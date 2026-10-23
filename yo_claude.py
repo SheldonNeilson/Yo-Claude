@@ -491,6 +491,8 @@ class Assistant:
             # skip our own beep (heard right after a wake) and sounds that weren't words at all
             if self.wake.last_text and time.time() > self.train_mute_until:
                 noise = float(np.percentile(self.noise, 50)) if self.noise else 0.0
+                log.info("Training: heard %r, woke=%s, voice %d, room %d", self.wake.last_text, bool(woke),
+                         self.peak, noise)
                 self.emit("train", heard=self.wake.last_text, woke=bool(woke), peak=self.peak, noise=noise)
                 if woke:
                     winsound.MessageBeep(winsound.MB_OK)
