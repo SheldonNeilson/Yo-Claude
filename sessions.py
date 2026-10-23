@@ -25,7 +25,9 @@ import workspace
 
 log = logging.getLogger("yo_claude")
 
+HERE = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(os.path.expanduser("~"), ".yoclaude")
+PC_CONTROL_DATA = os.path.join(DATA_DIR, "pc-control")   # its log, saved macros and kill-switch file
 CHAT_DIR = os.path.join(DATA_DIR, "home")       # cwd for chats: outside any project, so nothing project-level loads
 TRASH_DIR = os.path.join(DATA_DIR, "trash")
 META_PATH = os.path.join(DATA_DIR, "sessions.json")
@@ -453,8 +455,12 @@ class Router:
             except (OSError, ValueError):
                 pass
         servers.pop(PC_CONTROL_SERVER, None)
-        if self.settings.get("pc_control") and PC_CONTROL_SERVER in user:
-            servers[PC_CONTROL_SERVER] = user[PC_CONTROL_SERVER]
+        if self.settings.get("pc_control"):
+            server = pc_control_server() or user.get(PC_CONTROL_SERVER)
+            if server:
+                servers[PC_CONTROL_SERVER] = server
+            else:
+                log.warning("PC control is on but its server isn't installed (run install.ps1)")
         return servers
 
     # --- sessions list ---
@@ -707,6 +713,18 @@ class Router:
             self.meta.update(new_id, source="yoclaude", cwd=cwd)
         self.sessions_changed(cwd)
         return new_id, None
+
+
+def pc_control_server():
+    """The screen-control server bundled in pc_control/ (its own environment: its packages clash with the SDK's)."""
+    python = os.path.join(HERE, "pc_control", ".venv", "Scripts", "python.exe")
+    if not os.path.exists(python):
+        return None
+    os.makedirs(PC_CONTROL_DATA, exist_ok=True)
+    return {"type": "stdio", "command": python, "args": [os.path.join(HERE, "pc_control", "server.py")],
+            "env": {"SCREEN_CONTROL_LOG": os.path.join(PC_CONTROL_DATA, "screen-control.log"),
+                    "SCREEN_CONTROL_MACROS": os.path.join(PC_CONTROL_DATA, "macros"),
+                    "SCREEN_CONTROL_KILL_FILE": os.path.join(PC_CONTROL_DATA, "DISABLED")}}
 
 
 def same_folder(a, b):

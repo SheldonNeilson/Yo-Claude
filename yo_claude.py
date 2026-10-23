@@ -45,8 +45,8 @@ NEURAL_VOICE = "en-US-AvaNeural"   # `edge-tts --list-voices` for others
 NEURAL_RATE = "+5%"
 TEXT_HOLD_S = 12             # how long a reply stays on the bar when voice replies are off
 
-DEFAULT_SETTINGS = {"listening": True, "voice_replies": True, "pc_control": False, "bar_when_idle": True,
-                    "launch_at_login": True, "show_bar": True, "show_window": True}
+DEFAULT_SETTINGS = {"listening": True, "voice_replies": True, "pc_control": True, "bar_when_idle": True,
+                    "launch_at_login": True, "show_bar": True, "show_window": True, "onboarded": False}
 
 GREETINGS = ["Hey, how can I help?", "Yo! What do you need?", "How can I help?", "What's up?", "I'm listening."]
 DIDNT_HEAR = "I didn't hear anything."

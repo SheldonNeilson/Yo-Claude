@@ -39,6 +39,9 @@ window.training = {
       <p><b>Coding:</b> pick a folder at the top left. Claude can read and edit files there; the right-hand panel shows the
       files, everything that changed in the session, and your git branch. When Claude asks permission it says what it wants
       to do: answer <i>“yes, go ahead”</i> or <i>“no”</i>, or click.</p>
+      <p><b>PC control is on:</b> when you ask, Claude can see your screen and use your mouse and keyboard (as you,
+      with your logins). <b>Ctrl+Alt+X</b> stops it instantly; switch it off with [pc control] at the top or in the tray
+      menu. It adds about 11k tokens to every question, so turn it off when you don't need it.</p>
       <p><b>Stop</b> anything with [■], a right-click on the bar, or the tray menu.</p>
       <p class="dim">Next: a two-minute check of how well it hears you, so it can tune itself to your voice and room.</p>`));
     addButtons(d, [["close", () => this.close()], ["start the check →", () => this.go(1), "primary"]]);

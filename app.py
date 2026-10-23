@@ -14,6 +14,7 @@ import json
 import logging
 import os
 import queue
+import subprocess
 import sys
 import threading
 import time
@@ -96,6 +97,7 @@ class App:
             on_top=True, focus=False, background_color="#111110", hidden=True, shadow=False)
         for w in (self.main, self.bar):
             w.events.loaded += lambda w=w: self.ready.__setitem__(w, True)
+        self.main.events.loaded += self.on_main_loaded
         self.main_visible = self.settings.get("show_window", True)
         self.main.events.shown += self.dress_main     # title-bar colours only stick once the window is on screen
         self.main.events.closing += self.on_main_closing
@@ -118,6 +120,50 @@ class App:
         if self.settings.get("launch_at_login", True):
             set_launch_at_login(True)
         self.update_bar_visibility()
+        threading.Thread(target=self.check_updates, args=(True,), daemon=True).start()
+
+    def on_main_loaded(self):
+        if not self.settings.get("onboarded"):   # first run: the welcome + training walkthrough
+            self.settings["onboarded"] = True
+            self.settings.save()
+            self.bus.put(("open_training", {}))
+
+    # --- updates (installs are git clones of the repo) ---
+    def git(self, *args):
+        return subprocess.run(["git", "-C", HERE, *args], capture_output=True, text=True,
+                              creationflags=subprocess.CREATE_NO_WINDOW)
+
+    def check_updates(self, quiet=False):
+        """Fetch; if there's anything new, say so (quiet) or install it and restart (from the tray)."""
+        if not os.path.isdir(os.path.join(HERE, ".git")):
+            if not quiet:
+                self.notify("This copy wasn't installed with git, so it can't update itself.")
+            return
+        if self.git("fetch", "--quiet").returncode:
+            if not quiet:
+                self.notify("Couldn't reach GitHub to check for updates.")
+            return
+        behind = self.git("rev-list", "--count", "HEAD..@{upstream}").stdout.strip()
+        if not behind or behind == "0":
+            if not quiet:
+                self.notify("Yo Claude is up to date.")
+            return
+        if quiet:
+            self.notify(f"An update is available ({behind} change{'s' if behind != '1' else ''}). "
+                        "Tray menu → Check for updates to install it.")
+            return
+        self.notify("Updating Yo Claude… it restarts in a moment.")
+        subprocess.Popen(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
+                          os.path.join(HERE, "install.ps1"), "-Update"], cwd=HERE,
+                         creationflags=subprocess.CREATE_NEW_CONSOLE)
+        self.quit()
+
+    def notify(self, message):
+        log.info("Notice: %s", message)
+        try:
+            self.tray.notify(message, "Yo Claude")
+        except Exception:
+            pass
 
     def voice(self):
         try:
@@ -319,6 +365,8 @@ class App:
                              checked=checked("launch_at_login")),
             pystray.Menu.SEPARATOR,
             pystray.MenuItem("Training mode…", lambda: self.open_training()),
+            pystray.MenuItem("Check for updates…",
+                             lambda: threading.Thread(target=self.check_updates, daemon=True).start()),
             pystray.MenuItem("Open log", lambda: os.startfile(LOG_PATH)),
             pystray.MenuItem("Quit", lambda: self.quit()),
         )

@@ -1,0 +1,14 @@
+mcp==1.30.0
+mss==10.2.0
+pyautogui==0.9.54
+pillow==13.0.0
+pywin32==312
+uiautomation==2.0.29
+comtypes==1.4.17
+winrt-runtime==3.2.1
+winrt-Windows.Foundation==3.2.1
+winrt-Windows.Foundation.Collections==3.2.1
+winrt-Windows.Globalization==3.2.1
+winrt-Windows.Graphics.Imaging==3.2.1
+winrt-Windows.Media.Ocr==3.2.1
+winrt-Windows.Storage.Streams==3.2.1
