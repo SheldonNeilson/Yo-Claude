@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Yo Claude bar</title>
+<link rel="stylesheet" href="app.css">
+<style>
+  html, body { background: var(--bg); overflow: hidden; }
+  #bar { display: flex; align-items: center; gap: 12px; min-height: 56px; padding: 6px 12px; border: 2px solid var(--line2);
+         box-sizing: border-box; width: 100vw; }
+  #m { cursor: pointer; flex: none; image-rendering: pixelated; }
+  #meter { flex: none; }
+  #txt { flex: 1; min-width: 0; }
+  #label { font-weight: bold; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #text { color: var(--text); font-size: 12px; max-height: 120px; overflow: hidden; display: -webkit-box;
+          -webkit-line-clamp: 6; -webkit-box-orient: vertical; }
+  .btn { border: 0; padding: 0 3px; color: var(--dim); font-weight: bold; font-size: 12px; }
+  .btn:hover { color: var(--orange); } #stop:hover { color: var(--red); }
+</style>
+</head>
+<body>
+<div id="bar" class="pywebview-drag-region">
+  <canvas id="m" width="48" height="30" title="Talk"></canvas>
+  <canvas id="meter" width="120" height="36"></canvas>
+  <div id="txt"><div id="label"></div><div id="text" class="hidden"></div></div>
+  <button id="stop" class="btn hidden" title="Stop">[■]</button>
+  <button id="open" class="btn" title="Open the full window">[⤢]</button>
+  <button id="min" class="btn" title="Hide until next time">[_]</button>
+</div>
+<script src="mascot.js"></script>
+<script>
+"use strict";
+const $ = (s) => document.querySelector(s);
+const api = () => window.pywebview.api;
+const ACTIVE = ["listening", "thinking", "speaking", "using_pc", "approval"];
+const COLORS = Object.assign({}, MASCOT.colors, { idle: "#b06a52" });
+const SPIN = "·✢✳✶✻✽✻✶✳✢";
+let state = "starting", text = "", holdUntil = 0, voice = "starting";
+const levels = new Array(24).fill(0);
+const loud = (v) => Math.min(1, Math.max(0, (20 * Math.log10((v || 1) / 32768) + 62) / 45));
+
+window.app = {
+  events(list) {
+    for (const e of list) {
+      if (e.kind === "levels") for (const v of e.levels) { levels.push(loud(v)); levels.shift(); }
+      if (e.kind === "display") {
+        state = e.state; voice = e.voice; text = e.text || "";
+        holdUntil = e.hold ? Date.now() + e.hold * 1000 : 0;
+        layout();
+      }
+    }
+  },
+};
+function label(t) {
+  const cur = Math.floor(t * 2) % 2 ? "█" : " ";
+  return {
+    starting: "> booting" + cur, idle: '> say "yo claude"' + cur, paused: "> wake word off · click to talk",
+    listening: (text ? "> follow-up? " : "> listening ") + cur,
+    thinking: SPIN[Math.floor(t * 8) % SPIN.length] + " thinking…", speaking: "● claude",
+    using_pc: "⌖ using your pc…", approval: "! claude needs your ok", error: "! error",
+  }[state] || state;
+}
+function shownText() {
+  if (ACTIVE.includes(state) || state === "error") return text;
+  return Date.now() < holdUntil ? text : "";
+}
+let lastH = 0;
+function layout() {
+  const t = shownText();
+  $("#text").textContent = t;
+  $("#text").classList.toggle("hidden", !t);
+  $("#stop").classList.toggle("hidden", !ACTIVE.includes(state));
+  const h = Math.ceil($("#bar").getBoundingClientRect().height);
+  if (Math.abs(h - lastH) > 2) { lastH = h; api().bar_resize(h); }
+}
+function draw() {
+  const t = performance.now() / 1000;
+  const color = COLORS[state] || COLORS.idle;
+  MASCOT.draw($("#m"), state, levels.at(-1), t);
+  if (!ACTIVE.includes(state)) $("#m").style.opacity = 0.75; else $("#m").style.opacity = 1;
+  const lab = $("#label"); lab.textContent = label(t); lab.style.color = ACTIVE.includes(state) ? color : "var(--dim)";
+  const g = $("#meter").getContext("2d"); g.clearRect(0, 0, 120, 36);
+  levels.forEach((lv, i) => {
+    if (state === "thinking") lv = 0.35 + 0.3 * Math.sin(t * 6 - i * 0.5);
+    if (state === "paused") lv = 0;
+    const n = Math.min(4, Math.round(lv * 4));
+    g.globalAlpha = (0.3 + 0.7 * (i + 1) / 24) * (ACTIVE.includes(state) ? 1 : 0.55);
+    g.fillStyle = color;
+    const x = i * 5;
+    g.fillRect(x, 16, 4, 3);
+    for (let k = 1; k <= n; k++) { g.fillRect(x, 16 - k * 4, 4, 3); g.fillRect(x, 16 + k * 4, 4, 3); }
+  });
+  g.globalAlpha = 1;
+  if (holdUntil && Date.now() > holdUntil) { holdUntil = 0; layout(); }
+  requestAnimationFrame(draw);
+}
+$("#m").onclick = () => api().talk();
+$("#stop").onclick = () => api().stop();
+$("#open").onclick = () => api().open_main();
+$("#min").onclick = () => api().bar_minimise();
+window.addEventListener("pywebviewready", async () => {
+  const s = await api().init();
+  state = s.display.state; voice = s.display.voice; text = s.display.text || "";
+  layout(); requestAnimationFrame(draw);
+});
+</script>
+</body>
+</html>

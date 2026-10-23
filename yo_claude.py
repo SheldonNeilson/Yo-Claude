@@ -1,19 +1,13 @@
-"""Yo Claude - a "Hey Siri" style voice assistant for Windows.
+"""Yo Claude's voice engine: wake word, speech detection, transcription, the voice, and the conversation loop.
 
 Say "yo claude" (or click the bar / tray icon), Claude greets you, you speak, the speech is transcribed locally
-(faster-whisper), sent to Claude through the logged-in Claude Code CLI, and the answer is read aloud in a
-Microsoft neural voice (edge-tts). A floating bar at the bottom of the screen shows what it's doing, and a tray
-icon switches the wake word, voice replies and PC control on and off.
-
-    pythonw yo_claude.py             # normal
-    python yo_claude.py --debug      # with a console, logging what the wake engine hears
-    python yo_claude.py --say "hi"   # just speak a line
-
-Everything it writes lives in ~/.yoclaude (settings.json, yo_claude.log, models).
+(faster-whisper) and sent to the app's active Claude session (sessions.py), and the answer is read aloud in a
+Microsoft neural voice (edge-tts). Raw audio never leaves the PC; only the transcribed text goes to Claude.
+app.py runs it. Everything it writes lives in ~/.yoclaude (settings.json, yo_claude.log, models).
 """
 
-import argparse
 import asyncio
+import difflib
 import io
 import json
 import logging
@@ -21,12 +15,8 @@ import os
 import queue
 import random
 import re
-import shutil
-import subprocess
-import sys
 import threading
 import time
-import uuid
 import wave
 import winsound
 from collections import deque
@@ -43,13 +33,10 @@ DATA_DIR = os.path.join(os.path.expanduser("~"), ".yoclaude")
 WAKE_PHRASE = "yo claude"
 VOSK_MODEL = os.path.join(DATA_DIR, "models", "vosk-model-small-en-us-0.15")
 WHISPER_MODEL = "small.en"   # tiny.en / base.en / small.en / medium.en
-CLAUDE_MODEL = "sonnet"
-WEB_TOOLS = ["WebSearch", "WebFetch"]
-PC_CONTROL_SERVER = "screen-control"   # MCP server from ~/.claude.json handed to Claude when PC control is on
-CLAUDE_TIMEOUT_S = 180
-PC_CONTROL_TIMEOUT_S = 600
-CONVERSATION_WINDOW_S = 300  # a wake within this long after the last answer continues the chat
+VOICE_TURN_TIMEOUT_S = 1800  # coding tasks can take a while
+CONVERSATION_WINDOW_S = 300  # a voice conversation older than this starts a new session (unless picked in the app)
 FOLLOWUP_LISTEN_S = 6        # after answering, listen this long for a follow-up without the wake word
+APPROVAL_LISTEN_S = 8
 SPEECH_START_TIMEOUT_S = 7
 END_SILENCE_S = 1.5          # pause that ends your request
 MAX_UTTERANCE_S = 30
@@ -58,25 +45,14 @@ NEURAL_VOICE = "en-US-AvaNeural"   # `edge-tts --list-voices` for others
 NEURAL_RATE = "+5%"
 TEXT_HOLD_S = 12             # how long a reply stays on the bar when voice replies are off
 
-DEFAULT_SETTINGS = {"listening": True, "voice_replies": True, "pc_control": False, "bar_when_idle": True}
+DEFAULT_SETTINGS = {"listening": True, "voice_replies": True, "pc_control": False, "bar_when_idle": True,
+                    "launch_at_login": True, "show_bar": True, "show_window": True}
 
 GREETINGS = ["Hey, how can I help?", "Yo! What do you need?", "How can I help?", "What's up?", "I'm listening."]
 DIDNT_HEAR = "I didn't hear anything."
 DIDNT_CATCH = "Sorry, I didn't catch that."
 OKAY = "Okay."
 STOP_PHRASES = {"never mind", "nevermind", "cancel", "stop", "nothing", "no thanks", "thats all", "goodbye", "bye"}
-
-SYSTEM_PROMPT = (
-    "You are Claude, talking to the user by voice through a wake-word assistant on their Windows PC. "
-    "Your reply is read aloud by text-to-speech, so answer in plain conversational sentences: no markdown, "
-    "lists, headings, code blocks, URLs or emoji. Keep it short, one to three sentences, unless the user asks "
-    "for detail. Their words came from speech recognition and may contain mistakes; interpret them sensibly."
-)
-PC_CONTROL_PROMPT = (
-    " You can see and control the user's screen, keyboard and mouse with the screen-control tools; use them "
-    "when the user asks you to do something on their PC, then say briefly what you did. Before anything hard "
-    "to undo (deleting, sending, posting, buying, submitting), ask the user to confirm and wait for their reply."
-)
 
 SAMPLE_RATE = 16000
 FRAME_LENGTH = 512
@@ -322,98 +298,58 @@ def speakable(text):
     return re.sub(r"\s+", " ", text).strip()
 
 
-# --- Claude -------------------------------------------------------------------
-class Claude:
-    def __init__(self, settings):
-        self.settings = settings
-        self.exe = shutil.which("claude") or os.path.expanduser(r"~\.local\bin\claude.exe")
-        self.workdir = os.path.join(DATA_DIR, "home")   # outside any project, so no project CLAUDE.md/MCP loads
-        os.makedirs(self.workdir, exist_ok=True)
-        self.session_id = None
-        self.last_answer_at = 0.0
-        self.proc = None
-
-    def pc_control_config(self):
-        """MCP config holding just the screen-control server, copied from the user's Claude Code config."""
-        try:
-            with open(os.path.expanduser("~/.claude.json"), encoding="utf-8") as f:
-                server = json.load(f)["mcpServers"][PC_CONTROL_SERVER]
-        except (OSError, ValueError, KeyError):
-            log.warning("PC control is on but no %r MCP server is configured in ~/.claude.json", PC_CONTROL_SERVER)
-            return None
-        path = os.path.join(DATA_DIR, "pc-control-mcp.json")
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump({"mcpServers": {PC_CONTROL_SERVER: server}}, f)
-        return path
-
-    def ask(self, prompt):
-        """Claude's reply, or None if cancelled."""
-        if time.time() - self.last_answer_at > CONVERSATION_WINDOW_S:
-            self.session_id = None
-        tools, system, timeout = list(WEB_TOOLS), SYSTEM_PROMPT, CLAUDE_TIMEOUT_S
-        # Only the web tools (Claude Code's full coding toolset is ~35k tokens of context per question), and no
-        # user settings, so your hooks, plugins and skills don't run or load for voice questions.
-        cmd = [self.exe, "-p", "--output-format", "json", "--model", CLAUDE_MODEL,
-               "--permission-mode", "default", "--strict-mcp-config", "--setting-sources", "project,local",
-               "--tools", ",".join(WEB_TOOLS)]
-        if self.settings["pc_control"] and (config := self.pc_control_config()):
-            cmd += ["--mcp-config", config]
-            tools.append(f"mcp__{PC_CONTROL_SERVER}")
-            system += PC_CONTROL_PROMPT
-            timeout = PC_CONTROL_TIMEOUT_S
-        cmd += ["--allowedTools", ",".join(tools), "--append-system-prompt", system]
-        cmd += ["--resume", self.session_id] if self.session_id else ["--session-id", str(uuid.uuid4())]
-        t = time.time()
-        log.debug("Claude command: %s", cmd)
-        self.proc = proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                            text=True, encoding="utf-8", cwd=self.workdir,
-                                            creationflags=subprocess.CREATE_NO_WINDOW)
-        try:
-            stdout, stderr = proc.communicate(prompt, timeout=timeout)
-        except subprocess.TimeoutExpired:
-            self.cancel()
-            return "Sorry, that took too long. Try again?"
-        finally:
-            self.proc = None
-        if getattr(proc, "cancelled", False):
-            return None
-        try:
-            out = json.loads(stdout)
-        except json.JSONDecodeError:
-            log.error("Claude output: %s %s", stdout[-500:], stderr[-500:])
-            return "Sorry, I couldn't reach Claude."
-        u = out.get("usage") or {}
-        log.info("Claude answered in %.1fs (exit %s, %d context tokens, %d cached)", time.time() - t, proc.returncode,
-                 u.get("input_tokens", 0) + u.get("cache_creation_input_tokens", 0) + u.get("cache_read_input_tokens", 0),
-                 u.get("cache_read_input_tokens", 0))
-        self.session_id = out.get("session_id") or self.session_id
-        self.last_answer_at = time.time()
-        if out.get("is_error"):
-            log.error("Claude error: %s", out)
-            return "Sorry, something went wrong on my end."
-        return out.get("result") or "I don't have an answer for that."
-
-    def cancel(self):
-        proc = self.proc
-        if proc and proc.poll() is None:
-            proc.cancelled = True
-            subprocess.run(["taskkill", "/T", "/F", "/PID", str(proc.pid)], capture_output=True,
-                           creationflags=subprocess.CREATE_NO_WINDOW)
-
-
 # --- the assistant ------------------------------------------------------------
 def is_stop(text):
     return re.sub(r"[^a-z ]", "", text.lower()).strip() in STOP_PHRASES
 
 
+def approval_verdict(text):
+    """True for an explicit go-ahead, False for a no, None if it's unclear (then the click decides)."""
+    t = re.sub(r"[^a-z ]", " ", text.lower())
+    t = re.sub(r"\s+", " ", t).strip()
+    if re.search(r"\b(go ahead|do it|approve|approved|proceed|allow it|yes please)\b", t):
+        return True
+    if re.search(r"\b(no|nope|don t|do not|deny|stop|cancel|never mind|wait)\b", t):
+        return False
+    return None
+
+
+def voice_command(text):
+    """("new", folder?) / ("switch", name) for app commands said out loud, else None."""
+    t = re.sub(r"[^a-z0-9 ]", " ", text.lower()).strip()
+    t = re.sub(r"\s+", " ", t)
+    if re.fullmatch(r"(please )?(start |open |make )?(a )?(new|fresh) (chat|conversation)( please)?", t):
+        return ("new", None)
+    if re.fullmatch(r"(please )?(start |open |make )?(a )?(new|fresh) session( please)?|start over", t):
+        return ("new", "current")
+    m = re.fullmatch(r"(switch|go|change) (back )?to (the )?(.+?)( session| chat)?", t)
+    if m:
+        return ("switch", m.group(4))
+    return None
+
+
+def spoken_part(text):
+    """What to read aloud: the plain opening of the reply; the rest stays on screen."""
+    head = re.split(r"\n\s*\n|```|\n\s*[-*#|]|\n\s*\d+\.", text.strip(), maxsplit=1)[0]
+    head = speakable(head)
+    sentences = re.split(r"(?<=[.!?])\s+", head)
+    spoken = " ".join(sentences[:3])
+    if len(spoken) > 420:
+        spoken = spoken[:420].rsplit(" ", 1)[0] + "…"
+    if len(speakable(text)) > len(spoken) + 40:
+        spoken += " The rest is on screen."
+    return spoken or "Done. It's on screen."
+
+
 class Assistant:
     """Runs on its own thread: reads the mic continuously and moves between idle/listening/thinking/speaking.
 
-    `emit(kind, **data)` reports to the UI ("state", "level"); `commands` takes "talk", "stop", "settings", "quit".
+    `emit(kind, **data)` reports to the UI ("state", "level"); `commands` takes "talk", "stop", "settings", "quit",
+    and ("approval", session, id, summary) from the router when Claude asks permission during a voice turn.
     """
 
-    def __init__(self, settings, emit, commands, save_samples=False, collect=False):
-        self.settings, self.emit, self.commands = settings, emit, commands
+    def __init__(self, settings, emit, commands, router, save_samples=False, collect=False):
+        self.settings, self.emit, self.commands, self.router = settings, emit, commands, router
         self.save_samples = save_samples or collect
         self.collect = collect   # --collect: only judge and save what it hears, never reply
         self.hits = self.tries = 0
@@ -425,13 +361,15 @@ class Assistant:
         self.wake = VoskWake()
         self.stt = Transcriber()
         self.speaker = Speaker()
-        self.claude = Claude(settings)
-        self.worker = ThreadPoolExecutor(1)
+        self.worker = ThreadPoolExecutor(2)   # one for the Claude turn, one to transcribe approvals meanwhile
         self.job = self.utterance = None
+        self.approval = None         # (session, id, summary) being asked about by voice
+        self.approval_job = None
         self.generation = 0          # bumps on stop, so a cancelled job's late result is ignored
         self.after_speaking = None
         self.state = None
         self.quit = False
+        router.on_voice_approval = lambda sid, aid, summary: commands.put(("approval", sid, aid, summary))
         threading.Thread(target=self.speaker.warm, args=(GREETINGS + [DIDNT_HEAR, DIDNT_CATCH, OKAY],),
                          daemon=True).start()
         self.go_idle()
@@ -448,10 +386,11 @@ class Assistant:
         self.wake.reset()
         self.set_state(IDLE if self.settings["listening"] else PAUSED, text, hold)
 
-    def listen(self, timeout_s=SPEECH_START_TIMEOUT_S, followup=False, text=""):
+    def listen(self, timeout_s=SPEECH_START_TIMEOUT_S, followup=False, text="", approval=False):
         self.vad.reset()
         self.utterance = Utterance(timeout_s, followup)
         self.utterance.text = text
+        self.utterance.approval = approval
         self.set_state(LISTENING, text)
 
     def say(self, text, then, pcm=None):
@@ -471,9 +410,9 @@ class Assistant:
 
     def stop(self):
         self.generation += 1
-        self.claude.cancel()
+        self.router.interrupt()
         self.speaker.stop()
-        self.job = None
+        self.job = self.approval = self.approval_job = None
         self.go_idle()
 
     # main loop
@@ -495,7 +434,6 @@ class Assistant:
             log.exception("Assistant crashed")
             self.set_state("error", "Something broke. See the log (tray menu).")
         finally:
-            self.claude.cancel()
             self.speaker.stop()
             self.mic.stop()
 
@@ -513,6 +451,10 @@ class Assistant:
                 self.start_conversation()
             elif cmd == "settings" and self.state in (IDLE, PAUSED):
                 self.go_idle()
+            elif isinstance(cmd, tuple) and cmd[0] == "approval" and self.job and self.state == THINKING:
+                self.approval = cmd[1:]
+                self.say(f"Claude wants to {cmd[3]}. Say yes, go ahead, or no.",
+                         lambda _: self.listen(APPROVAL_LISTEN_S, approval=True))
 
     def on_idle(self, frame, p):
         self.recent.append(frame)
@@ -545,6 +487,13 @@ class Assistant:
         if result is None:
             return
         kind, pcm = result
+        if self.utterance.approval:
+            if kind == "timeout":
+                self.say("Okay, it's waiting for you on screen.", lambda _: self.set_state(THINKING))
+            else:
+                self.approval_job = self.worker.submit(self.stt, pcm)
+                self.set_state(THINKING)
+            return
         if kind == "timeout":
             if self.utterance.followup:   # leave the last reply on the bar a little longer
                 self.go_idle(self.utterance.text, TEXT_HOLD_S)
@@ -552,24 +501,64 @@ class Assistant:
                 self.say(DIDNT_HEAR, lambda _: self.go_idle())
             return
         self.set_state(THINKING, "")
-        self.job = (self.generation, self.worker.submit(self.think, pcm))
+        self.job = (self.generation, self.worker.submit(self.think, pcm, self.generation))
 
-    def think(self, pcm):
-        """Worker thread: transcribe, ask Claude, render the voice. Returns (reply, next step, pcm)."""
+    def think(self, pcm, generation):
+        """Worker thread: transcribe, run voice commands or ask Claude, render the voice.
+        Returns (reply, next step, pcm)."""
         heard = self.stt(pcm)
         if not heard:
             return DIDNT_CATCH, "idle", None
         if is_stop(heard):
             return OKAY, "idle", None
+        command = voice_command(heard)
+        if command:
+            return self.run_command(command), "followup", None
         self.emit("state", state=THINKING, text=f"“{heard}”", hold=0.0)
-        reply = self.claude.ask(heard)
-        if reply is None:
+        s = self.router.active
+        if s is not None and not s.picked and time.time() - s.last_used > CONVERSATION_WINDOW_S:
+            self.router.new_session()   # an old voice conversation: start afresh
+        try:
+            reply = self.router.send(heard, voice=True).result(VOICE_TURN_TIMEOUT_S)
+        except Exception as e:
+            log.warning("Voice turn failed: %s", e)
+            reply = None
+        if generation != self.generation:
             return None
-        reply = speakable(reply)
-        pcm = self.speaker.synth(reply) if self.settings["voice_replies"] else None
-        return reply, "followup", pcm
+        if not reply:
+            return "Sorry, something went wrong. It's on screen.", "idle", None
+        spoken = spoken_part(reply)
+        pcm = self.speaker.synth(spoken) if self.settings["voice_replies"] else None
+        return spoken, "followup", pcm
+
+    def run_command(self, command):
+        if command[0] == "new":
+            s = self.router.new_session(command[1])
+            return "Okay, new " + ("session in " + os.path.basename(s.cwd) if s.cwd else "chat") + "."
+        name = command[1]
+        sessions = self.router.list(self.router.folder)
+        titles = [x["title"].lower() for x in sessions]
+        match = difflib.get_close_matches(name, titles, n=1, cutoff=0.4) or [t for t in titles if name in t][:1]
+        if not match:
+            return f"I couldn't find a session called {name}."
+        target = sessions[titles.index(match[0])]
+        self.router.open(target["id"], target["cwd"])
+        return f"Switched to {target['title'][:60]}."
 
     def on_thinking(self, frame, p):
+        if self.approval_job is not None:
+            if not self.approval_job.done():
+                return
+            heard, self.approval_job = self.approval_job.result(), None
+            (sid, aid, _), self.approval = self.approval, None
+            verdict = approval_verdict(heard)
+            if verdict is None:
+                return self.say("I didn't get a clear yes or no, so it's waiting on screen.",
+                                lambda _: self.set_state(THINKING))
+            self.router.approve(sid, aid, verdict)
+            return self.say("Going ahead." if verdict else "Okay, I won't.", lambda _: self.set_state(THINKING))
+        if self.job is None:
+            return self.go_idle()
         generation, future = self.job
         if not future.done():
             return
@@ -587,54 +576,3 @@ class Assistant:
         if not self.speaker.busy:
             then, self.after_speaking = self.after_speaking, None
             then()
-
-
-# --- entry point --------------------------------------------------------------
-def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--say", help="speak this text and exit")
-    ap.add_argument("--debug", action="store_true", help="log everything the wake engine hears, save samples")
-    ap.add_argument("--collect", action="store_true", help="never reply: beep on a wake, save every sample")
-    args = ap.parse_args()
-    args.debug = args.debug or args.collect
-
-    os.makedirs(DATA_DIR, exist_ok=True)
-    handlers = [logging.FileHandler(os.path.join(DATA_DIR, "yo_claude.log"), encoding="utf-8")]
-    if sys.stdout:
-        handlers.append(logging.StreamHandler(sys.stdout))
-    logging.basicConfig(level=logging.WARNING, format="%(asctime)s %(message)s", handlers=handlers)
-    log.setLevel(logging.DEBUG if args.debug else logging.INFO)
-
-    if args.say:
-        speaker = Speaker()
-        pcm = speaker.synth(args.say)
-        if pcm is not None:
-            speaker.play(pcm)
-            time.sleep(len(pcm) / TTS_RATE + 0.2)
-        return
-
-    import win32api, win32event, winerror
-    mutex = win32event.CreateMutex(None, False, "Local\\YoClaude")
-    if win32api.GetLastError() == winerror.ERROR_ALREADY_EXISTS:
-        log.info("Already running.")
-        return
-
-    import overlay
-    settings = Settings()
-    events, commands = queue.Queue(), queue.Queue()
-
-    def engine():
-        try:
-            Assistant(settings, lambda kind, **d: events.put((kind, d)), commands, save_samples=args.debug,
-                      collect=args.collect).run()
-        except Exception:
-            log.exception("Assistant failed to start")
-            events.put(("state", {"state": "error", "text": "Couldn't start. See the log (tray menu)."}))
-
-    threading.Thread(target=engine, daemon=True).start()
-    overlay.run(settings, events, commands, log_path=os.path.join(DATA_DIR, "yo_claude.log"))
-    del mutex
-
-
-if __name__ == "__main__":
-    main()
