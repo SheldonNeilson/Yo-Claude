@@ -16,9 +16,12 @@ import subprocess
 import threading
 import time
 import uuid
+import warnings
 
 import anyio
 import claude_agent_sdk as sdk
+
+import workspace
 
 log = logging.getLogger("yo_claude")
 
@@ -62,6 +65,8 @@ async def _open_process_no_window(*args, **kwargs):
 
 
 anyio.open_process = _open_process_no_window
+# Chats pre-approve the web tools on purpose; the SDK warns that those then skip can_use_tool.
+warnings.filterwarnings("ignore", category=sdk.CanUseToolShadowedWarning)
 
 
 # --- metadata the SDK doesn't keep: groups, pins, where a session came from -----------------------------------
@@ -118,8 +123,8 @@ def approval_summary(tool, inp):
     """What Claude wants to do, said in a few words (for the card and for voice)."""
     path = inp.get("file_path") or inp.get("notebook_path") or inp.get("path") or ""
     name = os.path.basename(path) if path else ""
-    if tool == "Bash":
-        return "run the command " + (inp.get("description") or inp.get("command", ""))[:120]
+    if tool in ("Bash", "PowerShell"):
+        return "run: " + (inp.get("description") or inp.get("command", ""))[:120]
     if tool in ("Edit", "MultiEdit", "NotebookEdit"):
         return f"edit {name}"
     if tool == "Write":
@@ -143,13 +148,16 @@ class Session:
         self.items = []
         self.client = None
         self.busy = False
-        self.permission_mode = "default"
+        self.permission_mode = router.settings.get("permission_mode") or "auto"
         self.model = router.settings.get("model") or None     # None = your Claude Code default (chats: CHAT_MODEL)
         self.effort = router.settings.get("effort") or None
         self.approvals = {}                 # approval id -> asyncio future
         self.always = set()                 # tools allowed for the rest of this session
         self.voice_turn = False
         self.picked = False                 # chosen in the app: voice keeps talking to it however old it is
+        self.baseline = None                # workspace snapshot the changes panel compares with
+        self.baseline_kind = None           # "start" (made here) or "opened" (an older session opened now)
+        self.touched = []                   # files Claude's tools changed (for folders that aren't git repos)
         self.stream_item = None
         self.last_used = time.time()
         self.lock = None                    # asyncio.Lock, made on the loop
@@ -193,8 +201,14 @@ class Session:
                 if t == "text" and b.get("text", "").strip() and not is_noise(b["text"]):
                     text = b["text"]
                     voice = role == "user" and text.startswith("[voice] ")
+                    attachments = []
+                    if role == "user":   # attached files go back to chips, as they were when sent
+                        attachments = re.findall(r'<attached_file path="([^"]+)">', text)
+                        attachments += re.findall(r"^Attached file \(read it as needed\): (.+)$", text, flags=re.M)
+                        text = re.sub(r'\s*<attached_file path="[^"]+">.*?</attached_file>', "", text, flags=re.S)
+                        text = re.sub(r"\s*^Attached file \(read it as needed\): .+$", "", text, flags=re.M).strip()
                     self.add({"kind": role if role in ("user", "assistant") else "assistant",
-                              "text": text[8:] if voice else text, "voice": voice})
+                              "text": text[8:] if voice else text, "voice": voice, "attachments": attachments})
                 elif t == "thinking" and b.get("thinking"):
                     self.add({"kind": "thinking", "text": b["thinking"]})
                 elif t == "tool_use":
@@ -295,6 +309,8 @@ class Session:
             self.busy = True
             self.router.set_work(self, "thinking")
             try:
+                if self.cwd and not self.baseline:   # the changes panel needs "before" captured before any edit
+                    await asyncio.to_thread(self.router.take_baseline, self, "opened" if self.resumed else "start")
                 await self.connect()
                 await self.client.query(prompt)
                 final = ""
@@ -353,7 +369,11 @@ class Session:
                             item["result"] = result_text(b.content)
                             item["status"] = "error" if b.is_error else "done"
                             self.changed(item)
-                            self.router.emit("tool_done", session=self.id, name=item["name"], input=item["input"])
+                            path = (item["input"] or {}).get("file_path")
+                            if path and item["name"] in ("Edit", "MultiEdit", "Write", "NotebookEdit") \
+                                    and path not in self.touched:
+                                self.touched.append(path)
+                            self.router.emit("tool_done", session=self.id, name=item["name"])
                 if self.router.work_state(self) == "using_pc":
                     self.router.set_work(self, "thinking")
             return None
@@ -468,10 +488,12 @@ class Router:
 
     # --- opening / creating ---
     def set_folder(self, folder):
+        """Switching folder starts afresh there: the next message opens a new session in it."""
         self.folder = folder or None
         if folder:
             self.meta.add_folder(folder)
-        self.sessions_changed(self.folder)
+        if self.active is not None and not same_folder(self.active.cwd, self.folder):
+            self.active = None
 
     def new_session(self, cwd="current", picked=False):
         cwd = self.folder if cwd == "current" else cwd
@@ -479,6 +501,7 @@ class Router:
         s.picked = picked
         self.live[s.id] = s
         self.active = s
+        self.ensure_baseline(s, "start")
         self.emit("opened", session=self.describe(s), items=[])
         self.sessions_changed(cwd)
         return s
@@ -491,8 +514,32 @@ class Router:
             self.live[sid] = s
         s.picked = True
         self.active = s
+        self.ensure_baseline(s, "opened")
         self.emit("opened", session=self.describe(s), items=s.items)
         return s
+
+    def ensure_baseline(self, s, kind):
+        """Snapshot the folder (in the background: git can take a moment on big repos)."""
+        if not s.cwd or s.baseline:
+            return
+        saved = self.meta.session(s.id).get("baseline")
+        if saved:
+            s.baseline, s.baseline_kind = saved, self.meta.session(s.id).get("baseline_kind", "opened")
+            return
+        threading.Thread(target=self.take_baseline, args=(s, kind), daemon=True).start()
+
+    def take_baseline(self, s, kind):
+        if s.baseline or not s.cwd:
+            return
+        try:
+            snap = workspace.snapshot(s.cwd)
+        except Exception as e:
+            log.warning("Snapshot of %s failed: %s", s.cwd, e)
+            return
+        if snap and not s.baseline:
+            s.baseline, s.baseline_kind = snap, kind
+            self.meta.update(s.id, baseline=snap, baseline_kind=kind, cwd=s.cwd)
+            self.emit("baseline", session=s.id)
 
     def describe(self, s):
         return {"id": s.id, "cwd": s.cwd, "mode": s.mode, "permission_mode": s.permission_mode, "busy": s.busy,
@@ -506,13 +553,23 @@ class Router:
             asyncio.ensure_future(connected.pop(0).disconnect())
 
     # --- talking ---
-    def send(self, text, voice=False, sid=None):
-        """Send a message to a session (default: the active one). Returns a concurrent Future with the reply."""
+    def send(self, text, voice=False, sid=None, context="", attachments=(), images=()):
+        """Send a message to a session (default: the active one). Returns a concurrent Future with the reply.
+        `context` is extra prompt text (attached files); `images` are (media_type, base64) pairs."""
         s = self.live.get(sid) if sid else self.active
         if s is None:
             s = self.new_session()
-        s.add({"kind": "user", "text": text, "voice": voice})
-        prompt = f"[voice] {text}" if voice else text
+        s.add({"kind": "user", "text": text, "voice": voice, "attachments": list(attachments),
+               "images": len(images)})
+        prompt = (f"[voice] {text}" if voice else text) + (f"\n\n{context}" if context else "")
+        if images:
+            content = [{"type": "text", "text": prompt}] + [
+                {"type": "image", "source": {"type": "base64", "media_type": mt, "data": data}} for mt, data in images]
+
+            async def message():
+                yield {"type": "user", "message": {"role": "user", "content": content}, "parent_tool_use_id": None,
+                       "session_id": s.id}
+            prompt = message()
         return self.run(s.turn(prompt, voice))
 
     def interrupt(self, sid=None):
@@ -531,8 +588,12 @@ class Router:
             self.loop.call_soon_threadsafe(lambda: future.done() or future.set_result((allow, always)))
 
     def set_permission_mode(self, sid, mode):
+        if mode not in ("auto", "default", "acceptEdits", "plan"):
+            return
+        self.settings["permission_mode"] = mode   # also the default for new sessions
+        self.settings.save()
         s = self.live.get(sid)
-        if not s or mode not in ("default", "acceptEdits", "plan"):
+        if not s:
             return
         s.permission_mode = mode
         if s.client:

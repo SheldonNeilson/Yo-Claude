@@ -1,3 +1,7 @@
+// Page errors go to the Yo Claude log (WebView2 has no visible console).
+window.addEventListener("error", (e) => window.pywebview?.api?.js_error(`${e.message} @ ${e.filename}:${e.lineno}`));
+window.addEventListener("unhandledrejection", (e) => window.pywebview?.api?.js_error("promise: " + (e.reason?.stack || e.reason)));
+
 // Claude Code's pixel mascot (same art as icons.py), drawn on a canvas and animated per state.
 const MASCOT = {
   base: ["..############..", "..##.######.##..", "################", "..############..", "...#.#....#.#..."],

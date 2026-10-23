@@ -47,7 +47,8 @@
     <div id="transcript"></div>
     <div id="composer">
       <div id="chips"></div>
-      <textarea id="input" rows="2" placeholder="> message claude…  (Enter sends, Shift+Enter new line)"></textarea>
+      <div id="atlist" class="menu hidden"></div>
+      <textarea id="input" rows="2" placeholder="> message claude…  (Enter sends · Shift+Enter new line · @ attaches a file · paste images)"></textarea>
       <div class="composer-actions">
         <button id="talkBtn" title="Talk instead of typing">[talk]</button>
         <span class="dim" id="hint"></span>
@@ -66,5 +67,6 @@
 <script src="vendor/highlight.min.js"></script>
 <script src="mascot.js"></script>
 <script src="app.js"></script>
+<script src="panel.js"></script>
 </body>
 </html>

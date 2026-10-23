@@ -23,6 +23,7 @@ import pystray
 import webview
 
 import icons
+import workspace
 import yo_claude
 from sessions import Router
 
@@ -329,7 +330,7 @@ class Api:
 
     # --- folders ---
     def pick_folder(self):
-        result = self._app.main.create_file_dialog(webview.FOLDER_DIALOG)
+        result = self._app.main.create_file_dialog(webview.FileDialog.FOLDER)
         if result:
             self.set_folder(result[0])
             return result[0]
@@ -358,9 +359,20 @@ class Api:
     def list_sessions(self, cwd):
         return self._app.router.list(cwd)
 
-    def send(self, text):
-        if text and text.strip():
-            self._app.router.send(text.strip())
+    def send(self, text, attachments=None, images=None):
+        """attachments: folder-relative paths; images: data: URLs pasted into the box."""
+        text = (text or "").strip()
+        attachments, images = attachments or [], images or []
+        if not text and not attachments and not images:
+            return
+        cwd = self._cwd()
+        context = "\n\n".join(workspace.attachment_text(cwd, p) for p in attachments) if cwd else ""
+        pics = []
+        for url in images:
+            head, _, data = url.partition(",")
+            if head.startswith("data:image/") and ";base64" in head:
+                pics.append((head[5:].split(";")[0], data))
+        self._app.router.send(text or "(see attached)", context=context, attachments=attachments, images=pics)
 
     def stop(self):
         self._app.commands.put("stop")
@@ -402,6 +414,73 @@ class Api:
             self._app.router.open(new_id, cwd)
         return error
 
+    # --- workspace (the active session's folder, else the chosen folder) ---
+    def _cwd(self):
+        r = self._app.router
+        return r.active.cwd if r.active else r.folder
+
+    def _ws(self, fn, *args):
+        cwd = self._cwd()
+        if not cwd:
+            return {"error": "No folder. Pick one (top left) to work on code."}
+        try:
+            return fn(cwd, *args)
+        except Exception as e:
+            log.warning("%s failed: %s", fn.__name__, e)
+            return {"error": str(e)}
+
+    def tree(self, rel=""):
+        return self._ws(workspace.list_dir, rel)
+
+    def files(self):
+        return self._ws(workspace.all_files)
+
+    def read_file(self, rel):
+        return self._ws(workspace.read_file, rel)
+
+    def git_info(self):
+        return self._ws(workspace.git_info)
+
+    def switch_branch(self, name):
+        err = self._ws(workspace.switch_branch, name)
+        self._app.router.sessions_changed(self._cwd())
+        return err
+
+    def create_branch(self, name):
+        return self._ws(workspace.create_branch, name)
+
+    def _session(self):
+        return self._app.router.active
+
+    def changes(self):
+        s = self._session()
+        if not s or not s.cwd:
+            return {"files": [], "none": "No code session open."}
+        if not s.baseline:
+            if workspace.is_repo(s.cwd):
+                return {"files": [], "none": "Taking a snapshot of the folder…"}
+            return {"repo": False, "files": [{"path": p, "status": "M", "add": 0, "del": 0} for p in s.touched],
+                    "kind": "tools"}
+        out = workspace.changes(s.cwd, s.baseline)
+        out["kind"] = s.baseline_kind
+        return out
+
+    def file_diff(self, path):
+        s = self._session()
+        return workspace.file_diff(s.cwd, s.baseline, path) if s and s.baseline else ""
+
+    def revert_file(self, path):
+        s = self._session()
+        if not s or not s.baseline:
+            return "No snapshot for this session."
+        return workspace.revert_file(s.cwd, s.baseline, path)
+
+    def open_in_editor(self, rel=""):
+        return self._ws(workspace.open_in_editor, rel)
+
+    def reveal(self, rel=""):
+        return self._ws(workspace.reveal, rel)
+
     # --- voice / windows ---
     def talk(self):
         self._app.commands.put("talk")
@@ -430,6 +509,9 @@ class Api:
 
     def open_log(self):
         os.startfile(LOG_PATH)
+
+    def js_error(self, message):
+        log.warning("page error: %s", str(message)[:2000])
 
 
 def main():

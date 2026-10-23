@@ -11,7 +11,7 @@ const MODELS = [["", "model: default"], ["claude-fable-5-1", "Fable 5.1"], ["cla
                 ["claude-sonnet-5-5", "Sonnet 5.5"], ["claude-haiku-5-5", "Haiku 5.5"]];
 const EFFORTS = [["", "effort: default"], ["low", "effort: low"], ["medium", "effort: medium"], ["high", "effort: high"],
                  ["xhigh", "effort: xhigh"], ["max", "effort: max"]];
-const PERMS = [["default", "ask before changes"], ["acceptEdits", "auto-accept edits"], ["plan", "plan mode"]];
+const PERMS = [["auto", "auto mode"], ["default", "ask before changes"], ["acceptEdits", "auto-accept edits"], ["plan", "plan mode"]];
 const STATE_LABEL = { starting: "booting…", idle: "● ready", paused: "○ wake word off", listening: "◉ listening",
                       thinking: "✻ thinking…", speaking: "▶ speaking", using_pc: "⌖ using your pc",
                       approval: "! needs your ok", error: "✗ error" };
@@ -72,13 +72,26 @@ function handle(e) {
       break;
     case "opened":
       S.active = e.session; S.items = e.items || []; renderTranscript(); renderHead(); renderSessions();
+      panel.refresh(true);
       break;
     case "display": S.display = e; renderState(); break;
     case "levels": S.level = Math.min(1, Math.max(0, (20 * Math.log10((e.levels.at(-1) || 1) / 32768) + 62) / 45)); break;
     case "settings": S.settings = e.settings; renderToggles(); break;
-    case "folder": S.folder = e.folder; S.folders = e.folders; renderFolder(); break;
+    case "folder":
+      S.folder = e.folder; S.folders = e.folders;
+      if (S.active && !sameFolder(S.active.cwd, S.folder)) { S.active = null; S.items = []; renderTranscript(); }
+      renderHead();
+      api().list_sessions(S.folder).then((list) => { S.sessions = list; renderSessions(); });
+      window.panel && panel.refresh();
+      break;
     case "work":
-      if (S.active && e.session === S.active.id) { S.active.busy = e.session_state !== "idle"; renderBusy(); }
+      if (S.active && e.session === S.active.id) {
+        S.active.busy = e.session_state !== "idle"; renderBusy();
+        if (e.session_state === "idle") panel.refresh(true);
+      }
+      break;
+    case "tool_done": case "baseline":
+      if (S.active && e.session === S.active.id) panel.refresh(true);
       break;
   }
 }
@@ -86,6 +99,7 @@ function handle(e) {
 // ---------- header ----------
 function renderFolder() {
   $("#folderBtn").textContent = S.folder ? `▸ ${S.folder}` : "▸ no folder (chat)";
+  $("#folderBtn").title = "Folder: picks chat or code mode. Switching folder starts a new session there.";
   const code = !!(S.active ? S.active.cwd : S.folder);
   $("#modeBadge").textContent = code ? "CODE" : "CHAT";
   $("#modeBadge").className = "badge " + (code ? "code" : "chat");
@@ -121,7 +135,11 @@ $("#tVoice").onclick = () => api().set_setting("voice_replies", !(S.settings.voi
 $("#tPc").onclick = () => api().set_setting("pc_control", !S.settings.pc_control);
 $("#compactBtn").onclick = () => api().compact();
 $("#logo").onclick = () => api().talk();
-$("#panelBtn").onclick = () => { $("#app").classList.toggle("with-panel"); window.panel && panel.refresh(); };
+$("#panelBtn").onclick = () => {
+  const open = $("#app").classList.toggle("with-panel");
+  api().set_setting("panel_open", open);
+  panel.refresh();
+};
 
 // ---------- sessions ----------
 function renderSessions() {
@@ -197,7 +215,7 @@ function renderHead() {
   $("#sessionTitle").textContent = title + (a?.cwd ? `  ·  ${a.cwd}` : "");
   fillSelect($("#modelSel"), MODELS, a ? a.model : (S.settings.model || ""));
   fillSelect($("#effortSel"), EFFORTS, a ? a.effort : (S.settings.effort || ""));
-  fillSelect($("#permSel"), PERMS, a ? a.permission_mode : "default");
+  fillSelect($("#permSel"), PERMS, a ? a.permission_mode : (S.settings.permission_mode || "auto"));
   $("#permSel").classList.toggle("hidden", !(a ? a.cwd : S.folder));
   renderFolder(); renderBusy();
 }
@@ -214,8 +232,9 @@ function renderTranscript() {
   const t = $("#transcript");
   t.innerHTML = ""; itemEls.clear();
   if (!S.items.length) {
-    t.appendChild(el("div", "empty", esc(S.active?.cwd
-      ? `code session in ${S.active.cwd}\n\nsay “yo claude” or type below`
+    const cwd = S.active ? S.active.cwd : S.folder;
+    t.appendChild(el("div", "empty", esc(cwd
+      ? `code session in ${cwd}\n\nsay “yo claude” or type below`
       : "chat — no folder\n\nsay “yo claude” or type below\npick a folder (top left) for coding")));
   }
   S.items.forEach((it) => it && renderItem(it, true));
@@ -241,6 +260,8 @@ function buildItem(it) {
     case "user": {
       const n = el("div", "msg user"); n.textContent = it.text;
       if (it.voice) n.appendChild(el("span", "mic", "🎤 voice"));
+      for (const p of it.attachments || []) n.appendChild(el("span", "chip small", "📎 " + esc(p)));
+      if (it.images) n.appendChild(el("span", "chip small", `🖼 ${it.images} image${it.images > 1 ? "s" : ""}`));
       return n;
     }
     case "assistant": return el("div", "msg assistant" + (it.streaming ? " cursor" : ""), md(it.text));
@@ -262,7 +283,7 @@ function buildItem(it) {
 function toolArg(name, inp) {
   inp = inp || {};
   const p = inp.file_path || inp.notebook_path || inp.path;
-  if (name === "Bash") return inp.description || inp.command;
+  if (name === "Bash" || name === "PowerShell") return inp.description || inp.command;
   if (p) return rel(p);
   return inp.pattern || inp.query || inp.url || inp.prompt || inp.description || Object.values(inp).find((v) => typeof v === "string") || "";
 }
@@ -276,7 +297,7 @@ function toolBody(name, inp, result) {
   if (name === "Edit") h = diffHtml(inp.old_string, inp.new_string);
   else if (name === "MultiEdit") h = (inp.edits || []).map((e) => diffHtml(e.old_string, e.new_string)).join("");
   else if (name === "Write") h = `<pre>${esc((inp.content || "").slice(0, 6000))}</pre>`;
-  else if (name === "Bash") h = `<pre>$ ${esc(inp.command)}</pre>`;
+  else if (name === "Bash" || name === "PowerShell") h = `<pre>${name === "Bash" ? "$" : "PS>"} ${esc(inp.command)}</pre>`;
   else h = `<pre>${esc(JSON.stringify(inp, null, 2))}</pre>`;
   if (result) h += `<pre>${esc(result)}</pre>`;
   return h;
@@ -317,17 +338,105 @@ function renderBusy() {
   $("#hint").textContent = busy ? "claude is working — you can queue another message" : "";
 }
 
-// ---------- composer ----------
+// ---------- composer: text, attached files (chips or @mentions), pasted images ----------
+window.composer = {
+  files: [], images: [], fileList: null, fileListFor: undefined, pick: -1, matches: [],
+  attach(path) { if (!this.files.includes(path)) this.files.push(path); this.renderChips(); $("#input").focus(); },
+  renderChips() {
+    const c = $("#chips");
+    c.innerHTML = "";
+    this.files.forEach((p, i) => c.appendChild(this.chip("📎 " + p, () => { this.files.splice(i, 1); this.renderChips(); })));
+    this.images.forEach((u, i) => c.appendChild(this.chip(`🖼 image ${i + 1}`, () => { this.images.splice(i, 1); this.renderChips(); })));
+  },
+  chip(label, remove) {
+    const x = el("span", "chip", esc(label) + " <b>×</b>");
+    x.querySelector("b").onclick = remove;
+    return x;
+  },
+  async knownFiles() {
+    const cwd = S.active ? S.active.cwd : S.folder;
+    if (!cwd) return [];
+    if (this.fileListFor !== cwd) { this.fileListFor = cwd; const r = await api().files(); this.fileList = Array.isArray(r) ? r : []; }
+    return this.fileList;
+  },
+  async autocomplete() {
+    const box = $("#input");
+    const m = box.value.slice(0, box.selectionStart).match(/@([^\s@]*)$/);
+    const list = $("#atlist");
+    if (!m) { list.classList.add("hidden"); this.matches = []; return; }
+    const q = m[1].toLowerCase();
+    const seq = this.seq = (this.seq || 0) + 1;
+    const files = await this.knownFiles();
+    if (seq !== this.seq) return;   // a later keystroke already took over
+    this.matches = files.filter((f) => f.toLowerCase().includes(q))
+      .sort((a, b) => (base(a).toLowerCase().startsWith(q) ? 0 : 1) - (base(b).toLowerCase().startsWith(q) ? 0 : 1) || a.length - b.length)
+      .slice(0, 12);
+    if (!this.matches.length) { list.classList.add("hidden"); return; }
+    this.pick = 0;
+    list.innerHTML = this.matches.map((f, i) => `<div data-i="${i}" class="${i === 0 ? "on" : ""}">${esc(f)}</div>`).join("");
+    list.querySelectorAll("div").forEach((d) => d.onmousedown = (e) => { e.preventDefault(); this.choose(+d.dataset.i); });
+    list.classList.remove("hidden");
+  },
+  choose(i) {
+    const box = $("#input"), path = this.matches[i];
+    if (!path) return;
+    const before = box.value.slice(0, box.selectionStart).replace(/@([^\s@]*)$/, "@" + path + " ");
+    box.value = before + box.value.slice(box.selectionStart);
+    box.selectionStart = box.selectionEnd = before.length;
+    $("#atlist").classList.add("hidden"); this.matches = [];
+  },
+  key(e) {
+    if (!this.matches.length) return false;
+    const list = [...$("#atlist").children];
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      this.pick = (this.pick + (e.key === "ArrowDown" ? 1 : -1) + list.length) % list.length;
+      list.forEach((d, i) => d.classList.toggle("on", i === this.pick));
+      return true;
+    }
+    if (e.key === "Enter" || e.key === "Tab") { this.choose(this.pick); return true; }
+    if (e.key === "Escape") { $("#atlist").classList.add("hidden"); this.matches = []; return true; }
+    return false;
+  },
+  async mentions(text) {
+    const known = new Set(await this.knownFiles());
+    return [...text.matchAll(/@([^\s]+)/g)].map((m) => m[1]).filter((p) => known.has(p));
+  },
+  addImage(file) {
+    const r = new FileReader();
+    r.onload = () => { this.images.push(r.result); this.renderChips(); };
+    r.readAsDataURL(file);
+  },
+};
 async function send() {
   const box = $("#input");
   const text = box.value.trim();
-  if (!text) return;
+  const files = [...new Set([...composer.files, ...(await composer.mentions(text))])];
+  const images = composer.images.slice();
+  if (!text && !files.length && !images.length) return;
   box.value = ""; autosize();
-  await api().send(text);
+  composer.files = []; composer.images = []; composer.renderChips();
+  await api().send(text, files, images);
 }
+$("#input").addEventListener("paste", (e) => {
+  for (const it of e.clipboardData?.items || []) if (it.type.startsWith("image/")) { e.preventDefault(); composer.addImage(it.getAsFile()); }
+});
+document.addEventListener("dragover", (e) => e.preventDefault());
+document.addEventListener("drop", (e) => {
+  e.preventDefault();
+  const cwd = (S.active ? S.active.cwd : S.folder) || "";
+  for (const f of e.dataTransfer?.files || []) {
+    if (f.type.startsWith("image/")) { composer.addImage(f); continue; }
+    const full = f.pywebviewFullPath || f.path;
+    if (full && cwd && full.toLowerCase().startsWith(cwd.toLowerCase())) composer.attach(full.slice(cwd.length).replace(/^[\\/]/, "").replace(/\\/g, "/"));
+    else if (full) alertBox("Only files inside the session's folder can be attached.");
+  }
+});
 function autosize() { const b = $("#input"); b.style.height = "auto"; b.style.height = Math.min(200, b.scrollHeight + 2) + "px"; }
-$("#input").addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } });
-$("#input").addEventListener("input", autosize);
+$("#input").addEventListener("keydown", (e) => {
+  if (composer.key(e)) { e.preventDefault(); return; }
+  if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
+});
+$("#input").addEventListener("input", () => { autosize(); composer.autocomplete(); });
 $("#sendBtn").onclick = send;
 $("#talkBtn").onclick = () => api().talk();
 $("#stopBtn").onclick = () => api().stop();
@@ -387,6 +496,8 @@ window.addEventListener("pywebviewready", async () => {
   Object.assign(S, { settings: s.settings, folder: s.folder, folders: s.folders, groups: s.groups, sessions: s.sessions,
                      active: s.active, items: s.items || [], display: s.display });
   renderToggles(); renderFolder(); renderSessions(); renderHead(); renderTranscript(); renderState();
+  if (S.settings.panel_open) $("#app").classList.add("with-panel");
+  panel.load();
   requestAnimationFrame(animate);
   $("#input").focus();
 });
