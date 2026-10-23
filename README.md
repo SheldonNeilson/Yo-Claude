@@ -17,7 +17,7 @@ Unofficial fan project, not made or supported by Anthropic. Uses your own Claude
 Open **PowerShell** and run:
 
 ```powershell
-git clone https://github.com/YOUR-GITHUB-NAME/yo-claude "$env:LOCALAPPDATA\YoClaude"
+git clone https://github.com/SheldonNeilson/Yo-Claude.git "$env:LOCALAPPDATA\YoClaude"
 & "$env:LOCALAPPDATA\YoClaude\Install Yo Claude.cmd"
 ```
 
