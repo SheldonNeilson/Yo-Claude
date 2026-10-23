@@ -23,6 +23,7 @@ import pystray
 import webview
 
 import icons
+import taskbar
 import workspace
 import yo_claude
 from sessions import Router
@@ -77,28 +78,38 @@ class App:
         self.display = "starting"
         self.ready = {}            # window -> loaded
         self.tick = 0
+        self.taskbar = None
         folder = self.settings.get("folder")
         self.router.set_folder(folder if folder and os.path.isdir(folder) else None)
         self.api = Api(self)
         scale = ctypes.windll.user32.GetDpiForSystem() / 96
         left, top, right, bottom = (v / scale for v in self.work_area())
         width, height = int((right - left) * 0.82), int((bottom - top) * 0.86)
+        x, y = int(left + (right - left - width) / 2), int(top + (bottom - top - height) / 2)
         self.main = webview.create_window(
-            "Yo Claude", os.path.join(UI, "index.html"), js_api=self.api, width=width, height=height, min_size=(760, 480),
+            "Yo Claude", os.path.join(UI, "index.html"), js_api=self.api, width=width, height=height, x=x, y=y,
+            min_size=(760, 480),
             background_color="#111110", hidden=not self.settings.get("show_window", True))
         self.bar = webview.create_window(
-            "Yo Claude bar", os.path.join(UI, "bar.html"), js_api=self.api, width=560, height=56, frameless=True,
+            "Yo Claude bar", os.path.join(UI, "bar.html"), js_api=self.api, width=560, height=56, min_size=(300, 40),
+            frameless=True,
             on_top=True, focus=False, background_color="#111110", hidden=True, shadow=False)
         for w in (self.main, self.bar):
             w.events.loaded += lambda w=w: self.ready.__setitem__(w, True)
+        self.main_visible = self.settings.get("show_window", True)
+        self.main.events.shown += self.dress_main     # title-bar colours only stick once the window is on screen
         self.main.events.closing += self.on_main_closing
+        self.main.events.minimized += lambda: self.set_main_visible(False)
+        self.main.events.restored += lambda: self.set_main_visible(True)
+        self.main.events.maximized += lambda: self.set_main_visible(True)
         self.bar.events.moved += self.on_bar_moved
         self.tray = None
 
     # --- startup (pywebview calls this on its own thread once the GUI loop runs) ---
     def started(self):
-        self.style_bar()
-        self.place_bar(56)
+        self.bar_height = 56
+        self.dress_main()
+        threading.Thread(target=self.ensure_shortcuts, daemon=True).start()
         self.tray = self.make_tray()
         threading.Timer(4, icons.promote_tray_icon, args=(self.settings,)).start()
         threading.Thread(target=self.voice, daemon=True, name="voice").start()
@@ -150,9 +161,11 @@ class App:
                 bar_events.append(ev)
                 self.update_tray()
                 self.update_bar_visibility()
+                if getattr(self, "taskbar", None):
+                    self.taskbar.show(self.display)
             if levels:
                 bar_events.append({"kind": "levels", "levels": levels})
-                main_events.append({"kind": "levels", "levels": levels[-3:]})
+                main_events.append({"kind": "levels", "levels": levels})
             self.push(self.main, main_events)
             self.push(self.bar, bar_events)
 
@@ -170,16 +183,49 @@ class App:
     def on_main_closing(self):
         if getattr(self, "quitting", False):
             return True
-        self.main.hide()        # closing the window keeps Yo Claude running in the tray
+        self.main.hide()        # closing the window keeps Yo Claude running in the tray (and brings the bar back)
         self.settings["show_window"] = False
         self.settings.save()
+        self.set_main_visible(False)
         return False
 
     def show_main(self):
         self.main.show()
         self.main.restore()
+        self.dress_main()
         self.settings["show_window"] = True
         self.settings.save()
+        self.set_main_visible(True)
+
+    def set_main_visible(self, visible):
+        """The bar lives inside the window while it's on screen; the floating bar only shows when it isn't."""
+        self.main_visible = visible
+        self.update_bar_visibility()
+
+    def dress_main(self):
+        """Mascot window icon, and the taskbar button's progress/badge (needs the window to exist)."""
+        try:
+            hwnd = self.main.native.Handle.ToInt32()
+        except Exception:
+            return
+        taskbar.set_window_icon(hwnd, icons.ICO_PATH)
+        taskbar.style_title_bar(hwnd)
+        if self.taskbar is None:
+            self.taskbar = taskbar.Taskbar(hwnd)
+            self.taskbar.show(self.display)
+
+    def ensure_shortcuts(self):
+        target = os.path.join(os.path.dirname(sys.executable), "pythonw.exe")
+        key = [target, HERE]
+        if self.settings.get("shortcuts") == key:
+            return
+        try:
+            made = icons.make_shortcuts(APP_ID, target, f'"{os.path.join(HERE, "app.py")}"', HERE, icons.ICO_PATH)
+            log.info("Shortcuts: %s", ", ".join(made))
+            self.settings["shortcuts"] = key
+            self.settings.save()
+        except Exception as e:
+            log.warning("Couldn't create shortcuts: %s", e)
 
     def style_bar(self):
         """The bar mustn't steal focus from the window you're working in, and stays off the taskbar."""
@@ -198,7 +244,11 @@ class App:
         return r.left, r.top, r.right, r.bottom
 
     def place_bar(self, height):
-        """Keep the bar's bottom edge where it was (default: bottom centre, just above the taskbar)."""
+        """Keep the bar's bottom edge where it was (default: bottom centre, just above the taskbar).
+        Only while it's shown: moving or resizing a hidden pywebview window makes it appear."""
+        self.bar_height = height
+        if not getattr(self, "bar_shown", False):
+            return
         scale = ctypes.windll.user32.GetDpiForSystem() / 96
         left, top, right, bottom = (v / scale for v in self.work_area())
         pos = self.settings.get("bar_anchor")
@@ -217,7 +267,7 @@ class App:
         self.settings.save()
 
     def bar_wanted(self):
-        if not self.settings.get("show_bar", True):
+        if self.main_visible or not self.settings.get("show_bar", True):
             return False
         busy = self.display not in ("idle", "paused")
         held = self.voice_text and self.voice_hold and self.voice_state in ("idle", "paused")
@@ -227,9 +277,12 @@ class App:
         want = self.bar_wanted()
         if want != getattr(self, "bar_shown", None):
             self.bar_shown = want
-            (self.bar.show if want else self.bar.hide)()
             if want:
+                self.bar.show()
                 self.style_bar()
+                self.place_bar(getattr(self, "bar_height", 56))
+            else:
+                self.bar.hide()
 
     # --- tray ---
     def make_tray(self):
@@ -259,17 +312,23 @@ class App:
             pystray.MenuItem("PC control (screen, keyboard, mouse)", toggle("pc_control", lambda on: self.router.reconnect_all()),
                              checked=checked("pc_control")),
             pystray.Menu.SEPARATOR,
-            pystray.MenuItem("Compact bar", toggle("show_bar"), checked=checked("show_bar")),
-            pystray.MenuItem("Keep bar visible when idle", toggle("bar_when_idle"), checked=checked("bar_when_idle")),
+            pystray.MenuItem("Floating bar when the window is closed", toggle("show_bar"), checked=checked("show_bar")),
+            pystray.MenuItem("Keep floating bar visible when idle", toggle("bar_when_idle"),
+                             checked=checked("bar_when_idle")),
             pystray.MenuItem("Launch with Windows", toggle("launch_at_login", set_launch_at_login),
                              checked=checked("launch_at_login")),
             pystray.Menu.SEPARATOR,
+            pystray.MenuItem("Training mode…", lambda: self.open_training()),
             pystray.MenuItem("Open log", lambda: os.startfile(LOG_PATH)),
             pystray.MenuItem("Quit", lambda: self.quit()),
         )
         icon = pystray.Icon("YoClaude", icons.tray_frame("starting", 0), "Yo Claude – starting", menu)
         icon.run_detached()
         return icon
+
+    def open_training(self):
+        self.show_main()
+        self.bus.put(("open_training", {}))
 
     def update_tray(self):
         if self.tray:
@@ -495,6 +554,7 @@ class Api:
         a.bar.hide()
 
     def bar_resize(self, height):
+        log.debug("bar_resize(%s)", height)
         self._app.place_bar(max(56, min(220, int(height))))
 
     def compact(self):
@@ -505,10 +565,23 @@ class Api:
         a.settings["show_window"] = False
         a.settings.save()
         a.bar_shown = None
-        a.update_bar_visibility()
+        a.set_main_visible(False)
 
     def open_log(self):
         os.startfile(LOG_PATH)
+
+    # --- training mode ---
+    def train(self, on):
+        self._app.commands.put(("train", bool(on)))
+        if on:
+            self._app.show_main()
+
+    def set_wake_alternates(self, phrases):
+        phrases = [p.strip().lower() for p in phrases or [] if p and p.strip()]
+        self._app.settings["wake_alternates"] = phrases
+        self._app.settings.save()
+        self._app.commands.put(("alternates", phrases))
+        self._app.emit_settings()
 
     def js_error(self, message):
         log.warning("page error: %s", str(message)[:2000])

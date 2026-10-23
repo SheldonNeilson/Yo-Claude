@@ -74,8 +74,8 @@ function handle(e) {
       S.active = e.session; S.items = e.items || []; renderTranscript(); renderHead(); renderSessions();
       panel.refresh(true);
       break;
-    case "display": S.display = e; renderState(); break;
-    case "levels": S.level = Math.min(1, Math.max(0, (20 * Math.log10((e.levels.at(-1) || 1) / 32768) + 62) / 45)); break;
+    case "display": S.display = e; renderState(); inbar.event(e); break;
+    case "levels": inbar.event(e); break;
     case "settings": S.settings = e.settings; renderToggles(); break;
     case "folder":
       S.folder = e.folder; S.folders = e.folders;
@@ -90,6 +90,8 @@ function handle(e) {
         if (e.session_state === "idle") panel.refresh(true);
       }
       break;
+    case "train": training.onJudgement(e); break;
+    case "open_training": training.open(); break;
     case "tool_done": case "baseline":
       if (S.active && e.session === S.active.id) panel.refresh(true);
       break;
@@ -116,11 +118,11 @@ function renderState() {
   $("#stateLabel").textContent = label;
   $("#stateLabel").style.color = MASCOT.colors[st] || "";
 }
-function animate() {
-  MASCOT.draw($("#logo"), S.display.state || "idle", S.level);
+function animate() {   // the header logo stays still; the live mascot is the embedded bar's
   if (S.display.state === "thinking") renderState();
   requestAnimationFrame(animate);
 }
+const inbar = new MiniBar($("#inbar"));
 
 $("#folderBtn").onclick = (e) => {
   const items = S.folders.map((f) => [f, () => api().set_folder(f)]);
@@ -134,6 +136,7 @@ $("#tListen").onclick = () => api().set_setting("listening", !(S.settings.listen
 $("#tVoice").onclick = () => api().set_setting("voice_replies", !(S.settings.voice_replies !== false));
 $("#tPc").onclick = () => api().set_setting("pc_control", !S.settings.pc_control);
 $("#compactBtn").onclick = () => api().compact();
+$("#helpBtn").onclick = () => training.open();
 $("#logo").onclick = () => api().talk();
 $("#panelBtn").onclick = () => {
   const open = $("#app").classList.toggle("with-panel");
@@ -333,9 +336,9 @@ function approvalCard(it) {
   return n;
 }
 function renderBusy() {
-  const busy = !!S.active?.busy;
-  $("#stopBtn").classList.toggle("hidden", !busy);
-  $("#hint").textContent = busy ? "claude is working — you can queue another message" : "";
+  $("#input").placeholder = S.active?.busy
+    ? "> claude is working — you can queue another message"
+    : "> message claude…  (Enter sends · Shift+Enter new line · @ attaches a file · paste images)";
 }
 
 // ---------- composer: text, attached files (chips or @mentions), pasted images ----------
@@ -439,8 +442,7 @@ $("#input").addEventListener("keydown", (e) => {
 $("#input").addEventListener("input", () => { autosize(); composer.autocomplete(); });
 $("#sendBtn").onclick = send;
 $("#talkBtn").onclick = () => api().talk();
-$("#stopBtn").onclick = () => api().stop();
-document.addEventListener("keydown", (e) => { if (e.key === "Escape" && S.active?.busy) api().stop(); });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" && inbar.active()) api().stop(); });
 
 // ---------- menus & dialogs ----------
 function showMenu(anchor, items) {
@@ -498,6 +500,8 @@ window.addEventListener("pywebviewready", async () => {
   renderToggles(); renderFolder(); renderSessions(); renderHead(); renderTranscript(); renderState();
   if (S.settings.panel_open) $("#app").classList.add("with-panel");
   panel.load();
+  MASCOT.draw($("#logo"), "idle", 0, 1);
+  inbar.event({ kind: "display", ...S.display });
   requestAnimationFrame(animate);
   $("#input").focus();
 });

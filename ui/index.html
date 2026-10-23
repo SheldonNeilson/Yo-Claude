@@ -21,6 +21,7 @@
     <button id="tPc" class="toggle pc" title="Let Claude use your screen, keyboard and mouse. Adds ~11k tokens to every question, and screenshots add more.">[pc control]</button>
     <button id="panelBtn" title="Files, changes and git">[files]</button>
     <button id="compactBtn" title="Compact mode: hide this window, keep the bar">[compact]</button>
+    <button id="helpBtn" title="How to use Yo Claude, and tune the wake word to your voice">[?]</button>
   </header>
 
   <aside id="side">
@@ -51,9 +52,12 @@
       <textarea id="input" rows="2" placeholder="> message claude…  (Enter sends · Shift+Enter new line · @ attaches a file · paste images)"></textarea>
       <div class="composer-actions">
         <button id="talkBtn" title="Talk instead of typing">[talk]</button>
-        <span class="dim" id="hint"></span>
-        <span class="spacer"></span>
-        <button id="stopBtn" class="danger hidden">[■ stop]</button>
+        <div id="inbar" class="minibar" title="What Yo Claude is doing">
+          <canvas class="mb-m" width="40" height="26" title="Talk"></canvas>
+          <canvas class="mb-meter" width="120" height="30"></canvas>
+          <div class="mb-txt"><div class="mb-label"></div><div class="mb-text hidden"></div></div>
+          <button class="mb-stop btn hidden" title="Stop (Esc)">[■]</button>
+        </div>
         <button id="sendBtn" class="primary">[send ⏎]</button>
       </div>
     </div>
@@ -66,7 +70,9 @@
 <script src="vendor/marked.min.js"></script>
 <script src="vendor/highlight.min.js"></script>
 <script src="mascot.js"></script>
+<script src="minibar.js"></script>
 <script src="app.js"></script>
 <script src="panel.js"></script>
+<script src="training.js"></script>
 </body>
 </html>

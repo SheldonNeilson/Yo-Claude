@@ -145,6 +145,26 @@ select:focus, input:focus, textarea:focus { border-color: var(--orange); }
 .viewer.diff .hunk { color: var(--blue); display: block; }
 .viewer.diff span { display: block; white-space: pre; }
 
+/* mini bar (floating compact bar, and embedded in the main window) */
+.minibar { display: flex; align-items: center; gap: 12px; }
+.minibar .mb-m { cursor: pointer; flex: none; image-rendering: pixelated; }
+.minibar .mb-meter { flex: none; }
+.minibar .mb-txt { flex: 1; min-width: 0; }
+.minibar .mb-label { font-weight: bold; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.minibar .mb-text { color: var(--text); font-size: 12px; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; }
+.minibar .btn { border: 0; padding: 0 3px; color: var(--dim); font-weight: bold; font-size: 12px; }
+.minibar .btn:hover { color: var(--orange); } .minibar .mb-stop:hover { color: var(--red); }
+#inbar { flex: 1; min-width: 0; border: 1px solid var(--line); padding: 2px 10px; background: var(--bg); }
+#inbar .mb-text { -webkit-line-clamp: 1; white-space: nowrap; text-overflow: ellipsis; display: block; }
+
+/* training */
+.dialog.training p { margin: 0 0 10px; }
+.dialog.training .big { color: var(--orange); font-size: 16px; font-weight: bold; }
+.trainlist { border: 1px solid var(--line); padding: 6px 10px; max-height: 220px; overflow-y: auto; background: var(--bg); }
+.trainlist .ok { color: var(--green); } .trainlist .bad { color: var(--red); }
+.dialog .pick { display: block; padding: 2px 0; cursor: pointer; }
+.dialog .pick input { width: auto; }
+
 /* composer extras */
 #composer { position: relative; }
 #chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 4px; }

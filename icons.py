@@ -96,6 +96,33 @@ def make_ico():
     return ICO_PATH
 
 
+def make_shortcuts(app_id, target, arguments, workdir, ico):
+    """Desktop and Start-menu shortcuts carrying the app's AppUserModelID, so the running window groups under them on
+    the taskbar (and pins as Yo Claude, not Python)."""
+    import pythoncom
+    from win32com.client import Dispatch
+    from win32com.propsys import propsys, pscon
+    from win32com.shell import shell, shellcon
+
+    pythoncom.CoInitialize()
+    made = []
+    for folder in (shellcon.CSIDL_DESKTOPDIRECTORY, shellcon.CSIDL_PROGRAMS):
+        path = os.path.join(shell.SHGetFolderPath(0, folder, None, 0), "Yo Claude.lnk")
+        link = Dispatch("WScript.Shell").CreateShortcut(path)
+        link.TargetPath = target
+        link.Arguments = arguments
+        link.WorkingDirectory = workdir
+        link.IconLocation = ico
+        link.Description = "Yo Claude - voice-first Claude assistant"
+        link.Save()
+        store = propsys.SHGetPropertyStoreFromParsingName(path, None, shellcon.GPS_READWRITE,
+                                                          propsys.IID_IPropertyStore)
+        store.SetValue(pscon.PKEY_AppUserModel_ID, propsys.PROPVARIANTType(app_id))
+        store.Commit()
+        made.append(path)
+    return made
+
+
 def promote_tray_icon(settings, tooltip_prefix="Yo Claude"):
     """Windows 11 hides new tray icons behind the ^ arrow. Show this one on the taskbar the first time Windows lists
     it; if you later move it back into the overflow in Settings, that choice is left alone."""

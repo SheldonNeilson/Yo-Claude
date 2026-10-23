@@ -134,14 +134,22 @@ class VoskWake:
     DECOYS = ["yo", "you", "your", "close", "closed", "cloud", "claudia", "clod", "clause", "claws", "loud", "go",
               "load", "though", "hello", "what", "the", "a", "it", "is", "to", "glad", "called"]
 
-    def __init__(self, phrase=WAKE_PHRASE):
+    def __init__(self, phrase=WAKE_PHRASE, alternates=()):
         import vosk
         vosk.SetLogLevel(-1)
+        self.model = vosk.Model(VOSK_MODEL)
         self.phrase = phrase
-        grammar = [phrase] + self.DECOYS + ["[unk]"]
-        self.rec = vosk.KaldiRecognizer(vosk.Model(VOSK_MODEL), SAMPLE_RATE, json.dumps(grammar))
         self.speech = self.quiet = 0
         self.last_text = None   # text of the utterance that just finished, if one did on this frame
+        self.set_alternates(alternates)
+
+    def set_alternates(self, alternates):
+        """Extra phrases that count as the wake word for this person (from training: how they say it)."""
+        import vosk
+        self.phrases = [self.phrase] + [a for a in alternates if a and a != self.phrase]
+        words = {w for p in self.phrases for w in p.split()}
+        grammar = self.phrases + [d for d in self.DECOYS if d not in words or d in self.phrase.split()] + ["[unk]"]
+        self.rec = vosk.KaldiRecognizer(self.model, SAMPLE_RATE, json.dumps(grammar))
 
     def feed(self, frame, speech_prob):
         self.last_text = None
@@ -160,7 +168,7 @@ class VoskWake:
         if text:
             log.debug("Wake engine heard: %s", text)
         self.last_text = text
-        return self.phrase in text
+        return any(p in text for p in self.phrases)
 
     def reset(self):
         self.rec.Reset()
@@ -358,7 +366,11 @@ class Assistant:
         self.emit("state", state="starting", text="")
         self.mic = Mic()
         self.vad = Vad()
-        self.wake = VoskWake()
+        self.wake = VoskWake(alternates=settings.get("wake_alternates", []))
+        self.training = False        # training mode: report every judgement, never reply
+        self.train_mute_until = 0.0
+        self.peak = 0.0              # loudest frame of the speech being judged
+        self.noise = deque(maxlen=int(FPS * 5))
         self.stt = Transcriber()
         self.speaker = Speaker()
         self.worker = ThreadPoolExecutor(2)   # one for the Claude turn, one to transcribe approvals meanwhile
@@ -451,6 +463,16 @@ class Assistant:
                 self.start_conversation()
             elif cmd == "settings" and self.state in (IDLE, PAUSED):
                 self.go_idle()
+            elif isinstance(cmd, tuple) and cmd[0] == "train":
+                self.training = cmd[1]
+                if self.training:
+                    self.stop()
+                    self.mic.start()
+                    self.set_state(IDLE, "Training: listening to how you say it", hold=3600)
+                else:
+                    self.go_idle()
+            elif isinstance(cmd, tuple) and cmd[0] == "alternates":
+                self.wake.set_alternates(cmd[1])
             elif isinstance(cmd, tuple) and cmd[0] == "approval" and self.job and self.state == THINKING:
                 self.approval = cmd[1:]
                 self.say(f"Claude wants to {cmd[3]}. Say yes, go ahead, or no.",
@@ -458,8 +480,25 @@ class Assistant:
 
     def on_idle(self, frame, p):
         self.recent.append(frame)
+        level = rms(frame)
+        if p > VAD_ON:
+            self.peak = max(self.peak, level)
+        else:
+            self.noise.append(level)
         self.heard_speech = self.heard_speech or p > VAD_ON
         woke = self.wake.feed(frame, p)
+        if self.training and self.wake.last_text is not None and self.heard_speech:
+            # skip our own beep (heard right after a wake) and sounds that weren't words at all
+            if self.wake.last_text and time.time() > self.train_mute_until:
+                noise = float(np.percentile(self.noise, 50)) if self.noise else 0.0
+                self.emit("train", heard=self.wake.last_text, woke=bool(woke), peak=self.peak, noise=noise)
+                if woke:
+                    winsound.MessageBeep(winsound.MB_OK)
+                    self.train_mute_until = time.time() + 1.2
+            self.heard_speech, self.peak = False, 0.0
+            return
+        if self.wake.last_text is not None:
+            self.peak = 0.0
         if self.save_samples and self.wake.last_text is not None and self.heard_speech:
             self.save_sample(self.wake.last_text or "nothing")
             self.heard_speech = False
