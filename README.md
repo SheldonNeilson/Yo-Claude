@@ -9,8 +9,9 @@ Unofficial fan project, not made or supported by Anthropic. Uses your own Claude
 ![Yo Claude coding: folders and sessions on the left, the conversation with folded tool steps, and the files changed in the session on the right](docs/screenshots/coding.png)
 
 **Coding by voice or text.** Folders and their sessions on the left (spinning while Claude works, a dot for replies you
-haven't read), Claude's steps folded into one-line summaries, and everything the session changed on the right. The
-meters at the top show how full this conversation is and how much of your plan's limits you've used.
+haven't read), the conversation in ASCII speech bubbles with Claude's steps folded into one-line summaries, and
+everything the session changed on the right. The meters at the top show how full this conversation is and how much
+of your plan's limits you've used.
 
 ![Yo Claude using the PC: the steps it took in Paint, the picture it made, and a live view of the screen while it works](docs/screenshots/pc-control.png)
 
@@ -62,18 +63,35 @@ The first time, a welcome tour explains everything and checks how well it hears 
   "Never mind" ends it.
 - **Voice commands**: "new session", "new chat", "switch to *session name*".
 - **Approvals**: when Claude asks permission, say "yes, go ahead" or "no", or click.
-- **Stop** anything: `[■]`, Esc, a right-click on the bar, or the tray menu.
+- **Stop** anything: `[■]`, Esc (when no list or menu is open), a right-click on the bar, or the tray menu.
 - **Mishearing you?** Turn on **Voice → More accurate speech recognition**. It uses a bigger speech model: slower,
   and a one-off download of about 1.5 GB.
+
+### The conversation
+
+- Your messages sit in an ASCII speech bubble on the right, Claude's on the left, with when they were sent (recent
+  ones as "4m ago"; hover for the full date and time). Claude's steps are folded into one-line summaries, with any
+  pictures it looked at shown underneath.
+- **Type** instead of talking: `@` attaches a file, `/` lists commands, and you can paste screenshots.
+  - Yo Claude's own commands: `/new`, `/chat`, `/model sonnet`, `/effort high`, `/context`, `/usage`, `/tasks`,
+    `/files`, `/changes`, `/git`, `/stop`.
+  - Claude Code's commands for the folder (`/compact`, your skills and custom commands) are listed too.
+- **Queue** messages while Claude is working; a queued one shows **✕ cancel**, which puts it back in the box.
+- **Rewind**: hover one of your messages and click **⟲ rewind** to go back to just before it. Rewind the conversation
+  and the files Claude changed since, only the conversation, or only the files. Tick "first copy this conversation to
+  a new session" to keep the rewound part going in a copy, without redoing it.
+- **Errors** have a **↻ retry** button that sends your last message again.
+- **Claude's plan** for a task shows as a checklist above the message box: done, doing now, next.
+- **Copy anything**: select it and press Ctrl+C, use a message's **⧉ copy** button, or right-click for Copy, Copy
+  message, Copy code and Copy whole conversation.
+- **Follow**: the chat and task output stay at the newest line until you scroll up; the follow button jumps back.
 
 ### The window
 
 - **Menus** along the top (File, Edit, View, Session, Voice, Tools, Help) have every setting, with keyboard shortcuts
   (Help → Keyboard shortcuts). Hover anything for a short explanation.
-- **Type** instead of talking: `@` attaches a file, and you can paste screenshots.
-- **Copy anything**: select it and press Ctrl+C, use a message's **⧉ copy** button, or right-click for Copy, Copy
-  message, Copy code and Copy whole conversation.
 - **Model and effort** are picked per session, at the top of the conversation.
+- **Resize** the sessions list and the right-hand panel by dragging their edges (double-click resets).
 - **Compact mode**: close or minimise the window and a small bar stays at the bottom of the screen. `[⤢]` opens the
   window again.
 - **Tray icon** (bottom right): the wake word, voice replies, PC control, the floating bar, launch with Windows,
@@ -92,18 +110,27 @@ The first time, a welcome tour explains everything and checks how well it hears 
 
 ### Coding
 
-- In a folder session, the right-hand panel shows the files, everything changed in the session (with diffs and
-  per-file revert) and your git branch.
+- In a folder session, the right-hand panel has four tabs:
+  - **files**: a file explorer. New file and folder, rename (F2), delete to the Recycle Bin (Del), cut, copy and
+    paste (Ctrl+X/C/V), duplicate, multi-select with Ctrl/Shift+click, and drag to move (Ctrl copies).
+  - **changes**: everything changed in the session, with diffs and per-file revert.
+  - **git**: your branch, and switching or creating one.
+  - **tasks**: background commands and subagents (see below).
 - The mode dropdown sets how much Claude asks first: **auto** (Claude Code's safety check decides; always the
   default), *ask before changes*, *auto-accept edits* or *plan*. A change applies to that session only.
-- **Background tasks** Claude starts (long renders, builds) show in the conversation with a timer and a stop button,
-  and as a purple spinner in the tree. They keep running if Yo Claude restarts, and Claude reports back when they
-  finish.
+- **Background tasks** Claude starts (long renders, builds, test runs) and **subagents** show in the **tasks** tab:
+  this session's by default, or all sessions grouped by session.
+  - It opens by itself when one starts.
+  - Click a task for its live output; a subagent's work reads like a conversation.
+  - Tasks keep running if Yo Claude restarts, and Claude is told how they ended.
 
 ### Files, pictures and video
 
 - File and folder paths in Claude's replies are links: click to preview, right-click for open, **open with…** (the
-  apps Windows has for that file type), show in Explorer and copy path.
+  apps Windows has for that file type, plus your Visual Studio versions for text files), show in Explorer and copy
+  path.
+- **Text files** open in a viewer you can edit in: **✎ edit**, then Ctrl+S to save. Markdown shows formatted, with a
+  source view. Saving keeps line endings, and refuses if the file changed on disk meanwhile.
 - Pictures, videos, audio and PDFs a reply mentions appear under it. Click one to view it bigger, or **pop out** to
   get it in its own resizable window.
 - Videos play in the chat. The button at the top right plays them **picture in picture**, on top of other windows,
@@ -112,9 +139,12 @@ The first time, a welcome tour explains everything and checks how well it hears 
 
 ### Context and usage limits
 
-- **ctx** next to the model picker shows how full this conversation's context window is. Click it to see what's
-  using it (system prompt, tools, PC control, memory files, your messages, tool results), with tips to free some up,
-  **compact this conversation**, or start a **new session**.
+- **ctx** next to the model picker shows how full this conversation's context window is. Click it (or type
+  `/context`) for:
+  - What's using it: system prompt, tools, memory files, your messages, tool results.
+  - Tips to free some up, **compact this conversation**, or start a **new session**.
+  - **What's loaded**: MCP servers, skills (by plugin) and memory files, each with its token cost. Switch servers,
+    plugins or single skills off for Yo Claude's sessions (your Claude Code settings stay as they are).
 - **5h** and **7d** at the top right are your Claude plan's 5-hour and weekly limits, shared with Claude Code and the
   Claude app. Hover them for when they reset, or click for details. They update with each reply.
 - The bars turn amber past 50% and red past 80%.
@@ -157,6 +187,7 @@ Your conversations stay in Claude Code.
 - **It doesn't hear me**: tray → *Training mode* checks your mic level and how it hears "yo claude", and can learn
   how you say it.
 - **It mishears what I say**: Voice → *More accurate speech recognition*.
+- **A reply failed**: click **↻ retry** on the error.
 - **No answer**: run `claude` in a terminal once to check Claude Code works and you're signed in.
 - **"Limit reached"**: the **5h** / **7d** meters show which limit and when it resets.
 - **Something else**: tray → *Open log*, and send the log to whoever shared this with you.
