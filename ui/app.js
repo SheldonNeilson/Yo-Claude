@@ -109,6 +109,9 @@ function handle(e) {
       break;
     case "update": renderUpdate(e); break;
     case "notice": toast(e.text); break;
+    case "session_info":
+      if (S.active && e.session.id === S.active.id) { Object.assign(S.active, e.session); renderExtraDirs(); }
+      break;
     case "train": training.onJudgement(e); break;
     case "open_training": training.open(); break;
     case "tool_done": case "baseline":
@@ -362,9 +365,25 @@ function renderHead() {
   $("#sessionTitle").textContent = title + (a?.cwd ? `  ·  ${a.cwd}` : "");
   fillSelect($("#modelSel"), MODELS, a ? a.model : (S.settings.model || ""));
   fillSelect($("#effortSel"), EFFORTS, a ? a.effort : (S.settings.effort || ""));
-  fillSelect($("#permSel"), PERMS, a ? a.permission_mode : (S.settings.permission_mode || "auto"));
+  fillSelect($("#permSel"), PERMS, a ? a.permission_mode : "auto");
   $("#permSel").classList.toggle("hidden", !(a ? a.cwd : S.folder));
-  renderFolder(); renderBusy();
+  renderFolder(); renderBusy(); renderExtraDirs();
+}
+function renderExtraDirs() {   // other folders this session may read and write
+  const box = $("#extraDirs"), a = S.active;
+  box.classList.toggle("hidden", !a);
+  if (!a) return;
+  box.innerHTML = `<span class="lbl">${(a.extra_dirs || []).length ? "also works in:" : "only this folder"}</span>`;
+  for (const d of a.extra_dirs || []) {
+    const chip = el("span", "xdir", `▤ ${esc(base(d))}<b title="Remove">×</b>`);
+    chip.title = d + " · click to open · × to remove";
+    chip.onclick = (e) => e.target.tagName === "B" ? api().remove_extra_dir(a.id, d) : api().open_path(d, "open");
+    box.appendChild(chip);
+  }
+  const add = el("button", "", "+ folder");
+  add.title = "Let this session also read and write another folder";
+  add.onclick = async () => { const err = await api().add_extra_dir(a.id); if (err) alertBox(err); };
+  box.appendChild(add);
 }
 async function ensureActive() {
   if (!S.active) S.active = await api().new_session();
@@ -651,33 +670,47 @@ function renderBusy() {
 
 // ---------- files and media: chips, thumbnails, previews under replies, the viewer, open with… ----------
 const MEDIA_EXT = "png|jpe?g|gif|webp|bmp|svg|mp4|webm|mov|m4v|mp3|wav|ogg|m4a|flac|pdf";
-const MEDIA_RE = new RegExp(String.raw`(?:[A-Za-z]:[\\/][^\s"'\`<>|*?()\[\]]+|[\w.\-~/\\]+)\.(?:${MEDIA_EXT})\b`, "gi");
+// Paths in plain text: folders may contain spaces ("D:\Oddly Based\..."), the file name may not.
+const MEDIA_RE = new RegExp(String.raw`(?:[A-Za-z]:[\\/](?:[^\\/:*?"<>|\r\n\`]+[\\/])*|(?:\.{0,2}[\\/])?(?:[\w.\-~]+[\\/])+)?[^\\/\s:*?"<>|\`()\[\]]+\.(?:${MEDIA_EXT})\b`, "gi");
 const MEDIA_RE_ONE = new RegExp(String.raw`\.(?:${MEDIA_EXT})$`, "i");
+const looksLikePath = (t) => /^([A-Za-z]:[\\/]|\.{0,2}[\\/]|~[\\/])/.test(t) || /^[\w.\- ]+([\\/][\w.\- ]+)+[\\/]?$/.test(t) || /^[\w\-]+\.[A-Za-z0-9]{1,6}$/.test(t);
 const mediaCache = new Map();
 
-function fileMenuItems(path, cwd) {
+function fileMenuItems(path, cwd, apps) {
+  // apps: the "open with" choices Windows has for this type (filled in a moment after the menu opens)
+  const openWith = apps === undefined ? [["  …", () => {}, { disabled: true }]]
+    : apps.map((h) => ["  " + h.name + (h.default ? "  (default)" : ""), () => api().open_with(path, h.id, cwd)]);
   return [
     ["sub:" + base(path)],
     ["preview", () => viewFile(path, cwd)],
-    ["open", () => api().open_path(path, "open", cwd)],
-    ["open with…", () => api().open_path(path, "openwith", cwd)],
+    ["pop out in its own window", () => api().pop_out(path, cwd)],
     ["show in explorer", () => api().open_path(path, "reveal", cwd)],
-    ["open in vs code", () => api().open_path(path, "code", cwd)],
-    ["copy path", async () => { const m = await api().media(path, cwd); navigator.clipboard.writeText(m.path || path); }],
+    ["copy path", async () => { const m = await api().media(path, cwd); copyText(m.path || path, "path copied"); }],
+    "-", ["sub:open with"], ...openWith,
+    ["  choose another app…", () => api().open_path(path, "openwith", cwd)],
   ];
+}
+function showFileMenu(e, path, cwd, extra = []) {   // right-click on any file: shown at once, apps added when found
+  e.preventDefault(); e.stopPropagation();
+  const at = { clientX: e.clientX, clientY: e.clientY };
+  showMenu(at, [...extra, ...fileMenuItems(path, cwd)]);
+  const token = showFileMenu.token = {};
+  api().open_with_options(path, cwd).then((apps) => {
+    if (showFileMenu.token === token && !$("#menu").classList.contains("hidden")) showMenu(at, [...extra, ...fileMenuItems(path, cwd, apps || [])]);
+  });
 }
 function fileChip(label, path, cwd) {
   const c = el("span", "chip small link", esc(label));
   c.title = "Click to preview · right-click for more";
   c.onclick = () => viewFile(path, cwd);
-  c.oncontextmenu = (e) => { e.preventDefault(); showMenu(e, fileMenuItems(path, cwd)); };
+  c.oncontextmenu = (e) => showFileMenu(e, path, cwd);
   return c;
 }
 function mediaThumb(path, cwd, info) {
   const box = el("span", "mthumb", "…");
   box.title = base(path) + " · click to view · right-click for more";
   box.onclick = () => viewFile(path, cwd);
-  box.oncontextmenu = (e) => { e.preventDefault(); showMenu(e, fileMenuItems(path, cwd)); };
+  box.oncontextmenu = (e) => showFileMenu(e, path, cwd);
   (info ? Promise.resolve(info) : api().media(path, cwd)).then((m) => {
     if (!m || m.error) { box.textContent = "missing: " + base(path); box.classList.add("missing"); return; }
     box.innerHTML = "";
@@ -688,18 +721,37 @@ function mediaThumb(path, cwd, info) {
   });
   return box;
 }
-function mediaUnder(node, it) {   // pictures, video, audio and PDFs a reply mentions, shown underneath it
-  const found = [...new Set((it.text || "").match(MEDIA_RE) || [])];
-  if (!found.length) return;
+function mediaUnder(node, it) {
+  // Paths a reply mentions become links (click: preview, right-click: open with...; folders open in Explorer), and
+  // pictures, video, audio and PDFs among them are shown underneath it.
+  const codes = [...node.querySelectorAll("code")].filter((c) => !c.closest("pre"));
+  const tokens = new Set(codes.map((c) => c.textContent.trim()).filter(looksLikePath));
+  for (const m of (it.text || "").match(MEDIA_RE) || []) tokens.add(m.trim());
+  if (!tokens.size) return;
   const cwd = S.active?.cwd;
   const show = (list) => {
-    if (!list.length) return;
+    const byToken = new Map(list.map((m) => [m.token, m]));
+    for (const c of codes) {
+      const m = byToken.get(c.textContent.trim());
+      if (!m) continue;
+      c.classList.add("pathlink");
+      c.title = m.kind === "dir" ? "Open this folder · right-click for more" : "Preview · right-click for open with…";
+      c.onclick = () => m.kind === "dir" ? api().open_path(m.path, "open") : viewFile(m.path, cwd);
+      c.oncontextmenu = (e) => {
+        if (m.kind !== "dir") return showFileMenu(e, m.path, cwd);
+        e.preventDefault(); e.stopPropagation();
+        showMenu(e, [["sub:" + m.name], ["open in explorer", () => api().open_path(m.path, "open")],
+          ["open in vs code", () => api().open_path(m.path, "code")], ["copy path", () => copyText(m.path, "path copied")]]);
+      };
+    }
+    const seen = new Set(), media = list.filter((m) => !["dir", "file"].includes(m.kind) && !seen.has(m.path) && seen.add(m.path));
+    if (!media.length) return;
     const strip = el("div", "thumbs");
-    for (const m of list) strip.appendChild(mediaThumb(m.path, cwd, m));
+    for (const m of media) strip.appendChild(mediaThumb(m.path, cwd, m));
     node.appendChild(strip);
   };
   if (mediaCache.has(it.i)) return show(mediaCache.get(it.i));
-  api().resolve_media(found, cwd).then((list) => { mediaCache.set(it.i, list || []); show(list || []); });
+  api().resolve_paths([...tokens], cwd).then((list) => { mediaCache.set(it.i, list || []); show(list || []); });
 }
 async function viewFile(path, cwd, opts = {}) {
   const m = await api().media(path, cwd);
@@ -724,8 +776,16 @@ async function viewFile(path, cwd, opts = {}) {
       if (f.truncated) d.appendChild(el("div", "dim", "(showing the first 300 KB)"));
     }
   }
-  const buttons = [["open", () => api().open_path(m.path, "open")], ["open with…", () => api().open_path(m.path, "openwith")],
-                   ["show in explorer", () => api().open_path(m.path, "reveal")]];
+  const buttons = [["pop out ⤢", () => { closeModal(); api().pop_out(m.path); }],
+                   ["open", () => api().open_path(m.path, "open")],
+                   ["open with ▾", async (e) => {
+                     const r = e.currentTarget.getBoundingClientRect();
+                     const apps = await api().open_with_options(m.path);
+                     showMenu({ clientX: r.left, clientY: r.top - 8 - 24 * (apps.length + 2) },
+                       [...apps.map((h) => [h.name + (h.default ? "  (default)" : ""), () => api().open_with(m.path, h.id)]),
+                        "-", ["choose another app…", () => api().open_path(m.path, "openwith")]]);
+                   }],
+                   ["show in explorer", () => api().open_path(m.path, "reveal")], ["copy path", () => copyText(m.path, "path copied")]];
   if (opts.attach) buttons.push(["attach to message", () => { composer.attach(path); closeModal(); }]);
   buttons.push(["close", closeModal, "primary"]);
   addButtons(d, buttons);

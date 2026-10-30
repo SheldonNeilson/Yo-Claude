@@ -123,7 +123,7 @@ pre:hover .codecopy { opacity: 1; }
 .composer-actions { display: flex; gap: 8px; margin-top: 6px; align-items: center; }
 
 /* menus & modals */
-.menu { position: fixed; z-index: 50; background: var(--bg2); border: 2px solid var(--line2); min-width: 200px; padding: 4px 0;
+.menu { position: fixed; z-index: 80; background: var(--bg2); border: 2px solid var(--line2); min-width: 200px; padding: 4px 0;
         box-shadow: 4px 4px 0 #000; }
 .menu div { padding: 4px 12px; cursor: pointer; white-space: nowrap; }
 .menu div:hover { background: var(--bg3); color: var(--orange); }
@@ -161,7 +161,9 @@ pre:hover .codecopy { opacity: 1; }
 .st-A, .st-\? { color: var(--green); } .st-M, .st-R { color: var(--amber); } .st-D { color: var(--red); }
 .add { color: var(--green); } .del { color: var(--red); }
 #branchPill { cursor: pointer; }
-.dialog.wide { width: min(1100px, 90vw); max-width: none; }
+.dialog.wide { width: min(1100px, 90vw); max-width: 96vw; max-height: 94vh; resize: both; overflow: auto; }
+code.pathlink { cursor: pointer; text-decoration: underline dotted; text-underline-offset: 3px; }
+code.pathlink:hover { color: var(--orange2); background: var(--bg3); }
 .viewer { max-height: 62vh; overflow: auto; background: #0b0b0a; border: 1px solid var(--line); padding: 8px; margin: 0; }
 .viewer.diff .hunk { color: var(--blue); display: block; }
 .viewer.diff span { display: block; white-space: pre; }
@@ -243,6 +245,13 @@ pre:hover .codecopy { opacity: 1; }
 .taskcard button { padding: 0 6px; font-size: 11px; }
 .msg.note { color: #b9a3ff; font-size: 12px; }
 .spin.bgtask { color: #b9a3ff; }
+
+/* extra folders a session may use */
+#extraDirs { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 4px 12px; border-bottom: 1px solid var(--line); font-size: 12px; }
+#extraDirs .lbl { color: var(--dim); }
+#extraDirs .xdir { border: 1px solid #3c5f45; color: var(--green); padding: 0 6px; cursor: pointer; white-space: nowrap; }
+#extraDirs .xdir b { color: var(--dim); margin-left: 4px; } #extraDirs .xdir b:hover { color: var(--red); }
+#extraDirs button { padding: 0 6px; font-size: 11px; }
 
 /* clean up */
 .cleanlist { border: 1px solid var(--line); background: var(--bg); max-height: 55vh; overflow-y: auto; margin-top: 10px; padding: 4px 0; }

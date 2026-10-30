@@ -39,6 +39,7 @@ META_PATH = os.path.join(DATA_DIR, "sessions.json")
 PROJECTS_DIR = os.path.join(os.path.expanduser("~"), ".claude", "projects")
 PC_CONTROL_SERVER = "screen-control"
 WEB_TOOLS = ["WebSearch", "WebFetch"]
+FILE_TOOLS = ["Read", "Glob", "Grep", "Edit", "Write"]
 CHAT_MODEL = "sonnet"
 MAX_LIVE = 6              # connected sessions kept warm (several folders can be working at once)
 ATTACH_DIR = os.path.join(os.path.expanduser("~"), ".yoclaude", "attachments")   # pasted images, kept viewable
@@ -223,7 +224,8 @@ class Session:
         self.items = []
         self.client = None
         self.busy = False
-        self.permission_mode = router.settings.get("permission_mode") or "auto"
+        self.permission_mode = "auto"       # always the default; changing it is per session
+        self.extra_dirs = [d for d in router.meta.session(self.id).get("extra_dirs", []) if os.path.isdir(d)]
         self.model = router.settings.get("model") or None     # None = your Claude Code default (chats: CHAT_MODEL)
         self.effort = router.settings.get("effort") or None
         self.approvals = {}                 # approval id -> asyncio future
@@ -339,8 +341,12 @@ class Session:
         else:
             # not [] - the SDK sends that as an empty --setting-sources, which loads everything. CHAT_DIR has no
             # project settings, so this leaves out your user settings (skills, plugins: ~10k tokens a question).
-            opts.update(setting_sources=["project", "local"], tools=WEB_TOOLS, allowed_tools=list(WEB_TOOLS),
+            # A chat given extra folders also gets the file tools, so it can work in them.
+            tools = WEB_TOOLS + (FILE_TOOLS if self.extra_dirs else [])
+            opts.update(setting_sources=["project", "local"], tools=tools, allowed_tools=list(WEB_TOOLS),
                         model=CHAT_MODEL)
+        if self.extra_dirs:   # more folders Claude may read and write, besides the main one
+            opts["add_dirs"] = list(self.extra_dirs)
         if self.model:
             opts["model"] = self.model
         if self.effort:
@@ -441,6 +447,9 @@ class Session:
 
     def after_turn(self):
         self.stream_item = None
+        if getattr(self, "reconnect_after", False) and not self.running_tasks():   # extra folders changed mid-reply
+            self.reconnect_after = False
+            asyncio.ensure_future(self.disconnect())
         if self.router.active is not self:   # finished while you were looking at another session
             self.router.meta.update(self.id, unseen=True)
         self.router.set_work(self, "background" if self.running_tasks() else "idle")
@@ -856,7 +865,21 @@ class Router:
 
     def describe(self, s):
         return {"id": s.id, "cwd": s.cwd, "mode": s.mode, "permission_mode": s.permission_mode, "busy": s.busy,
-                "model": s.model or "", "effort": s.effort or ""}
+                "model": s.model or "", "effort": s.effort or "", "extra_dirs": list(s.extra_dirs)}
+
+    def set_extra_dirs(self, sid, dirs):
+        """Folders a session may also read and write. Takes effect from its next message (a start-up option)."""
+        s = self.live.get(sid)
+        if not s:
+            return "Open the session first."
+        s.extra_dirs = [d for d in dict.fromkeys(dirs) if os.path.isdir(d) and not same_folder(d, s.cwd)]
+        self.meta.update(sid, extra_dirs=s.extra_dirs)
+        if s.client and not s.busy:
+            self.run(s.disconnect())
+        elif s.client:
+            s.reconnect_after = True
+        self.emit("session_info", session=self.describe(s))
+        return None
 
     # --- talking ---
     def send(self, text, voice=False, sid=None, context="", attachments=(), images=(), origin="user"):
@@ -900,9 +923,7 @@ class Router:
     def set_permission_mode(self, sid, mode):
         if mode not in ("auto", "default", "acceptEdits", "plan"):
             return
-        self.settings["permission_mode"] = mode   # also the default for new sessions
-        self.settings.save()
-        s = self.live.get(sid)
+        s = self.live.get(sid)   # this session only: new sessions always start in auto
         if not s:
             return
         s.permission_mode = mode

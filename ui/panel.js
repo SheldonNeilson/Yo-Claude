@@ -137,11 +137,9 @@ function renderBranch() {
 $("#branchPill").onclick = () => { $("#app").classList.add("with-panel"); panel.tab = "git"; panel.load(); };
 
 function fileMenu(ev, e) {
-  showMenu(ev, [
-    ["attach to message", () => composer.attach(e.path)],
-    ...(e.dir ? [["open in vs code", () => api().open_in_editor(e.path)], ["show in explorer", () => api().reveal(e.path)]]
-              : fileMenuItems(e.path, panel.cwd)),
-  ]);
+  const attach = ["attach to message", () => composer.attach(e.path)];
+  if (!e.dir) return showFileMenu(ev, e.path, panel.cwd, [attach]);
+  showMenu(ev, [attach, ["open in vs code", () => api().open_in_editor(e.path)], ["show in explorer", () => api().reveal(e.path)]]);
 }
 
 function preview(path) {   // images, video, audio and PDFs play; anything else shows as text

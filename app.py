@@ -25,6 +25,7 @@ import webview
 
 import icons
 import media
+import openwith
 import taskbar
 import workspace
 import yo_claude
@@ -546,6 +547,21 @@ class Api:
     def remove_folder(self, folder):
         self._app.router.set_workspace(folder, False)
 
+    def add_extra_dir(self, sid):
+        """Pick another folder this session may read and write."""
+        s = self._app.router.live.get(sid)
+        if not s:
+            return "Open the session first."
+        result = self._app.main.create_file_dialog(webview.FileDialog.FOLDER)
+        if not result:
+            return None
+        return self._app.router.set_extra_dirs(sid, s.extra_dirs + [result[0]])
+
+    def remove_extra_dir(self, sid, folder):
+        s = self._app.router.live.get(sid)
+        if s:
+            return self._app.router.set_extra_dirs(sid, [d for d in s.extra_dirs if d != folder])
+
     # --- viewing files: attachments, things Claude made, the file tree ---
     def _resolve(self, path, cwd=None):
         if not path:
@@ -571,6 +587,42 @@ class Api:
             if "error" not in info and info["kind"] != "file":
                 out.append(info)
         return out
+
+    def resolve_paths(self, paths, cwd=None):
+        """Which of the paths a reply mentions exist: {token, path, kind (dir/image/video/audio/pdf/file), name}."""
+        out = []
+        for token in dict.fromkeys(paths or []):
+            if len(out) >= 40:
+                break
+            full = self._resolve(str(token).strip().strip("'\""), cwd)
+            if full:
+                kind = "dir" if os.path.isdir(full) else media.kind_of(full)
+                info = {"token": token, "path": full, "kind": kind, "name": os.path.basename(full) or full}
+                if kind not in ("dir", "file"):
+                    info["url"] = self._app.media.url(full)
+                out.append(info)
+        return out
+
+    def open_with_options(self, path, cwd=None):
+        """The apps Windows has for this file's type (default first)."""
+        full = self._resolve(path, cwd)
+        return openwith.handlers(full) if full and os.path.isfile(full) else []
+
+    def open_with(self, path, handler_id, cwd=None):
+        full = self._resolve(path, cwd)
+        if not full:
+            return f"Not found: {path}"
+        openwith.launch(full, handler_id)
+        return None
+
+    def pop_out(self, path, cwd=None):
+        """A file in its own resizable window (video, pictures, PDFs, text)."""
+        full = self._resolve(path, cwd)
+        if not full or not os.path.isfile(full):
+            return f"Not found: {path}"
+        webview.create_window(os.path.basename(full), self._app.media.url(full), width=1100, height=720,
+                              background_color="#000000")
+        return None
 
     def read_any(self, path, cwd=None):
         """Text preview of any file you click on (attachments may live outside the session's folder)."""
