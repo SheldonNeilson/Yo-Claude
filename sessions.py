@@ -360,6 +360,49 @@ ADVISOR_BLOCK = re.compile(r"<advisor>\s*(.*?)\s*</advisor>\s*", re.S)   # the a
 TIDY_KEEP = re.compile(r"`[^`\n]+`|@\S+|https?://\S+|[A-Za-z]:[\\/]\S+")   # must come back exactly as they were
 
 
+class WarmHaiku:
+    """One Haiku session kept open for AutoCorrect (tidy_text): starting Claude Code for every fix took 3+ s, asking a
+    running one about 1 s. One question at a time; it starts afresh every FRESH_AFTER questions (so the conversation
+    doesn't grow) or after a failure, and belongs to the event loop it was started on."""
+    FRESH_AFTER = 25
+
+    def __init__(self):
+        self.client, self.loop, self.asked, self.lock = None, None, 0, None
+
+    async def ask(self, prompt, opts):
+        loop = asyncio.get_running_loop()
+        if self.loop is not loop:   # (another loop, e.g. a test script: a session of its own)
+            self.client, self.loop, self.asked, self.lock = None, loop, 0, asyncio.Lock()
+        async with self.lock:
+            if self.client is None or self.asked >= self.FRESH_AFTER:
+                await self.close()
+                self.client = sdk.ClaudeSDKClient(options=opts)
+                await self.client.connect()
+                self.asked = 0
+            self.asked += 1
+            try:
+                await self.client.query(prompt)
+                out = ""
+                async for m in self.client.receive_response():
+                    if isinstance(m, sdk.AssistantMessage):
+                        out += "".join(b.text for b in m.content if isinstance(b, sdk.TextBlock))
+                return out
+            except Exception:
+                await self.close()
+                raise
+
+    async def close(self):
+        client, self.client = self.client, None
+        if client:
+            try:
+                await client.disconnect()
+            except Exception:
+                pass
+
+
+WARM_TIDY = WarmHaiku()
+
+
 async def tidy_text(text, context=""):
     """Your message with its spelling, grammar and punctuation fixed (and, for speech, words that were obviously
     misheard), from the same kind of quick separate call as spoken_line: nothing saved, nothing in the chat. Your
@@ -385,10 +428,14 @@ async def tidy_text(text, context=""):
                                   system_prompt="You proofread messages before they're sent. You only ever return the "
                                                 "corrected message.",
                                   extra_args={"no-session-persistence": None})
-    out = ""
-    async for m in sdk.query(prompt=prompt, options=opts):
-        if isinstance(m, sdk.AssistantMessage):
-            out += "".join(b.text for b in m.content if isinstance(b, sdk.TextBlock))
+    try:
+        out = await WARM_TIDY.ask(prompt, opts)   # a Haiku kept running: about 1 s, against 3+ starting one each time
+    except Exception as e:
+        log.info("AutoCorrect's warm Haiku failed (%s): a one-off call instead", e)
+        out = ""
+        async for m in sdk.query(prompt=prompt, options=opts):
+            if isinstance(m, sdk.AssistantMessage):
+                out += "".join(b.text for b in m.content if isinstance(b, sdk.TextBlock))
     out = re.sub(r"^\s*<message>\s*|\s*</message>\s*$", "", out.strip()).strip()
     if not out or not 0.6 <= len(out) / len(text) <= 1.5 and abs(len(out) - len(text)) > 12:
         return text
