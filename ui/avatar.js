@@ -11,6 +11,7 @@ const AW = 200;                // the analysis grid frames are decoded to (colum
 const COLS = 64;               // characters across, whatever the panel's width
 const VIEW = [0, 0, 1, 1];     // the part of the clip shown: left, top, right, bottom (fractions)
 const REST = [44, 60];         // idle frames with a soft, closed-mouth smile: where she rests
+const SPEECH_DELAY = 0.06;     // s from starting the sound to hearing it (Windows' output latency): her mouth waits too
 
 const avatar = {
   el: null, pre: null, fxEl: null, fps: 12, clips: {}, ready: false,
@@ -38,12 +39,15 @@ const avatar = {
     if (!this.ready) return;
     new ResizeObserver(() => this.fit()).observe(side);
     this.nextIdleExtra = Date.now() + 8000;
-    setInterval(() => this.tick(), 1000 / this.fps);
+    setInterval(() => this.tick(), 500 / this.fps);   // twice the clips' rate: lip sync uses every beat, the rest every other
   },
   apply() { this.el?.classList.toggle("hidden", S.settings?.avatar === false); },
-  levels(list) {   // the voice's loudness, as it plays: drives her mouth while she talks
+  levels(list) {   // the voice's loudness, as it plays: her mouth's fallback if she has no speech envelope
     if (list?.length) { this.level = Math.min(1, (list.at(-1) || 0) / 3000); this.levelAt = Date.now(); }
   },
+  // what's being said, as loudness every `step` s from when it started playing (yo_claude.py Speaker.envelope): her
+  // mouth reads it on her own clock, so it's in time with the sound, not behind it like the streamed levels
+  speech(e) { this.env = e.env || []; this.envStep = e.step || 0.03; this.envStart = (e.started || 0) * 1000; },
   // the clip's frames as greyscale at AW columns (decoded once, by seeking through it)
   async decode(src, count) {
     const v = document.createElement("video");
@@ -160,6 +164,8 @@ const avatar = {
   tick() {
     if (!this.el || this.el.classList.contains("hidden") || document.hidden || !this.cols) return;
     const st = this.state(), now = Date.now(), group = this.group(st);
+    this.beat = (this.beat || 0) + 1;
+    if (this.beat % 2 && !(st === "speaking" && this.clip === "talking" && this.mouth && !this.rewinding)) return;
     let want = group.includes(this.clip) ? this.clip : this.any(group);   // stay on a suitable clip until it ends
     if (this.moodClip && now > this.moodUntil) this.moodClip = null;   // too late to react to that now
     if (st === "idle" && this.moodClip) {   // reacting to what just happened (after she's done speaking)
@@ -204,8 +210,11 @@ const avatar = {
 // Lip sync: on each beat, the talking frame whose mouth is as open as the voice is loud right now, preferring frames
 // near the current one so her face doesn't jump about.
 avatar.lipFrame = function (now) {
-  const loud = now - (this.levelAt || 0) < 300 ? this.level : 0;
-  this.mouthGoal = (this.mouthGoal || 0) * 0.35 + Math.min(1, loud * 1.7) * 0.65;
+  let loud = now - (this.levelAt || 0) < 300 ? this.level : 0;
+  const i = Math.floor(((now - this.envStart) / 1000 - SPEECH_DELAY) / this.envStep);
+  if (this.env?.length && i >= -10 && i < this.env.length + 10) loud = Math.min(1, (this.env[i] || 0) / 3000);
+  const goal = Math.min(1, loud * 1.7), was = this.mouthGoal || 0;
+  this.mouthGoal = goal > was ? goal : was * 0.4 + goal * 0.6;   // opens at once, closes a touch slower
   const m = this.mouth, target = this.mouthGoal;
   if (target < 0.08) {   // a pause between words: never frozen, drift slowly among the closed-mouth frames
     const closed = this.closedFrames || (this.closedFrames = [...m.keys()].sort((a, b) => m[a] - m[b]).slice(0, 8).sort((a, b) => a - b));

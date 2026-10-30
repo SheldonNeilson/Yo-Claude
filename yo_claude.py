@@ -321,6 +321,11 @@ class Speaker:
     def busy(self):
         return time.time() < self.until
 
+    def envelope(self, step):
+        """The loudness of what's playing, every `step` seconds: the face syncs her mouth to it on her own clock."""
+        n = int(TTS_RATE * step)
+        return [round(rms(self.pcm[i:i + n])) for i in range(0, len(self.pcm), n)] if self.pcm is not None else []
+
     def level(self):
         """Loudness of what's playing right now, for the waveform."""
         i = int((time.time() - self.started) * TTS_RATE)
@@ -459,6 +464,7 @@ class Assistant:
             pcm = self.speaker.synth(text)
         if self.settings["voice_replies"] and pcm is not None:
             self.speaker.play(pcm)
+            self.emit("speech", started=self.speaker.started, step=0.03, env=self.speaker.envelope(0.03))
             self.after_speaking = lambda: then(text)
             self.set_state(SPEAKING, text)
         else:

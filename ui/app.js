@@ -107,6 +107,7 @@ function handle(e) {
     }
     case "display": S.display = e; showDisplay(); break;
     case "levels": inbar.event(e); avatar.levels(e.levels); break;
+    case "speech": avatar.speech(e); break;
     case "live": if (S.active && e.session === S.active.id) transcript.live(e.image); break;
     case "settings": S.settings = e.settings; renderToggles(); avatar.apply(); renderBusy(); break;
     case "folder": S.folder = e.folder; renderHead(); break;
