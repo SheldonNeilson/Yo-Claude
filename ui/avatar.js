@@ -122,23 +122,29 @@ const avatar = {
     if (this.el && this.loadedBase && this.loadedBase !== this.base()) this.switchCharacter();
     this.el?.classList.toggle("hidden", !on || this.noClips);
   },
-  // another character picked (Options): all of theirs decoded, then swapped in at once
+  // another character picked (Options): their idle clip first, and they show as soon as it's in (as at start-up); the
+  // rest join as they're decoded. Picking again meanwhile switches again once this pass stops.
   async switchCharacter() {
     if (this.switching) return;
-    this.switching = true; this.loadedBase = this.base();
+    this.switching = true;
+    const base = this.loadedBase = this.base();
     try {
       const m = await this.manifest();
       this.noClips = !m;
+      this.el?.classList.toggle("hidden", S.settings?.[this.mount ? "bar_avatar" : "avatar"] !== true || this.noClips);
       if (m) {
         const fresh = {};
         this.stamps = {};
-        for (const [n, v] of Object.entries(m.clips)) await this.load(n, v, fresh);
-        if (fresh.idle) {
-          this.clips = fresh; this.clip = "idle"; this.frame = 0; this.rewinding = false; this.idleExtra = this.moodClip = null;
-          if (fresh.talking) { this.mouth = mouthOpenness(fresh.talking, this.AH); this.closedFrames = null; }
-          this.lv = null; this.analyse();
-          this.baseView = frameView(fresh.idle[0], this.AH); this.cols = 0; this.fit();
-          if (!this.ready) this.start();
+        const order = Object.entries(m.clips).sort(([a], [b]) => (b === "idle") - (a === "idle") || (b === "talking") - (a === "talking"));
+        for (const [n, v] of order) {
+          if (this.base() !== base) break;   // (another picked meanwhile: apply() below switches again)
+          await this.load(n, v, fresh);   // (once fresh is this.clips, load() also sets up talking and the blinks)
+          if (n === "idle" && fresh.idle) {
+            this.clips = fresh; this.clip = "idle"; this.frame = 0; this.rewinding = false; this.idleExtra = this.moodClip = null;
+            this.mouth = null; this.lv = null; this.analyse();
+            this.baseView = frameView(fresh.idle[0], this.AH); this.cols = 0;
+            if (this.ready) this.fit(); else this.start();
+          }
         }
       }
     } finally { this.switching = false; this.apply(); }
