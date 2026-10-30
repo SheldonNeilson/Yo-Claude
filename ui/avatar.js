@@ -52,6 +52,7 @@ const avatar = {
     const count = typeof v === "number" ? v : v.frames;
     try { into[name] = await this.decode(`avatar/${name}.mp4?${v.stamp || ""}`, count); } catch (e) { console.warn("avatar clip", name, e); return; }
     this.stamps[name] = v.stamp || "";
+    (this.blinks ||= {})[name] = firstBlink(into[name], this.AH);
     if (name === "talking" && into === this.clips) { this.mouth = mouthOpenness(this.clips.talking, this.AH); this.closedFrames = null; }
   },
   // New clips are recorded while she runs (scripts/make_avatar_clips.py adds each to clips.json as it's made): every
@@ -134,10 +135,15 @@ const avatar = {
   // a mood from her reaction to a reply (sessions.py MOODS): that clip plays next, once, if she has it
   react(clip) { if (this.clips[clip]) { this.moodClip = clip; this.moodUntil = Date.now() + 20000; } },
   // laughing is kept for when something's funny (a mood), not for idling
-  idleExtras() { return Object.keys(this.clips).filter((n) => n.startsWith("idle_") || ["looking", "hair"].includes(n)); },
+  // (the blink ones only now and then: she blinks in plenty of the others already)
+  idleExtras() {
+    const all = Object.keys(this.clips).filter((n) => n.startsWith("idle_") || ["looking", "hair"].includes(n));
+    return Math.random() < 0.25 ? all : all.filter((n) => !n.includes("blink"));
+  },
   // the start of an expression, played only part way and back: a glance, a moment's thought. Not the big-smile ones.
   microClips() {
-    return Object.keys(this.clips).filter((n) => !["idle", "talking", "hair", "idle_tuck", "laughing", "looking"].includes(n));
+    return Object.keys(this.clips).filter((n) => !["idle", "talking", "hair", "idle_tuck", "laughing", "looking"].includes(n)
+      && !n.includes("blink") && !(this.blinks?.[n]?.[0] < 6));   // (not if it opens with a blink straight away)
   },
   // idle, back at the start frame: a mannerism if one's due (or a mood to show), else now and then a small change of
   // expression, but mostly out to the calm end of her idle clip to rest there a few seconds (swaying among REST).
@@ -156,8 +162,11 @@ const avatar = {
     if (micro.length && Math.random() < 0.25) {
       this.clip = this.microClip = this.any(micro, this.lastMicro); this.lastMicro = this.clip;
       this.turnAt = 5 + Math.floor(Math.random() * 12);   // 0.4 to 1.4 s out, the same back
+      const b = this.blinks?.[this.clip];
+      if (b) this.turnAt = Math.min(this.turnAt, b[0] - 1);   // turning back before its blink
     } else {
       this.clip = "idle"; this.turnAt = Math.min(this.clips.idle.length - 1, REST[1]);
+      this.blinkOk = Math.random() < 0.15;   // her idle clip's own blink: on the odd pass, else skipped over
       this.restUntil = now + 4000 + Math.random() * 6000;
     }
   },
@@ -222,6 +231,8 @@ const avatar = {
       const end = Math.min(frames.length - 1, this.turnAt || Infinity);   // a short play turns back early
       const resting = st === "idle" && this.clip === "idle" && now < this.restUntil;
       if (!resting || this.frame < REST[0] || Math.random() < 0.5) this.frame += this.dir;   // resting: slower sways
+      const b = this.clip === "idle" && !this.blinkOk && this.blinks?.idle;
+      if (b && this.frame >= b[0] && this.frame <= b[1]) this.frame = this.dir > 0 ? b[1] + 1 : b[0] - 1;
       if (this.frame >= end) { this.frame = end; this.dir = -1; }
       if (resting && this.dir < 0 && this.frame <= REST[0]) { this.frame = REST[0]; this.dir = 1; }
       if (this.frame <= 0) {   // forward and back: what next?
@@ -299,4 +310,21 @@ function boxBlur(a, W, H, r) {   // two passes of a running-sum box blur
     }
   }
   return out;
+}
+
+// The frames of a clip's first blink, if it has one in its first two seconds: [first, last], else null. Her eyes are
+// in a band about 39% down the frame; closed, the dark of her pupils and lashes there mostly goes.
+function firstBlink(frames, AH) {
+  const y0 = Math.floor(AH * 0.37), y1 = Math.floor(AH * 0.43), x0 = Math.floor(AW * 0.3), x1 = Math.floor(AW * 0.7);
+  const dark = frames.slice(0, 26).map((g) => {
+    let n = 0;
+    for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) if (g[y * AW + x] < 70) n++;
+    return n;
+  });
+  const open = Math.max(dark[0], dark[1] || 0);
+  let a = -1, b = -1;
+  for (let i = 1; i < dark.length; i++) {
+    if (dark[i] < open * 0.5) { if (a < 0) a = i; b = i; } else if (a >= 0) break;
+  }
+  return a >= 0 && b - a <= 10 ? [a, b] : null;   // (a long run is her looking away, not a blink)
 }
