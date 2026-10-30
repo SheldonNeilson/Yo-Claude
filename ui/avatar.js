@@ -31,18 +31,48 @@ const avatar = {
     if (mount) mount.appendChild(this.el);
     else this.host.querySelector(".sidefoot").after(this.el);   // at the very bottom, under clean up and trash
     this.apply();
-    let manifest;
-    try { manifest = await (await fetch("avatar/clips.json", { cache: "no-store" })).json(); } catch (_) { return; }
+    this.stamps = {};
+    const manifest = await this.manifest();
+    if (!manifest) return;
     this.fps = manifest.fps || 12;
-    for (const [name, count] of Object.entries(manifest.clips || {})) {
-      try { this.clips[name] = await this.decode(`avatar/${name}.mp4`, count); } catch (e) { console.warn("avatar clip", name, e); }
-      if (name === "talking" && this.clips.talking) this.mouth = mouthOpenness(this.clips.talking, this.AH);
+    for (const [name, v] of Object.entries(manifest.clips)) {
+      await this.load(name, v);
       if (name === "idle" && this.clips.idle) { this.ready = true; this.fit(); }   // start as soon as idle is in
     }
     if (!this.ready) return;
     new ResizeObserver(() => this.fit()).observe(this.host);
     this.nextIdleExtra = Date.now() + 8000;
     setInterval(() => this.tick(), 500 / this.fps);   // twice the clips' rate: lip sync uses every beat, the rest every other
+    setInterval(() => this.refresh(), 60000);
+  },
+  async manifest() {   // avatar/clips.json: {fps, clips: {name: {frames, stamp}}} (or just a frame count, as it was)
+    try { const m = await (await fetch("avatar/clips.json", { cache: "no-store" })).json(); return m?.clips ? m : null; } catch (_) { return null; }
+  },
+  async load(name, v, into = this.clips) {
+    const count = typeof v === "number" ? v : v.frames;
+    try { into[name] = await this.decode(`avatar/${name}.mp4?${v.stamp || ""}`, count); } catch (e) { console.warn("avatar clip", name, e); return; }
+    this.stamps[name] = v.stamp || "";
+    if (name === "talking" && into === this.clips) { this.mouth = mouthOpenness(this.clips.talking, this.AH); this.closedFrames = null; }
+  },
+  // New clips are recorded while she runs (scripts/make_avatar_clips.py adds each to clips.json as it's made): every
+  // minute, any new or re-made one is decoded and joins her pool. A new idle clip means a new set (another start
+  // frame): then all of it is decoded first and swapped in at once, so she never mixes two sets.
+  async refresh() {
+    if (this.refreshing || document.hidden) return;
+    this.refreshing = true;
+    try {
+      const m = await this.manifest();
+      const changed = m ? Object.entries(m.clips).filter(([n, v]) => (typeof v === "number" ? "" : v.stamp || "") !== (this.stamps[n] ?? null)) : [];
+      if (changed.some(([n]) => n === "idle")) {
+        const fresh = {};
+        for (const [n, v] of Object.entries(m.clips)) await this.load(n, v, fresh);
+        if (fresh.idle) {
+          this.clips = fresh; this.clip = "idle"; this.frame = 0; this.rewinding = false; this.idleExtra = this.moodClip = null;
+          if (fresh.talking) { this.mouth = mouthOpenness(fresh.talking, this.AH); this.closedFrames = null; }
+          this.lv = null;
+        }
+      } else for (const [n, v] of changed) await this.load(n, v);
+    } finally { this.refreshing = false; }
   },
   apply() { this.el?.classList.toggle("hidden", S.settings?.[this.mount ? "bar_avatar" : "avatar"] === false); },
   levels(list) {   // the voice's loudness, as it plays: her mouth's fallback if she has no speech envelope
@@ -95,7 +125,8 @@ const avatar = {
   // the clips that suit a state; she picks among them at random, a new one each time one ends
   group(st) {
     const have = (names) => names.filter((n) => this.clips[n]), all = Object.keys(this.clips);
-    const g = st === "speaking" ? have(["talking"]) : st === "listening" || st === "approval" ? have(["listening"])
+    const g = st === "speaking" ? have(["talking"])
+      : st === "listening" || st === "approval" ? have(["listening", ...all.filter((n) => n.startsWith("listen_"))])
       : st === "thinking" ? have(["thinking", ...all.filter((n) => n.startsWith("think_"))])
       : st === "using_pc" ? have(["think_read", "looking"]) : [];
     return g.length ? g : ["idle"];
