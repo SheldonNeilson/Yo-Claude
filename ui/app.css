@@ -161,6 +161,7 @@ pre:hover .codecopy { opacity: 1; }
 
 #composer { border-top: 2px solid var(--line2); padding: 8px 12px; background: var(--bg2); }
 #input { width: 100%; resize: none; min-height: 44px; max-height: 200px; background: var(--bg); }
+#input.suggesting::placeholder { color: var(--dim); font-style: italic; opacity: 1; }   /* suggested next message */
 .composer-actions { display: flex; gap: 8px; margin-top: 6px; align-items: center; }
 
 /* menus & modals */
@@ -315,6 +316,34 @@ code.pathlink:hover { color: var(--orange2); background: var(--bg3); }
 .msg.note { color: #b9a3ff; font-size: 12px; }
 .spin.bgtask { color: #b9a3ff; }
 
+/* background task cards: how it ended, a short note under it, the full command on demand */
+.taskcard.completed .tstat { color: var(--green); }
+.taskcard.failed .tstat, .taskcard.failed .ticon { color: var(--red); }
+.taskcard.stopped .tstat, .taskcard.killed .tstat, .taskcard.stopped .ticon, .taskcard.killed .ticon { color: var(--dim); }
+.taskcard .tstat .elapsed { color: inherit; }
+.taskcard .tdesc { color: var(--text); }
+.taskcard .tcmdtoggle { flex: none; border-color: transparent; color: #b9a3ff; }
+.taskcard .tcmdtoggle:hover { border-color: var(--orange); color: var(--orange); }
+.taskwrap .tnote { display: flex; align-items: flex-end; gap: 6px; margin: 0 0 0 12px; padding: 2px 8px; border-left: 1px dashed #6f5fb0;
+                   color: var(--dim); font-size: 11px; white-space: pre-wrap; }
+.taskwrap .tnote.bad { color: #e39a9a; border-left-color: var(--red); }
+.taskwrap .tnotetext { flex: 1; min-width: 0; }
+.taskwrap .tnote.clamp .tnotetext { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.taskwrap .tmore { flex: none; border: none; padding: 0; font-size: 11px; color: #b9a3ff; }
+.taskwrap .tmore:hover { color: var(--orange); }
+.taskwrap .tcmd { position: relative; margin: 0 0 0 12px; padding: 3px 0 2px 8px; border-left: 1px dashed #6f5fb0; }
+.taskwrap .tcmdtext { margin: 0; padding: 6px 60px 6px 8px; background: #0d0c12; border: 1px solid #2a2540; color: var(--text);
+                      font-size: 12px; white-space: pre-wrap; word-break: break-all; max-height: 180px; overflow: auto; }
+.taskwrap .tcmdcopy { position: absolute; top: 7px; right: 14px; padding: 0 6px; font-size: 11px; background: var(--bg2); }
+.taskwrap { container-type: inline-size; }   /* narrow transcript (side panel open, small window): drop extras, then wrap */
+.taskcard .tdesc { min-width: 8ch; }
+@container (max-width: 820px) { .taskcard .tbg, .taskcard .gwhen { display: none; } }
+@container (max-width: 600px) {
+  .taskcard { flex-wrap: wrap; row-gap: 0; }
+  .taskcard .tdesc { flex: 1 1 calc(100% - 9em); }
+  .taskcard .tstat { margin-left: calc(1.1em + 8px); }
+}
+
 /* extra folders a session may use */
 #extraDirs { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 4px 12px; border-bottom: 1px solid var(--line); font-size: 12px; }
 #extraDirs .lbl { color: var(--dim); }
@@ -402,6 +431,8 @@ code.pathlink:hover { color: var(--orange2); background: var(--bg3); }
 .queuedtag { display: block; margin-top: 4px; color: var(--amber); font-size: 12px; }
 .queuedtag button { padding: 0 6px; font-size: 11px; margin-left: 6px; }
 .queuedtag button:hover { color: var(--red); border-color: var(--red); }
+.queuedtag button.sendnow:hover { color: var(--orange); border-color: var(--orange); }
+.queuebox:empty { display: none; }   /* queued messages, pinned below everything else until Claude takes them up */
 
 /* rewind */
 .msg.user .rewindbtn { position: absolute; top: -1.5em; left: 9ch; padding: 0 5px; font-size: 11px; opacity: 0; background: var(--bg2); }
@@ -598,3 +629,24 @@ b.lo { color: var(--green); } b.mid { color: var(--amber); } b.hi { color: var(-
 .followbtn.on { color: var(--orange); border-color: var(--orange); }
 /* the open task's header + buttons stay at the top of the panel while its log scrolls underneath */
 .tasktop { position: sticky; top: 0; z-index: 2; background: var(--bg, #111110); }
+/* /btw side chat: a small panel over the right of the conversation; nothing in it goes into the conversation */
+#chat { position: relative; }
+#btw { position: absolute; top: 46px; right: 16px; width: min(460px, 62%); max-height: 62%; z-index: 6; display: flex;
+       flex-direction: column; background: var(--bg2); border: 1px dashed var(--amber); box-shadow: 0 6px 24px rgba(0,0,0,.6); }
+#btw .btw-head { display: flex; align-items: center; gap: 8px; padding: 4px 6px 4px 10px; border-bottom: 1px dashed var(--line2);
+                 font-size: 12px; background: #0b0b0a; }
+#btw .btw-head b { color: var(--amber); }
+#btw .btw-head b::before { content: "[ "; color: var(--dim); } #btw .btw-head b::after { content: " ]"; color: var(--dim); }
+#btw .btw-head button { padding: 0 6px; font-size: 12px; }
+#btwLog { flex: 1; overflow-y: auto; padding: 8px 12px; min-height: 60px; }
+#btwLog, #btwLog * { user-select: text; }
+.btw-empty { color: var(--dim); font-size: 12px; }
+.btw-q { color: var(--orange); margin: 6px 0 4px; white-space: pre-wrap; }
+.btw-a { color: var(--text); margin: 0 0 10px 2ch; padding-left: 1ch; border-left: 1px solid var(--line2); }
+.btw-a p { margin: 0 0 6px; } .btw-a > :last-child { margin-bottom: 0; }
+.btw-a code { color: var(--amber); } .btw-a a { color: var(--blue); }
+.btw-a pre { background: #0b0b0a; border: 1px solid var(--line); padding: 6px; overflow-x: auto; }
+.btw-a.error { color: var(--red); }
+#btwInput { margin: 0 8px 8px; border-style: dashed; }
+#btwInput:disabled { opacity: .5; }
+#btwBtn { color: var(--amber); border-style: dashed; }

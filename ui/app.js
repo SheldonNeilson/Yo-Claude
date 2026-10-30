@@ -98,6 +98,8 @@ function handle(e) {
       renderTranscript(); renderHead(); renderTree();   // its folder opens by itself (it holds the active session)
       tasks.sessionChanged();
       planBox.collapsed = null; planBox.update();
+      if (window.btw?.session && btw.session !== S.active.id) btw.close();   // side chats belong to their conversation
+      setSuggest("");
       composer.preload();
       showDisplay();   // the bar follows the conversation you switched to
       panel.refresh(true);
@@ -106,7 +108,7 @@ function handle(e) {
     case "display": S.display = e; showDisplay(); break;
     case "levels": inbar.event(e); avatar.levels(e.levels); break;
     case "live": if (S.active && e.session === S.active.id) transcript.live(e.image); break;
-    case "settings": S.settings = e.settings; renderToggles(); avatar.apply(); break;
+    case "settings": S.settings = e.settings; renderToggles(); avatar.apply(); renderBusy(); break;
     case "folder": S.folder = e.folder; renderHead(); break;
     case "confirm_quit":
       confirmBox(`Claude is in the middle of a reply in ${e.busy.map((b) => `“${b.title}”`).join(", ")}. ` +
@@ -120,10 +122,15 @@ function handle(e) {
       if (e.session_state === "background") S.bg.add(e.session); else S.bg.delete(e.session);
       renderTree();
       if (S.active && e.session === S.active.id) {
+        if (e.session_state === "thinking") S.suggest = "";   // a new turn: the suggestion is out of date
         S.active.busy = e.session_state !== "idle"; renderBusy(); transcript.refreshGroups();
         if (e.session_state === "idle") { panel.refresh(true); composer.preload(true); }
       }
       break;
+    case "suggest":   // ignored while you're typing (it would only show after you send)
+      if (S.active && e.session === S.active.id && !(e.text && $("#input").value)) setSuggest(e.text);
+      break;
+    case "btw": btw.event(e); break;
     case "update": renderUpdate(e); break;
     case "notice": toast(e.text); break;
     case "session_info":
@@ -134,6 +141,7 @@ function handle(e) {
       break;
     case "limits": renderLimits(e.limits); break;
     case "ui": showForClaude(e); break;
+    case "mood": avatar.react(e.clip); break;
     case "train": training.onJudgement(e); break;
     case "open_training": training.open(); break;
     case "tool_done": case "baseline":
@@ -478,6 +486,14 @@ const transcript = {
   groups: [], last: null, liveImage: null,
 
   reset() { this.els.clear(); this.groupOf.clear(); this.groups = []; this.last = null; this.liveImage = null; },
+  // Queued messages wait in a box pinned at the bottom, below what Claude is still writing, until it takes them up.
+  queue() {
+    const t = $("#transcript");
+    let q = t.querySelector(":scope > .queuebox");
+    if (!q) { q = el("div", "queuebox"); t.appendChild(q); }
+    return q;
+  },
+  put(node) { $("#transcript").insertBefore(node, this.queue()); },   // into the flow, above the queue box
   running(g) {
     return g.items.some((i) => S.items[i]?.status === "running") || (g === this.last && !!S.active?.busy);
   },
@@ -487,7 +503,7 @@ const transcript = {
     g.pics = el("div", "gpics hidden");   // pictures Claude looked at in these steps, shown even while folded
     g.el.append(g.head, g.pics, g.live, g.steps);
     g.head.onclick = () => { g.open = !g.open; g.steps.classList.toggle("hidden", !g.open); this.renderHead(g); };
-    $("#transcript").appendChild(g.el);
+    this.put(g.el);
     this.groups.push(g);
     return g;
   },
@@ -555,13 +571,18 @@ Click to open` : "What Claude saw · click to enlarge";
       const node = buildItem(it);
       const old = this.els.get(it.i);
       const after = it.kind === "spoken" && this.els.get(it.for);
-      if (old) old.replaceWith(node);
+      const waiting = it.kind === "user" && it.queued, boxed = old?.parentElement?.classList.contains("queuebox");
+      if (waiting && boxed) old.replaceWith(node);
+      else if (waiting) { old?.remove(); this.queue().appendChild(node); }   // pinned at the bottom, in the order sent
+      else if (boxed && it.kind === "user") {
+        old.remove(); this.put(node); this.last = { item: it.i };   // Claude took it up: into the flow, here
+      } else if (old) old.replaceWith(node);
       else if (after) {   // under the message it's about, after any earlier voice bubbles for it
         let at = after;
         while (at.nextElementSibling?.classList.contains("spoken")) at = at.nextElementSibling;
         at.after(node);
-        if (!after.nextElementSibling || after === t.lastElementChild) this.last = { item: it.i };
-      } else { t.appendChild(node); this.last = { item: it.i }; }
+        if (!after.nextElementSibling || after === this.queue().previousElementSibling) this.last = { item: it.i };
+      } else { this.put(node); this.last = { item: it.i }; }
       this.els.set(it.i, node);
       node.querySelectorAll("pre code").forEach((c) => { try { hljs.highlightElement(c); } catch (_) {} });
       addCopyButtons(node, it);
@@ -626,7 +647,9 @@ function renderTranscript() {
       ? `code session in ${cwd}\n\nsay “yo claude” or type below`
       : "chat — no folder\n\nsay “yo claude” or type below\npick or add a folder (left) for coding")));
   }
-  S.items.forEach((it) => it && transcript.render(it, true));
+  // a message Claude took up after it had waited shows where it was taken up (`at`), not where it was sent
+  const place = (it) => (it.at != null ? it.at - 0.5 : it.i);
+  S.items.filter(Boolean).sort((a, b) => place(a) - place(b)).forEach((it) => transcript.render(it, true));
   follow.bind("chat", t);
   follow.set("chat", true);             // a freshly opened conversation starts at the newest message
   t.scrollTop = t.scrollHeight;
@@ -662,6 +685,16 @@ function buildItem(it) {
           b.value = r.text + (b.value ? "\n" + b.value : ""); autosize(); b.focus();
           for (const p of r.attachments || []) composer.attach(p);
         };
+        if (!(it.text || "").trimStart().startsWith("/")) {   // commands only run between replies
+          const now = el("button", "sendnow", "➤ send now");
+          now.dataset.tip = "Give this to Claude now: it reads it at its next step instead of after this reply";
+          now.onclick = async (e) => {
+            e.stopPropagation(); now.disabled = true;
+            const r = await api().send_now(it.i);
+            if (r?.error) { now.disabled = false; toast(r.error, "error"); }
+          };
+          q.appendChild(now);
+        }
         q.appendChild(x); n.appendChild(q);
       }
       if (it.uuid) {
@@ -863,14 +896,86 @@ function questionCard(it) {
   n.appendChild(btns);
   return n;
 }
-function taskCard(it) {   // a background task: running timer, stop, its output
+// Claude Code's task summaries mostly repeat the command ("Background command "<command>" completed (exit code 0)"). Keep only
+// what they add: the exit code, and a note when there is real text (an agent's reason for failing, Yo Claude's own notes).
+const TASK_TAILS = [
+  [/^completed \(exit code (-?\d+)\)\.?$/, "code"], [/^failed with exit code (-?\d+)\.?$/, "code"], [/^script failed \(exit (-?\d+)\)\.?$/, "code"],
+  [/^(?:finished|stream ended|was stopped(?: by the user)?|was killed)\.?$/, ""], [/^failed: ([\s\S]+)$/, "note"],
+  [/^(is waiting on its own background work)\.?$/, "note"]];
+function taskOutcome(it) {   // -> { code, note, quoted }: the exit code (or null), extra text worth showing, the quoted command
+  const s = (it.summary || "").trim();
+  let code = it.exit_code ?? null, note = s, quoted = "";
+  const tail = (rest) => {
+    for (const [re, what] of TASK_TAILS) {
+      const m = rest.match(re);
+      if (m) { if (what === "code") code = +m[1]; note = what === "note" ? m[1] : ""; return true; }
+    }
+    return false;
+  };
+  const prefixes = ["Background command", "Agent", "Task", "Monitor"];
+  const known = [it.description, it.command].filter(Boolean);
+  let done = prefixes.some((p) => known.some((q) => s.startsWith(`${p} "${q}" `) && tail(s.slice(p.length + q.length + 4)) && ((quoted = q), true)));
+  if (!done) {   // the quoted part isn't one we know: take the longest quote that ends in a known tail (commands hold quotes too)
+    const m = s.match(/^(?:Background command|Agent|Task|Monitor) "([\s\S]*)" ([\s\S]+)$/);
+    if (m && tail(m[2])) { quoted = m[1]; done = true; }
+  }
+  if (!done) {
+    const m = s.match(/^Ran to the end \(exit code (-?\d+)\)\.?$/);   // Yo Claude's own, for tasks it followed across a restart
+    if (m) { code = +m[1]; note = ""; }
+  }
+  if (note === it.description) note = "";
+  return { code, note, quoted };
+}
+function shortCommand(cmd) {   // a shell command, readable: no "cd <folder> &&" steps, one line
+  const parts = cmd.replace(/\s+/g, " ").trim().split(/\s*(&&|\|\||;)\s*/);   // [part, sep, part, sep, …]
+  const out = [];
+  for (let i = 0; i < parts.length; i += 2) {
+    if (/^(cd|pushd|Set-Location|sl)( (("[^"]*"|'[^']*'|(\\ |[^ ])+)))?$/i.test(parts[i]) && i + 2 < parts.length) continue;
+    out.push(parts[i], parts[i + 1]);
+  }
+  return out.filter((x) => x != null).join(" ").replace(/ (;|&&|\|\|)$/, "").replace(/ ;/g, ";") || cmd.trim();
+}
+const taskOpen = new Set();   // "<task id>:cmd" / "<task id>:note" that are expanded, kept across re-renders
+function taskCard(it) {   // a background task: running timer, stop, its output, how it ended, the command on demand
   const running = it.status === "running" || it.status === "pending";
   const icon = running ? '<span class="spin">✻</span>' : { completed: "✓", failed: "✗", stopped: "⊘", killed: "⊘" }[it.status] || "●";
   const n = el("div", `taskcard ${running ? "running" : it.status}`);
-  n.innerHTML = `<span class="ticon">${icon}</span><span class="tlabel">background task</span>` +
-    `<span class="tdesc">${esc(it.description || "")}</span>` +
-    (running ? `<span class="elapsed" data-start="${(it.started || 0) * 1000}"></span>` : `<span class="tstat">${esc(it.status)}</span>`) +
-    (it.last_tool ? `<span class="dim">· ${esc(it.last_tool)}</span>` : "") + `<span class="spacer"></span>` + whenHtml(it.started, "gwhen");
+  const out = taskOutcome(it);
+  const desc = (it.description || "").trim();
+  const shellish = (s) => s.length > 60 || /&&|\|\||;|\|/.test(s);
+  // the full command: what the tool ran, else the summary's quote, else a description that is itself a command
+  const cmd = (it.command || (out.quoted && out.quoted !== desc ? out.quoted : "") || (shellish(desc) ? desc : "")).trim();
+  const label = desc && desc !== cmd ? desc : shortCommand(cmd || desc);
+  const kind = /agent/.test(it.type || "") ? "agent" : it.command || /bash|shell/.test(it.type || "") ? "command" : "task";
+  const took = it.started && it.ended ? fmtElapsed((it.ended - it.started) * 1000) : "";
+  const word = { completed: "finished", failed: "failed", stopped: "stopped", killed: "stopped" }[it.status] || it.status;
+  const stat = [word, out.code != null ? `exit ${out.code}` : "",
+                took && (["stopped", "killed"].includes(it.status) ? `after ${took}` : took)].filter(Boolean).join(" · ");
+  n.innerHTML = `<span class="ticon">${icon}</span><span class="tlabel"><span class="tbg">background </span>${kind}</span>` +
+    `<span class="tdesc">${esc(label)}</span>` +
+    (running ? `<span class="tstat">running <span class="elapsed" data-start="${(it.started || 0) * 1000}"></span></span>` : `<span class="tstat">${esc(stat)}</span>`) +
+    (it.last_tool && running ? `<span class="dim">· ${esc(it.last_tool)}</span>` : "") + `<span class="spacer"></span>` + whenHtml(it.started, "gwhen");
+  n.querySelector(".tdesc").dataset.tip = desc || cmd;
+  const wrap = el("div", "taskwrap"); wrap.appendChild(n);
+  wrap.dataset.task = it.task_id || "";
+  let cmdBox = null;
+  const fold = (key, toggle, body, open, shut) => {   // a toggle that shows/hides body, remembered per task
+    const set = (on) => { body.classList.toggle("hidden", !on); toggle.textContent = on ? open : shut; };
+    set(taskOpen.has(key));
+    toggle.onclick = (e) => { e.stopPropagation(); taskOpen.has(key) ? taskOpen.delete(key) : taskOpen.add(key); set(taskOpen.has(key)); };
+  };
+  if (cmd && cmd !== label) {
+    const t = el("button", "tcmdtoggle");
+    t.dataset.tip = "Show the full command";
+    n.appendChild(t);
+    const box = el("div", "tcmd");
+    const pre = el("pre", "tcmdtext"); pre.textContent = cmd;
+    const cp = el("button", "tcmdcopy", "copy");
+    cp.onclick = (e) => { e.stopPropagation(); copyText(cmd, "command copied"); };
+    box.append(pre, cp);
+    fold(`${it.task_id}:cmd`, t, box, "▾ command", "▸ command");
+    cmdBox = box;
+  }
   if (running && !it.detached) {
     const b = el("button", "danger", "[stop]");
     b.onclick = async () => { const err = await api().stop_task(S.active.id, it.task_id); if (err) alertBox(err); };
@@ -881,9 +986,21 @@ function taskCard(it) {   // a background task: running timer, stop, its output
     b.onclick = () => viewFile(it.output_file);
     n.appendChild(b);
   }
-  const wrap = el("div", "taskwrap"); wrap.appendChild(n);
-  if (it.detached && running) wrap.appendChild(el("div", "dim small", "Started before Yo Claude restarted and still running; Claude will be told when it finishes."));
-  if (it.summary && !running) wrap.appendChild(el("div", "dim small", esc(it.summary)));
+  if (it.detached && running) wrap.appendChild(el("div", "tnote", "Started before Yo Claude restarted and still running; Claude will be told when it finishes."));
+  if (out.note && !running) {   // real extra text: two lines, the rest on click
+    const note = el("div", `tnote${it.status === "failed" ? " bad" : ""}`);
+    const text = el("span", "tnotetext"); text.textContent = out.note;
+    note.appendChild(text);
+    if (out.note.length > 160 || out.note.includes("\n")) {
+      const more = el("button", "tmore");
+      note.appendChild(more);
+      const clamp = (on) => { note.classList.toggle("clamp", !on); more.textContent = on ? "less" : "more"; };
+      clamp(taskOpen.has(`${it.task_id}:note`));
+      more.onclick = (e) => { e.stopPropagation(); const k = `${it.task_id}:note`; taskOpen.has(k) ? taskOpen.delete(k) : taskOpen.add(k); clamp(taskOpen.has(k)); };
+    }
+    wrap.appendChild(note);
+  }
+  if (cmdBox) wrap.appendChild(cmdBox);
   return wrap;
 }
 function fmtElapsed(ms) {
@@ -891,10 +1008,14 @@ function fmtElapsed(ms) {
   return s < 60 ? `${s}s` : s < 3600 ? `${Math.floor(s / 60)}m ${s % 60}s` : `${Math.floor(s / 3600)}h ${Math.floor(s / 60) % 60}m`;
 }
 function renderBusy() {
-  $("#input").placeholder = S.active?.busy
+  const box = $("#input"), hint = S.suggest && S.settings.suggest_next !== false ? S.suggest : "";
+  box.classList.toggle("suggesting", !!hint);   // a suggested next message, grey in the empty box: Tab takes it
+  box.placeholder = hint ? `${hint}   Tab ↹`
+    : S.active?.busy
     ? "> claude is working — you can queue another message"
     : "> message claude…  (Enter sends · Shift+Enter new line · @ attaches a file · paste images)";
 }
+function setSuggest(text) { if ((S.suggest || "") !== (text || "")) { S.suggest = text || ""; renderBusy(); } }
 
 // ---------- files and media: chips, thumbnails, previews under replies, the viewer, open with… ----------
 const MEDIA_EXT = "png|jpe?g|gif|webp|bmp|svg|mp4|webm|mov|m4v|mp3|wav|ogg|m4a|flac|pdf";
@@ -1225,6 +1346,7 @@ const LOCAL_COMMANDS = [
   ["changes", "", "What this session changed"],
   ["git", "", "Branch and commits"],
   ["stop", "", "Stop Claude"],
+  ["btw", "<question>", "Ask a side question without adding it to the conversation"],
 ];
 function runLocalCommand(text) {
   const [, name, arg = ""] = text.match(/^\/(\S+)\s*(.*)$/) || [];
@@ -1246,6 +1368,7 @@ function runLocalCommand(text) {
     usage: () => showLimits(),
     tasks: () => tab("tasks"), files: () => tab("files"), changes: () => tab("changes"), git: () => tab("git"),
     stop: () => api().stop(),
+    btw: () => btw.ask(arg),
   })[name]();
   return true;
 }
@@ -1259,6 +1382,10 @@ async function send() {
   if (!text && !chips.length && !images.length) return;
   if (text.startsWith("/") && !chips.length && !images.length && runLocalCommand(text)) {
     box.value = ""; autosize(); composer.closeList();
+    return;
+  }
+  if (/^\/btw(\s|$)/.test(text)) {   // a side question never goes to the conversation, even with files attached
+    box.value = ""; autosize(); composer.closeList(); runLocalCommand(text);   // (the chips stay for your next message)
     return;
   }
   sending = true;
@@ -1289,9 +1416,16 @@ document.addEventListener("drop", (e) => {
 function autosize() { const b = $("#input"); b.style.height = "auto"; b.style.height = Math.min(200, b.scrollHeight + 2) + "px"; }
 $("#input").addEventListener("keydown", (e) => {
   if (composer.key(e)) { e.preventDefault(); e.stopPropagation(); return; }
+  if (e.key === "Tab" && !e.shiftKey && !e.ctrlKey && !e.altKey && !e.target.value && $("#input").classList.contains("suggesting")) {
+    e.preventDefault();   // take the suggested next message into the box, to edit or send
+    const b = e.target; b.value = S.suggest; b.selectionStart = b.selectionEnd = b.value.length;
+    setSuggest(""); autosize();
+    return;
+  }
   if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
 });
 $("#input").addEventListener("input", () => { autosize(); composer.autocomplete(); });
+$("#input").addEventListener("input", () => setSuggest(""));   // typing anything hides the suggestion
 $("#sendBtn").onclick = send;
 $("#talkBtn").onclick = () => api().talk();
 document.addEventListener("keydown", (e) => {

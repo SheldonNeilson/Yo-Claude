@@ -65,12 +65,18 @@
     <div id="extraDirs" class="hidden" title="Other folders this session may read and write, besides its own"></div>
     <div id="transcript"></div>
     <div id="planBox" class="hidden" title="Claude's plan for this task (click to fold)"></div>
+    <div id="btw" class="hidden">
+      <div class="btw-head"><b>btw</b><span class="dim">side chat, not added to the conversation</span><span class="spacer"></span><button id="btwClose" title="Close and discard the side chat (Esc)">[✕]</button></div>
+      <div id="btwLog"></div>
+      <input id="btwInput" placeholder="&gt; ask a side question…  (Enter asks · Esc closes)">
+    </div>
     <div id="composer">
       <div id="chips"></div>
       <div id="atlist" class="menu hidden"></div>
       <textarea id="input" rows="2" placeholder="> message claude…  (Enter sends · Shift+Enter new line · @ attaches a file · / commands · paste images)"></textarea>
       <div class="composer-actions">
         <button id="talkBtn" title="Talk instead of typing">[talk]</button>
+        <button id="btwBtn" title="btw: ask a side question about this conversation without adding it to the conversation (or type /btw …)">[btw]</button>
         <div id="inbar" class="minibar" title="What Yo Claude is doing">
           <canvas class="mb-m" width="40" height="26" title="Talk"></canvas>
           <canvas class="mb-meter" width="120" height="30"></canvas>
@@ -98,6 +104,7 @@
 <script src="panel.js"></script>
 <script src="tasks.js"></script>
 <script src="plan.js"></script>
+<script src="btw.js"></script>
 <script src="avatar.js"></script>
 <script src="training.js"></script>
 <script src="menus.js"></script>

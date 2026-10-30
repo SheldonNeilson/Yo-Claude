@@ -47,6 +47,7 @@ PROJECTS_DIR = os.path.join(os.path.expanduser("~"), ".claude", "projects")
 PC_CONTROL_SERVER = "screen-control"
 WEB_TOOLS = ["WebSearch", "WebFetch"]
 FILE_TOOLS = ["Read", "Glob", "Grep", "Edit", "Write"]
+READ_TOOLS = ["Read", "Glob", "Grep"]   # all a /btw side chat gets (plus the web tools): it can't change anything
 CHAT_MODEL = "sonnet"
 MAX_LIVE = 6              # connected sessions kept warm (several folders can be working at once)
 ATTACH_DIR = os.path.join(os.path.expanduser("~"), ".yoclaude", "attachments")   # pasted images, kept viewable
@@ -56,11 +57,21 @@ STALE_DAYS = 30           # ...and suggests anything untouched for this long
 EMPTY_BYTES = 3_000       # session files this small have no real conversation in them
 SMALL_BYTES = 20_000      # "short" conversations: suggested once they're QUIET_DAYS old
 
+PERSONA = (
+    "Yo Claude's voice is a warm, quick-witted young woman: friendly and a little playful. Now and then she teases "
+    "gently or pokes fun at herself, but never at the user's expense, never cheesy or over the top, and never at the "
+    "cost of being correct and clear. When the topic is serious or something went wrong, she's simply kind and direct."
+)
 VOICE_NOTE = (
     " Messages that start with [voice] were spoken and transcribed by speech recognition, so they may contain "
     "mistakes; interpret them sensibly. Your reply to a [voice] message is read aloud: start it with one or two plain "
-    "conversational sentences (no markdown, lists, code or URLs) that give the answer or say what you did."
+    "conversational sentences (no markdown, lists, code or URLs) that give the answer or say what you did. Those "
+    "spoken sentences are in this voice: " + PERSONA
 )
+# Her face's moods (from the reply she's reacting to) and the clip each plays; missing clips are skipped by the window.
+MOODS = {"smile": "idle_tilt", "laugh": "laughing", "tease": "idle_brows", "shy": "idle_tuck", "proud": "think_nod",
+         "curious": "looking", "playful": "hair", "thoughtful": "think_side", "calm": "idle_blink",
+         "sorry": "idle_glance"}
 CHAT_PROMPT = (
     "You are Claude inside Yo Claude, a voice and text assistant on the user's Windows PC. Keep spoken answers short, "
     "one to three sentences, unless the user asks for detail." + VOICE_NOTE
@@ -210,8 +221,9 @@ def is_noise(text):
 
 
 async def spoken_line(title, asked, reply, short_version=False):
-    """One short line to say out loud about a reply, from a separate quick Claude call that isn't saved anywhere
-    (no session, no tools), so none of this prompting shows in the conversation or adds to its context."""
+    """One short line to say out loud about a reply, and the mood to show while saying it: (line, mood). From a
+    separate quick Claude call that isn't saved anywhere (no session, no tools), so none of this prompting shows in the
+    conversation or adds to its context."""
     if short_version:
         task = ("Say the short version of Claude's message below, out loud, in one or two sentences (at most 35 "
                 "words): the gist and anything it asks the user. Plain spoken English: no markdown, paths or code.")
@@ -220,17 +232,142 @@ async def spoken_line(title, asked, reply, short_version=False):
                 "from the screen. Write ONE short spoken sentence (at most 20 words) to tell them: start with the "
                 "session's short name, then the single most useful thing (the outcome, or the question it's asking). "
                 "Not a summary of everything. Plain spoken English: no markdown, paths or code.")
-    prompt = (f"{task}\n\nSession: {title}\n\nWhat the user asked:\n{(asked or '')[:1500]}\n\n"
-              f"Claude's message:\n{(reply or '')[:6000]}\n\nReply with the sentence only.")
+    prompt = (f"{task} Say it in her voice (see below): most lines get a light, natural touch of personality (a wry "
+              f"aside, a little warmth); the facts and the session's name stay exactly as given. Pick the mood her face shows while she says it.\n\n"
+              f"Session: {title}\n\nWhat the user asked:\n{(asked or '')[:1500]}\n\n"
+              f"Claude's message:\n{(reply or '')[:6000]}\n\n"
+              f"Reply with JSON only: {{\"line\": \"...\", \"mood\": one of {sorted(MOODS)}}}")
     opts = sdk.ClaudeAgentOptions(model=VOICE_NOTE_MODEL, tools=[], cwd=CHAT_DIR, setting_sources=["project"],
                                   max_turns=1, thinking={"type": "disabled"},
-                                  system_prompt="You write very short spoken notifications for a voice assistant.",
+                                  system_prompt="You write very short spoken lines for a voice assistant. " + PERSONA,
                                   extra_args={"no-session-persistence": None})
     text = ""
     async for m in sdk.query(prompt=prompt, options=opts):
         if isinstance(m, sdk.AssistantMessage):
             text += "".join(b.text for b in m.content if isinstance(b, sdk.TextBlock))
-    return " ".join(text.split()).strip(' "')
+    try:   # JSON, possibly in a code fence; if not, the whole text is the line
+        data = json.loads(re.search(r"\{.*\}", text, re.S).group(0))
+        line, mood = str(data.get("line", "")), str(data.get("mood", ""))
+    except (AttributeError, ValueError):
+        line, mood = text, ""
+    return " ".join(line.split()).strip(' "'), (mood if mood in MOODS else "")
+
+
+async def suggest_next(title, asked, reply):
+    """A likely next message from the user (grey in the empty message box, Tab takes it), from the same kind of quick
+    separate call as spoken_line: nothing saved, nothing in the chat. "" when nothing sensible comes to mind."""
+    asked = re.sub(r"^\[voice\]\s*", "", (asked or "").strip())
+    reply = (reply or "").strip()
+    reply = reply if len(reply) <= 4000 else "…" + reply[-4000:]   # the end is where questions and options are
+    prompt = ("Below is the last exchange in a conversation between a user and Claude (an AI assistant). Guess the "
+              "user's most likely next message to Claude, written as the user would type it: short (at most 15 words), "
+              "plain text, first person. If Claude asked a question, give a natural answer to it. If Claude offered "
+              "options or a next step, pick the likely one (for example \"Yes, do it\" or \"Go with option 2\"). "
+              "Never make up facts, names, numbers or details the user hasn't given. If no sensible guess fits, "
+              "reply NONE.\n\n"
+              f"Session: {title}\n\nWhat the user asked:\n{asked[:1500]}\n\nClaude's reply:\n{reply}\n\n"
+              "Reply with the user's next message only, or NONE.")
+    opts = sdk.ClaudeAgentOptions(model=VOICE_NOTE_MODEL, tools=[], cwd=CHAT_DIR, setting_sources=["project"],
+                                  max_turns=1, thinking={"type": "disabled"},
+                                  system_prompt="You predict what a user will type next to their AI assistant.",
+                                  extra_args={"no-session-persistence": None})
+    text = ""
+    async for m in sdk.query(prompt=prompt, options=opts):
+        if isinstance(m, sdk.AssistantMessage):
+            text += "".join(b.text for b in m.content if isinstance(b, sdk.TextBlock))
+    line = " ".join((text.strip().splitlines() or [""])[0].split()).strip(' "“”\'`')
+    if not line or line.rstrip(".").upper() == "NONE" or len(line.split()) > 20:
+        return ""
+    return line
+
+
+BTW_PROMPT = (
+    " This is a side question (\"btw\") about the conversation above, asked in a separate side chat. Nothing said "
+    "here is added to the main conversation, which may still be going on. Answer briefly and directly from what has "
+    "been said and done so far. You can only look (read files, search), not change anything; if the answer needs "
+    "changes or commands, say so and leave them for the main conversation. If the last request above has no reply "
+    "yet (or a placeholder one), Claude is most likely still working on it in the main conversation: don't apologise "
+    "for it or offer to do it here."
+)
+BTW_BUSY_NOTE = ("(Note: Claude is still working on the last request in the main conversation; that reply isn't "
+                 "shown here yet. Don't apologise for it or offer to redo it.)\n\n")
+
+
+async def side_chat(sid, cwd, questions, emit, model=None, mark=None, extra_dirs=(), settings=None, live=None):
+    """A /btw side chat about session `sid`: a fork of it (resume + fork_session) that Claude Code never saves
+    (--no-session-persistence), so it sees everything said and done so far, but none of it lands in the session's
+    transcript, its later context or the session list. Read-only: Read/Grep/Glob and the web tools at most.
+    Questions come from the asyncio queue `questions` (None ends it); follow-ups go to the same live connection, so
+    they keep the side thread. emit(state, text) reports: "delta" (answer text streaming in), "tool" (what it's
+    looking at), "done" (the whole answer), "error". `live` (a dict) gets the connection as "client"; once its
+    "closed" is set, no further question is asked."""
+    live = {} if live is None else live
+    tools = (READ_TOOLS if cwd or extra_dirs else []) + WEB_TOOLS
+
+    async def read_only(tool, inp, ctx):   # tools= already leaves out everything else; this is the second lock
+        if tool in tools:
+            return sdk.PermissionResultAllow()
+        return sdk.PermissionResultDeny(message="This is a read-only side chat.", interrupt=False)
+
+    opts = dict(
+        cwd=cwd or CHAT_DIR, resume=sid, fork_session=True, tools=tools, can_use_tool=read_only,
+        permission_mode="default", include_partial_messages=True, strict_mcp_config=True, mcp_servers={},
+        setting_sources=["user", "project", "local"] if cwd else ["project", "local"],
+        system_prompt={"type": "preset", "preset": "claude_code", "append": BTW_PROMPT},
+        thinking={"type": "disabled"}, stderr=lambda line: log.debug("claude (btw): %s", line.rstrip()),
+        extra_args={"no-session-persistence": None},
+    )
+    if settings:
+        opts["settings"] = settings
+    if model:
+        opts["model"] = model
+    if mark:   # the session was rewound: ask about the conversation as you see it
+        opts.update(resume_session_at=mark["at"], resume_drops_turn=mark["drop"])
+    if extra_dirs:
+        opts["add_dirs"] = list(extra_dirs)
+    fork = None
+    try:
+        async with sdk.ClaudeSDKClient(options=sdk.ClaudeAgentOptions(**opts)) as client:
+            live["client"] = client
+            while True:
+                question = await questions.get()
+                if question is None or live.get("closed"):
+                    break
+                live["answering"] = True
+                await client.query(question)
+                parts, error = [], None
+                async for m in client.receive_response():
+                    if isinstance(m, sdk.SystemMessage) and m.subtype == "init":
+                        fork = (m.data or {}).get("session_id") or fork
+                    if isinstance(m, sdk.StreamEvent) and not m.parent_tool_use_id:
+                        fork = m.session_id or fork
+                        ev = m.event or {}
+                        if ev.get("type") == "content_block_delta" and ev.get("delta", {}).get("type") == "text_delta":
+                            emit("delta", ev["delta"]["text"])
+                    elif isinstance(m, sdk.AssistantMessage) and not m.parent_tool_use_id:
+                        for b in m.content:
+                            if isinstance(b, sdk.TextBlock) and b.text.strip():
+                                parts.append(b.text)
+                            elif isinstance(b, sdk.ToolUseBlock) and b.name in tools:   # others just fail
+                                emit("tool", approval_summary(b.name, b.input or {}))
+                    elif isinstance(m, sdk.ResultMessage):
+                        fork = m.session_id or fork
+                        if m.is_error:
+                            error = m.result or "Claude couldn't answer that."
+                live["answering"] = False
+                if error and not parts:
+                    emit("error", str(error))
+                else:
+                    emit("done", "\n\n".join(parts))
+    except asyncio.CancelledError:
+        raise
+    except Exception as e:
+        log.warning("btw side chat for %s failed: %s", sid, e)
+        emit("error", f"The side chat stopped: {e}")
+    finally:
+        # forking copies the session's file checkpoints under the fork's id; the fork is gone, so they can go too
+        if fork and fork != sid and re.fullmatch(r"[0-9a-f-]{36}", fork):
+            shutil.rmtree(os.path.join(os.path.expanduser("~"), ".claude", "file-history", fork), ignore_errors=True)
 
 
 def system_note(text):
@@ -294,7 +431,12 @@ class Session:
         self.lock = None                    # asyncio.Lock, made on the loop
         self.reader = None                  # the task reading everything Claude sends
         self.turn_future = None             # resolved with Claude's reply to the message being sent
+        self.waiting = {}                   # queued message index -> (prompt, its text): what "send now" sends
+        self.injected = []                  # [(item, text)] sent now into the reply in progress, not yet taken up
+        self.joined = {}                    # sent-now message index -> the turn future of the reply it joined
+        self.holding = False                # that reply ended, but Claude still has a sent-now message to answer
         self.unsolicited = False            # Claude is replying by itself (a background task finished)
+        self.turn_count = 0                 # turns started (a suggested next message is dropped if another began)
         self.tasks = {}                     # background task id -> its transcript item
         self.task_outputs = {}              # tool_use_id -> output file (named in the tool result)
         self.pid = None                     # this session's claude.exe
@@ -331,11 +473,12 @@ class Session:
             return
         mark = self.rewind_mark()
         stamps = message_times(self.router.session_file(self.id, self.cwd)[1])
+        self.folded = folded_prompts(self.router.session_file(self.id, self.cwd)[1])
         self.loading_history = True
         try:
             self.load_messages(messages, mark, stamps)
         finally:
-            self.loading_history, self.history_ts = False, None
+            self.loading_history, self.history_ts, self.folded = False, None, {}
         self.restore_spoken()
 
     def load_messages(self, messages, mark, stamps):
@@ -388,6 +531,13 @@ class Session:
                         pics = result_images(b.get("content"))
                         if pics:
                             item["image"] = thumbnail(pics[-1][1])
+            for uid, text in getattr(self, "folded", {}).get(m.uuid, ()):   # sent while Claude worked (send now)
+                self.history_ts = stamps.get(uid)
+                if system_note(text):
+                    self.add({"kind": "note", "text": system_note(text)})
+                    continue
+                voice = text.startswith("[voice] ")
+                self.add({"kind": "user", "text": text[8:] if voice else text, "voice": voice, "attachments": []})
 
     # --- SDK plumbing ---
     def options(self):
@@ -562,21 +712,50 @@ class Session:
         asked = next((i for i in reversed(self.items[:reply["i"]]) if i.get("kind") == "user"), None)
         return reply["i"], reply["text"], (asked or {}).get("text", "")
 
-    async def announce(self):
-        """Claude is done and waiting for you: say so in one short line, and show it as a voice bubble."""
+    async def announce(self, speak=True):
+        """Claude is done and waiting for you: her reaction. Says so in one short line, shown as a voice bubble (not
+        after a voice request: that reply is read out already), and her face shows the mood that fits."""
         st = self.router.settings
-        if not st.get("notify_done", True) or not st.get("voice_replies", True):
+        speak = speak and st.get("notify_done", True) and st.get("voice_replies", True)
+        if not speak and st.get("avatar") is False:
             return
         i, reply, asked = self.last_exchange()
         if i is None or any(x.get("kind") == "spoken" and x.get("for") == i for x in self.items):
             return
         try:
-            line = await spoken_line(self.router.title_of(self.id), asked, reply)
+            line, mood = await spoken_line(self.router.title_of(self.id), asked, reply)
         except Exception as e:
             log.warning("Couldn't write the spoken note for %s: %s", self.id, e)
             return
-        if line:
+        if mood:
+            self.router.emit("mood", session=self.id, mood=mood, clip=MOODS[mood])
+        if line and speak:
             self.add_spoken(i, line, say=True)
+
+    def turn_started(self):
+        """A new turn (yours, or Claude carrying on by itself): any suggested next message is out of date."""
+        self.turn_count += 1
+        self.router.emit("suggest", session=self.id, text="")
+
+    async def suggest(self, n):
+        """After Claude's reply: a likely next message from you, shown grey in the empty message box (Tab takes it).
+        `n` is the turn it's for: dropped if another turn has started since, or the reply ended in an error."""
+        if not self.router.settings.get("suggest_next", True):
+            return
+        last_user = max((x["i"] for x in self.items if x.get("kind") == "user"), default=-1)
+        if any(x.get("kind") == "error" or (x.get("kind") == "result" and x.get("error"))
+               for x in self.items[last_user + 1:]):
+            return
+        i, reply, asked = self.last_exchange()
+        if i is None or i < last_user:   # no reply to your last message
+            return
+        try:
+            text = await suggest_next(self.router.title_of(self.id), asked, reply)
+        except Exception as e:
+            log.warning("Couldn't suggest a next message for %s: %s", self.id, e)
+            return
+        if text and self.turn_count == n:
+            self.router.emit("suggest", session=self.id, text=text)
 
     def add_spoken(self, i, line, say):
         """A voice bubble under Claude's message `i` (kept in Yo Claude's notes, so it's there after a restart)."""
@@ -678,10 +857,14 @@ class Session:
         if not in_turn and not self.unsolicited and isinstance(m, (sdk.AssistantMessage, sdk.StreamEvent)):
             self.unsolicited = True          # Claude picked up again by itself, e.g. a background task finished
             self.busy = True
+            self.turn_started()
             self.router.set_work(self, "thinking")
         result = self.handle(m)
         if isinstance(m, sdk.ResultMessage):
-            if in_turn:
+            if in_turn and self.injected:   # a message sent now came too late to join: Claude answers it next
+                self.holding = True
+                self.stream_item = None
+            elif in_turn:
                 self.turn_future.set_result(result)
             elif self.unsolicited:
                 self.unsolicited = False
@@ -690,8 +873,9 @@ class Session:
 
     def after_turn(self):
         self.stream_item = None
-        if not self.voice_turn and not self.loading_history_flag():
-            asyncio.ensure_future(self.announce())
+        if not self.loading_history_flag():
+            asyncio.ensure_future(self.announce(speak=not self.voice_turn))
+            asyncio.ensure_future(self.suggest(self.turn_count))   # the count now: a queued message may start next
         self.voice_turn = False   # a later reply on its own (a background task finished) gets announced
         if self.think_item is not None:   # a thought that never got its closing block (stopped mid-way)
             self.think_item["streaming"] = False
@@ -766,22 +950,32 @@ class Session:
                    for t in self.running_tasks()]
         self.router.meta.update(self.id, tasks=running, tasks_pid=self.pid, cwd=self.cwd)
 
-    async def turn(self, prompt, voice, item=None):
+    async def turn(self, prompt, voice, item=None, text=None):
         """Send one message and stream the reply into the transcript. Returns Claude's final text. `item` is your
-        message in the transcript: it's marked queued while an earlier reply runs, and skipped if you cancel it."""
+        message in the transcript: it's marked queued while an earlier reply runs, and skipped if you cancel it.
+        `text` is the prompt's text when `prompt` isn't a plain string (with images): "send now" matches it."""
         if self.lock is None:
             self.lock = asyncio.Lock()
         if item is not None and (self.busy or self.lock.locked()):
             item["queued"] = True
+            self.waiting[item["i"]] = (prompt, text if text is not None else prompt)
             self.changed(item)
         async with self.lock:
+            if item is not None:
+                self.waiting.pop(item["i"], None)
             if item is not None and item.get("cancelled"):
                 return None
+            if item is not None and item.get("sent_now"):   # already answered in the reply it joined
+                joined = self.joined.pop(item["i"], None)
+                return joined.result() if joined and joined.done() and not joined.cancelled() \
+                    and not joined.exception() else None
             if item is not None and item.pop("queued", None):
+                item["at"] = len(self.items)   # shown from here on, below what came while it waited
                 self.changed(item)
             self.last_used = time.time()
             self.voice_turn = voice
             self.busy = True
+            self.turn_started()
             self.router.set_work(self, "thinking")
             try:
                 if self.cwd and not self.baseline:   # the changes panel needs "before" captured before any edit
@@ -799,9 +993,39 @@ class Session:
                 return None
             finally:
                 self.turn_future = None
+                self.injected, self.holding = [], False
                 self.busy = False
                 self.voice_turn = False
                 self.after_turn()
+
+    async def send_now(self, item):
+        """Give Claude a queued message now, during the reply in progress, instead of after it. Claude Code takes it
+        up at its next tool call (or answers it straight after, if the reply has no tool calls left); its turn() then
+        just returns that reply. Returns an error message, or None."""
+        if item.get("kind") != "user" or not item.get("queued") or item["i"] not in self.waiting:
+            return "That message has already been sent."
+        if not self.client or not self.turn_future or self.turn_future.done():
+            return None   # between replies: it's about to go anyway
+        prompt, text = self.waiting[item["i"]]
+        if isinstance(text, str) and text.lstrip().startswith("/"):
+            return "Commands can't join a reply in progress: they run when Claude is done."
+        del self.waiting[item["i"]]
+        item.update(queued=False, sent_now=True, at=len(self.items))   # before the await: turn() mustn't send it too
+        self.injected.append((item, " ".join(str(text).split())))
+        self.joined[item["i"]] = self.turn_future
+        self.changed(item)
+        try:
+            await self.client.query(prompt)
+        except Exception as e:   # not delivered: back in the queue
+            log.warning("Couldn't send a queued message now: %s", e)
+            self.injected = [x for x in self.injected if x[0] is not item]
+            self.joined.pop(item["i"], None)
+            self.waiting[item["i"]] = (prompt, text)
+            item.update(queued=True, sent_now=False)
+            item.pop("at", None)
+            self.changed(item)
+            return f"Couldn't send it now: {e}"
+        return None
 
     async def measure_context(self):
         """How full the context window is, by category (Claude Code's /context), for the meter and its breakdown."""
@@ -895,8 +1119,22 @@ class Session:
         if isinstance(m, sdk.UserMessage):
             if getattr(m, "uuid", None) and not m.parent_tool_use_id and not (
                     isinstance(m.content, list) and any(isinstance(b, sdk.ToolResultBlock) for b in m.content)):
+                said = m.content if isinstance(m.content, str) else \
+                    next((b.text for b in m.content if isinstance(b, sdk.TextBlock)), "")
+                said = " ".join(said.split())[:200]
+                sent = next((x for x in self.injected if x[1][:200] == said), None)
+                if sent:   # a message sent now: Claude has taken it up
+                    self.injected.remove(sent)
+                    # its own turn (after the reply it was sent into) is a real message you can rewind to; folded
+                    # into that reply it's only a note on a tool result in the session file, with no id to go back to
+                    own_turn, self.holding = self.holding, False
+                    if own_turn and not sent[0].get("uuid"):
+                        sent[0]["uuid"] = m.uuid
+                        self.changed(sent[0])
+                    return None
                 for item in reversed(self.items):   # your prompt, echoed back with its message id
-                    if item["kind"] == "user":
+                    if item["kind"] == "user" and not item.get("queued") and \
+                            not any(x[0] is item for x in self.injected):
                         if not item.get("uuid"):
                             item["uuid"] = m.uuid
                             self.changed(item)
@@ -978,6 +1216,42 @@ def message_times(path):
     return out
 
 
+def folded_prompts(path):
+    """Messages you sent while Claude was working that it took in mid-reply: Claude Code files them as attachments
+    to the message before (not as messages of their own; several in a row hang off each other, and other attachments
+    can sit in between). That message's id -> [(attachment id, your text)], in the order sent."""
+    parents, found, out = {}, [], {}
+    try:
+        with open(path, encoding="utf-8") as f:
+            for raw in f:
+                if '"attachment"' not in raw:
+                    continue
+                try:
+                    d = json.loads(raw)
+                except ValueError:
+                    continue
+                if d.get("type") != "attachment":
+                    continue
+                parents[d.get("uuid")] = d.get("parentUuid")
+                a = d.get("attachment") or {}
+                if a.get("type") == "queued_command" and a.get("commandMode", "prompt") == "prompt":
+                    text = a.get("prompt")
+                    if isinstance(text, list):   # with images: just its text
+                        text = "\n".join(b.get("text", "") for b in text if isinstance(b, dict) and b.get("type") == "text")
+                    if isinstance(text, str) and text.strip() and not text.lstrip().startswith("<") \
+                            and not is_noise(text):   # not agent messages or Claude Code bookkeeping
+                        found.append((d.get("uuid"), d.get("parentUuid"), text))
+    except OSError:
+        pass
+    for uid, parent, text in found:
+        for _ in range(100):   # up past attachments, to the message they hang off
+            if parent not in parents:
+                break
+            parent = parents[parent]
+        out.setdefault(parent, []).append((uid, text))
+    return out
+
+
 def agent_items(path, limit=400):
     """A subagent's transcript as items to show: its brief ("user"), what it said ("assistant", Markdown), each
     tool it used ("tool": name, a one-line brief, whether it failed) and its report back ("report")."""
@@ -1042,6 +1316,7 @@ class Router:
         self.work = {}                      # session id -> "thinking" | "using_pc" | "awaiting_approval" | "background"
         self.detached = {}                  # session id -> background tasks still running from before a restart
         self.finished_tasks = {}            # task id -> how a task from before a restart ended
+        self.btw = {}                       # session id -> its open /btw side chat {"id", "queue", "future"}
         self.watcher = None
         self.limits = self.meta.data.get("limits")   # last known plan usage limits
         self.on_voice_approval = None       # set by the voice assistant
@@ -1104,6 +1379,8 @@ class Router:
     def shutdown(self):
         """Quitting: close sessions, except ones with background tasks running. Those keep going on their own and
         Yo Claude picks them up again at its next start (restore_detached)."""
+        for sid in list(self.btw):
+            self.btw_close(sid)
         for s in list(self.live.values()):
             if s.running_tasks():
                 s.save_tasks()
@@ -1583,10 +1860,12 @@ class Router:
         if origin == "user":
             self.remember_last(s)
             item = s.add({"kind": "user", "text": text, "voice": voice, "attachments": list(attachments),
-                          "image_paths": [save_image(s.id, mt, data) for mt, data in images]})
+                          "image_paths": [save_image(s.id, mt, data) for mt, data in images],
+                          **({"queued": True} if s.busy or (s.lock and s.lock.locked()) else {})})
         prompt = (f"[voice] {text}" if voice else text) + (f"\n\n{context}" if context else "")
         if origin == "system":
             prompt = f"[Yo Claude] {text}"
+        said = prompt
         if images:
             content = [{"type": "text", "text": prompt}] + [
                 {"type": "image", "source": {"type": "base64", "media_type": mt, "data": data}} for mt, data in images]
@@ -1595,7 +1874,7 @@ class Router:
                 yield {"type": "user", "message": {"role": "user", "content": content}, "parent_tool_use_id": None,
                        "session_id": s.id}
             prompt = message()
-        return self.run(s.turn(prompt, voice, item))
+        return self.run(s.turn(prompt, voice, item, said))
 
     def ui_action(self, s, action, **args):
         """Claude showing the user something in the window (see Session.ui_tools). Returns what happened."""
@@ -1648,7 +1927,9 @@ class Router:
         async def make():
             _, reply, asked = s.last_exchange(upto=i)
             try:
-                line = await spoken_line(self.title_of(sid), asked, reply, short_version=True)
+                line, mood = await spoken_line(self.title_of(sid), asked, reply, short_version=True)
+                if mood:
+                    self.emit("mood", session=sid, mood=mood, clip=MOODS[mood])
             except Exception as e:
                 log.warning("Couldn't write the short version: %s", e)
                 self.emit("notice", text="Couldn't make the short version just now.")
@@ -1660,6 +1941,55 @@ class Router:
 
     def say_again(self, text):
         self.emit("announce", text=text)
+        return {}
+
+    # --- /btw: side questions that never land in the conversation (see side_chat) ---
+    def btw_ask(self, sid, question, bid=None):
+        """Ask a side question about session `sid`. With the `bid` of its open side chat it's a follow-up there;
+        otherwise a new side chat starts (closing any other one for that session). Works while Claude is busy in
+        the session. Answers come as "btw" events. Returns {"btw": id} or {"error": ...}."""
+        s = self.live.get(sid)
+        question = (question or "").strip()
+        if not s or not question:
+            return {"error": "Open a session and type a question."}
+        side = self.btw.get(sid)
+        if side and side["id"] != bid:
+            self.btw_close(sid)
+            side = None
+        if not side:
+            if not os.path.isfile(self.session_file(sid, s.cwd)[1]):
+                return {"error": "Nothing to ask about yet: this conversation hasn't started."}
+            bid = uuid.uuid4().hex[:12]
+            side = {"id": bid, "queue": asyncio.Queue(), "live": {}}
+
+            def emit(state, text=""):
+                self.emit("btw", session=sid, btw=bid, state=state, text=text)
+            model = s.model or (None if s.cwd else CHAT_MODEL)
+            side["future"] = self.run(side_chat(sid, s.cwd, side["queue"], emit, model=model, mark=s.rewind_mark(),
+                                                extra_dirs=s.extra_dirs, settings=json.dumps(self.loadout_settings()),
+                                                live=side["live"]))
+            self.btw[sid] = side
+            # it ended by itself (an error): the next question starts a new one
+            side["future"].add_done_callback(
+                lambda f: self.btw.pop(sid, None) if self.btw.get(sid) is side else None)
+        if s.busy:   # its reply so far isn't in the saved conversation yet, so the fork sees an unanswered message
+            question = BTW_BUSY_NOTE + question
+        self.loop.call_soon_threadsafe(side["queue"].put_nowait, question)
+        return {"btw": side["id"]}
+
+    def btw_close(self, sid, bid=None):
+        """Close (and forget) session `sid`'s side chat, stopping an answer still coming."""
+        side = self.btw.get(sid)
+        if side and (bid is None or side["id"] == bid):
+            self.btw.pop(sid, None)
+            live, client = side["live"], side["live"].get("client")
+            live["closed"] = True
+            # end it the gentle way (stop the answer, then no more questions) so claude.exe exits by itself; a bare
+            # cancel can skip the SDK's terminate step and leave the process running. Cancel only as a fallback.
+            self.loop.call_soon_threadsafe(side["queue"].put_nowait, None)
+            if client and live.get("answering"):
+                self.run(client.interrupt())
+            self.loop.call_soon_threadsafe(self.loop.call_later, 30, side["future"].cancel)
         return {}
 
     def retry(self, sid=None):
@@ -1683,12 +2013,31 @@ class Router:
         s.changed(item)
         return {"text": item.get("text", ""), "attachments": item.get("attachments", [])}
 
+    def send_now(self, sid, i):
+        """Give a queued message to Claude now, during the reply in progress (see Session.send_now)."""
+        s = self.live.get(sid)
+        item = s.items[i] if s and 0 <= i < len(s.items) else None
+        if not item:
+            return {"error": "That message isn't there any more."}
+        try:
+            err = self.run(s.send_now(item)).result(10)
+        except Exception as e:
+            log.warning("send now: %s", e)
+            return {"error": f"Couldn't send it now: {e}"}
+        return {"error": err} if err else {}
+
     def interrupt(self, sid=None):
         s = self.live.get(sid) if sid else self.active
         if not s:
             return
         for future in list(s.approvals.values()):
             self.loop.call_soon_threadsafe(lambda f=future: f.done() or f.set_result((False, False)))
+
+        def let_go():   # a reply held open for a sent-now message Claude hasn't taken up: stop waiting for it
+            if s.holding and s.turn_future and not s.turn_future.done():
+                s.injected, s.holding = [], False
+                s.turn_future.set_result("")
+        self.loop.call_soon_threadsafe(let_go)
         if s.client and s.busy:
             self.run(s.client.interrupt())
 

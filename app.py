@@ -549,6 +549,15 @@ class Api:
         r = self._app.router
         return r.say_short(r.active.id, i) if r.active else {"error": "Open a session first."}
 
+    def btw_ask(self, sid, question, bid=None):
+        """/btw: a side question about session `sid`, answered in a side chat that isn't added to the conversation
+        (a follow-up when `bid` is the open side chat). Answers arrive as "btw" events."""
+        return self._app.router.btw_ask(sid, question, bid)
+
+    def btw_close(self, sid, bid=None):
+        """Close the side chat (discarding it)."""
+        return self._app.router.btw_close(sid, bid)
+
     def say_again(self, text):
         return self._app.router.say_again(text)
 
@@ -560,6 +569,11 @@ class Api:
         """Take back a queued message in the open session (it goes back in the box)."""
         r = self._app.router
         return r.cancel_queued(r.active.id, i) if r.active else {"error": "Open a session first."}
+
+    def send_now(self, i):
+        """Give a queued message to Claude now, during the reply in progress, instead of after it."""
+        r = self._app.router
+        return r.send_now(r.active.id, i) if r.active else {"error": "Open a session first."}
 
     def rewind(self, uuid, mode="both", export=False):
         """Rewind the open session to before one of your messages (see Router.rewind)."""
