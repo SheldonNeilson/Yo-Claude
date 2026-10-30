@@ -763,6 +763,15 @@ class Api:
     def approve(self, sid, aid, allow, always=False):
         self._app.router.approve(sid, aid, bool(allow), bool(always))
 
+    def answer_question(self, sid, aid, answers=None):
+        """Answers to Claude's AskUserQuestion card ({question: label or [labels]}); None skips it."""
+        if isinstance(answers, dict):
+            answers = {str(q): [str(x) for x in a] if isinstance(a, list) else str(a)
+                       for q, a in answers.items() if isinstance(a, (str, list))}
+        else:
+            answers = None
+        self._app.router.answer(sid, aid, answers)
+
     def set_permission_mode(self, sid, mode):
         self._app.router.set_permission_mode(sid, mode)
 

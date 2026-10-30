@@ -674,6 +674,7 @@ function buildItem(it) {
     }
     case "assistant": return el("div", "msg assistant" + (it.streaming ? " cursor" : ""), md(it.text));
     case "approval": return approvalCard(it);
+    case "question": return questionCard(it);
     case "task": return taskCard(it);
     case "cancelled": return el("div", "hidden");   // a queued message you took back
     case "thinking": return thoughtBubble(it);
@@ -715,6 +716,7 @@ function toolArg(name, inp) {
   if (name === "Bash" || name === "PowerShell") return inp.description || inp.command;
   if (p) return rel(p);
   if (inp.x != null && inp.y != null) return `(${inp.x}, ${inp.y})`;
+  if (name === "AskUserQuestion" && Array.isArray(inp.questions)) return inp.questions.map((q) => q?.question).filter(Boolean).join(" · ");
   return inp.pattern || inp.query || inp.url || inp.text || inp.keys || inp.title || inp.prompt || inp.description ||
     Object.values(inp).find((v) => typeof v === "string") || "";
 }
@@ -774,6 +776,91 @@ function approvalCard(it) {
     btn("[deny]", "danger", false, false);
     n.appendChild(b);
   }
+  return n;
+}
+// Claude's AskUserQuestion: one button per option, an "Other…" box, send / skip. What you've picked so far is kept
+// outside the card, so it survives the card being drawn again (switching sessions and back).
+const questionPicks = new Map();   // "session:question card id" -> per question { picked: [labels], other: "" }
+function questionHead(q) {
+  return el("div", "qhead", `${q.header ? `<span class="qchip">${esc(q.header)}</span>` : ""}<span class="qtext">${esc(q.question)}</span>` +
+    (q.multiSelect ? `<span class="qmulti">(pick any)</span>` : ""));
+}
+function questionCard(it) {
+  const qs = it.questions || [];
+  const n = el("div", "question " + it.status);
+  if (it.status !== "pending") {   // answered or skipped: what was chosen, read-only
+    n.appendChild(el("div", "q", it.status === "answered" ? "✓ you answered" : "⊘ skipped: Claude carries on without an answer"));
+    for (const q of qs) {
+      const a = (it.answers || {})[q.question], b = el("div", "qblock");
+      b.appendChild(questionHead(q));
+      b.appendChild(a ? el("div", "qans", esc(Array.isArray(a) ? a.join(", ") : a)) : el("div", "qans none", "no answer"));
+      n.appendChild(b);
+    }
+    return n;
+  }
+  const sid = S.active.id, key = `${sid}:${it.id}`;
+  if (!questionPicks.has(key)) questionPicks.set(key, qs.map(() => ({ picked: [], other: "" })));
+  const st = questionPicks.get(key);
+  const quick = qs.length === 1 && !qs[0].multiSelect;   // a single one-choice question: clicking an option answers it
+  n.appendChild(el("div", "q", "? Claude asks" + (qs.length > 1 ? ` ${qs.length} questions` : "")));
+  const answers = () => {   // {question: label or typed text}, a list for multi-select (the shape Claude Code takes)
+    const r = {};
+    qs.forEach((q, k) => {
+      const o = st[k].other.trim();
+      const a = q.multiSelect ? [...st[k].picked, ...(o ? [o] : [])] : o || st[k].picked[0];
+      if (a && a.length) r[q.question] = a;
+    });
+    return r;
+  };
+  let sent = false;
+  const send = (ans) => {
+    if (sent) return;
+    sent = true;
+    n.querySelectorAll("button, input").forEach((x) => { x.disabled = true; });
+    questionPicks.delete(key);
+    api().answer_question(sid, it.id, ans);
+  };
+  const sendBtn = el("button", "primary", "[send]");
+  const ready = () => { sendBtn.disabled = !Object.keys(answers()).length; };
+  qs.forEach((q, k) => {
+    const s = st[k], b = el("div", "qblock"), opts = el("div", "qopts"), other = el("input");
+    const sync = () => {
+      opts.querySelectorAll(".qopt").forEach((x) => x.classList.toggle("on", s.picked.includes(x.dataset.label)));
+      other.classList.toggle("on", !!s.other.trim());
+      ready();
+    };
+    b.appendChild(questionHead(q));
+    for (const o of q.options || []) {
+      const x = el("button", "qopt" + (q.multiSelect ? "" : " radio"),
+        `<span class="ql">${esc(o.label)}</span>` + (o.description ? `<span class="qd">${esc(o.description)}</span>` : ""));
+      x.dataset.label = o.label;
+      x.onclick = () => {
+        if (q.multiSelect) s.picked = s.picked.includes(o.label) ? s.picked.filter((l) => l !== o.label) : [...s.picked, o.label];
+        else { s.picked = [o.label]; s.other = ""; other.value = ""; }
+        sync();
+        if (quick) send(answers());
+      };
+      opts.appendChild(x);
+    }
+    b.appendChild(opts);
+    const row = el("div", "qother");
+    other.placeholder = q.multiSelect ? "Other… add your own" : "Other… type your own answer";
+    other.value = s.other;
+    other.oninput = () => { s.other = other.value; if (!q.multiSelect && s.other.trim()) s.picked = []; sync(); };
+    other.onkeydown = (e) => { if (e.key === "Enter" && qs.length === 1 && Object.keys(answers()).length) send(answers()); };
+    row.appendChild(other);
+    b.appendChild(row);
+    n.appendChild(b);
+    sync();
+  });
+  const btns = el("div", "btns");
+  sendBtn.dataset.tip = "Send your answers to Claude";
+  sendBtn.onclick = () => send(answers());
+  const skip = el("button", "danger", "[skip]");
+  skip.dataset.tip = "Don't answer: Claude carries on without it";
+  skip.onclick = () => send(null);
+  btns.append(sendBtn, skip);
+  n.appendChild(btns);
   return n;
 }
 function taskCard(it) {   // a background task: running timer, stop, its output

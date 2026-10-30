@@ -474,6 +474,8 @@ class Session:
         if tool.startswith(f"mcp__{PC_CONTROL_SERVER}__"):
             self.router.set_work(self, "using_pc")
             return sdk.PermissionResultAllow()   # turned on deliberately from the tray
+        if tool == "AskUserQuestion":            # never auto-allowed: it needs the user's answers
+            return await self.ask_user(inp)
         if tool in self.always or (self.cwd is None and tool in WEB_TOOLS):
             return sdk.PermissionResultAllow()
         aid = uuid.uuid4().hex[:12]
@@ -497,6 +499,41 @@ class Session:
         if always:
             self.always.add(tool)
         return sdk.PermissionResultAllow()
+
+    async def ask_user(self, inp):
+        """Claude's AskUserQuestion: show the questions as a card and hand the answers back to the tool.
+        Claude Code takes them as updated input: answers = {question text: chosen label (or typed text)}, a list of
+        labels for a multiSelect question. Skipping (or stopping) denies the tool so Claude carries on without."""
+        questions = [q for q in inp.get("questions") or [] if isinstance(q, dict) and q.get("question")]
+        aid = uuid.uuid4().hex[:12]
+        future = asyncio.get_running_loop().create_future()
+        self.approvals[aid] = future             # with the approvals, so stopping the turn also skips it
+        item = self.add({"kind": "question", "id": aid, "questions": questions, "status": "pending"})
+        self.router.set_work(self, "awaiting_approval")
+        try:
+            got = await future                   # dict of answers, or anything else (None, an approval tuple) = skip
+        finally:
+            self.approvals.pop(aid, None)
+        answers = {}
+        if isinstance(got, dict):
+            for q in questions:
+                a = got.get(q["question"])
+                if q.get("multiSelect") and isinstance(a, list):
+                    a = [str(x).strip() for x in a if str(x).strip()]
+                elif isinstance(a, list):
+                    a = ", ".join(str(x).strip() for x in a if str(x).strip())
+                elif isinstance(a, str):
+                    a = a.strip()
+                if a:
+                    answers[q["question"]] = a
+        item["status"] = "answered" if answers else "skipped"
+        item["answers"] = answers
+        self.changed(item)
+        self.router.set_work(self, "thinking")
+        if not answers:
+            return sdk.PermissionResultDeny(message="The user didn't answer the question; carry on without it.",
+                                            interrupt=False)
+        return sdk.PermissionResultAllow(updated_input={**inp, "answers": answers})
 
     async def connect(self):
         if self.client is None:
@@ -1660,6 +1697,13 @@ class Router:
         future = s and s.approvals.get(aid)
         if future:
             self.loop.call_soon_threadsafe(lambda: future.done() or future.set_result((allow, always)))
+
+    def answer(self, sid, aid, answers):
+        """The user's answers to Claude's AskUserQuestion ({question: label(s)}), or None to skip it."""
+        s = self.live.get(sid)
+        future = s and s.approvals.get(aid)
+        if future:
+            self.loop.call_soon_threadsafe(lambda: future.done() or future.set_result(answers))
 
     def set_permission_mode(self, sid, mode):
         if mode not in ("auto", "default", "acceptEdits", "plan"):
