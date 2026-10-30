@@ -306,8 +306,8 @@ code.pathlink:hover { color: var(--orange2); background: var(--bg3); }
 /* the tail points up from the top corner, towards the speaker's side; the time sits next to it */
 .msg.user::after, .msg.assistant::after { position: absolute; top: -3em; height: 1.5em; width: 2ch; white-space: pre;
   line-height: 1.5em; pointer-events: none; }
-.msg.assistant::after { content: "\\|"; left: 2ch; color: #7a6a5c; }
-.msg.user::after { content: "|/"; right: 2ch; color: var(--orange); text-align: right; }
+.msg.assistant::after { content: "|\\"; left: 2ch; color: #7a6a5c; }   /* the two strokes meet at the top: a point */
+.msg.user::after { content: "/|"; right: 2ch; color: var(--orange); text-align: right; }
 .msg.assistant > :last-child { margin-bottom: 0; }
 .msg .copybtn { top: -1.5em; right: 1ch; }
 .msg.user .copybtn { right: auto; left: 1ch; }
