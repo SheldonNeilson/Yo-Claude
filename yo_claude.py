@@ -37,6 +37,7 @@ WHISPER_MODEL = "small.en"   # standard speech recognition
 # the bigger model is for mumbled speech, accents and noisy rooms. (distil-large-v3 was slower still, no better.)
 ACCURATE_MODEL = "medium.en"
 VOICE_TURN_TIMEOUT_S = 1800  # coding tasks can take a while
+TIDY_TIMEOUT_S = 8            # fixing what was heard (a Haiku call, usually 3-5 s): after this it's sent as heard
 CONVERSATION_WINDOW_S = 300  # a voice conversation older than this starts a new session (unless picked in the app)
 FOLLOWUP_LISTEN_S = 6        # after answering, listen this long for a follow-up without the wake word
 APPROVAL_LISTEN_S = 8
@@ -706,8 +707,15 @@ class Assistant:
         s = self.router.active
         if s is not None and not s.picked and time.time() - s.last_used > CONVERSATION_WINDOW_S:
             self.router.new_session()   # an old voice conversation: start afresh
+        sid = self.router.active.id if self.router.active else None
+        heard = self.tidy(heard, sid)
+        if generation != self.generation:   # "stop" while it was being fixed
+            self.emit("dictation", session=sid, stage="sent", text="")
+            return None
         try:
-            reply = self.router.send(heard, voice=True).result(VOICE_TURN_TIMEOUT_S)
+            reply = self.router.send(heard, voice=True, sid=sid)
+            self.emit("dictation", session=sid, stage="sent", text=heard)   # it's in the chat now: out of the box
+            reply = reply.result(VOICE_TURN_TIMEOUT_S)
         except Exception as e:
             log.warning("Voice turn failed: %s", e)
             reply = None
@@ -718,6 +726,23 @@ class Assistant:
         spoken = spoken_part(reply)
         pcm = self.speaker.synth(spoken) if self.settings["voice_replies"] else None
         return spoken, "followup", pcm
+
+    def tidy(self, heard, sid):
+        """What you said goes into the message box, gets its spelling, grammar and misheard words fixed by Haiku
+        (sessions.tidy_text), and is then sent. The fix gets TIDY_TIMEOUT_S at most; after that, or if it fails, what
+        was heard goes as it is."""
+        if not self.settings.get("fix_text", True):
+            return heard
+        self.emit("dictation", session=sid, stage="heard", text=heard)
+        try:
+            fixed = self.router.tidy(heard, sid).result(TIDY_TIMEOUT_S) or heard
+        except Exception as e:
+            log.info("Couldn't fix what was heard (%s): sending it as it is", e or type(e).__name__)
+            fixed = heard
+        if fixed != heard:
+            self.emit("state", state=THINKING, text=f"“{fixed}”", hold=0.0)
+        self.emit("dictation", session=sid, stage="fixed", text=fixed)
+        return fixed
 
     def run_command(self, command):
         if command[0] == "new":

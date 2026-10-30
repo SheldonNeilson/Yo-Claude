@@ -162,6 +162,9 @@ pre:hover .codecopy { opacity: 1; }
 #composer { border-top: 2px solid var(--line2); padding: 8px 12px; background: var(--bg2); }
 #input { width: 100%; resize: none; min-height: 44px; max-height: 200px; background: var(--bg); }
 #input.suggesting::placeholder { color: var(--dim); font-style: italic; opacity: 1; }   /* suggested next message */
+#input.dictating { color: var(--dim); font-style: italic; }   /* what you said, being fixed before it's sent */
+#input { transition: box-shadow .3s; }
+#input.tidied { box-shadow: 0 0 0 1px var(--amber); }   /* just fixed (Ctrl+Z undoes it) */
 .composer-actions { display: flex; gap: 8px; margin-top: 6px; align-items: center; }
 
 /* menus & modals */

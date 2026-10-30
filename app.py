@@ -544,6 +544,16 @@ class Api:
                 "active": r.describe(active) if active else None, "items": active.items if active else [],
                 "display": {"state": a.display, "voice": a.voice_state, "work": a.work_state, "text": a.voice_text}}
 
+    def fix_text(self, text):
+        """The message box, as you pause typing: {"text": your message with spelling and grammar fixed} (the same
+        text when there's nothing to fix, the setting's off, or the fix fails)."""
+        r = self._app.router
+        try:
+            return {"text": r.tidy(text, r.active.id if r.active else None).result(20)}
+        except Exception as e:
+            log.info("Couldn't fix the message: %s", e or type(e).__name__)
+            return {"text": text}
+
     def say_short(self, i):
         """The 🔊 button on Claude's messages: the short spoken version of message `i` in the open session."""
         r = self._app.router

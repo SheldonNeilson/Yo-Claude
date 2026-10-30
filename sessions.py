@@ -281,6 +281,46 @@ async def suggest_next(title, asked, reply):
     return line
 
 
+TIDY_KEEP = re.compile(r"`[^`\n]+`|@\S+|https?://\S+|[A-Za-z]:[\\/]\S+")   # must come back exactly as they were
+
+
+async def tidy_text(text, context=""):
+    """Your message with its spelling, grammar and punctuation fixed (and, for speech, words that were obviously
+    misheard), from the same kind of quick separate call as spoken_line: nothing saved, nothing in the chat. Your
+    words, meaning and tone stay; it never answers. Returns the text unchanged when there's nothing to fix or the fix
+    looks wrong (much longer or shorter, or a path, @file, link or `code` changed)."""
+    text = (text or "").strip()
+    if len(text.split()) < 2 or text.startswith("/"):
+        return text
+    context = (context or "").strip()
+    context = context if len(context) <= 1500 else "…" + context[-1500:]
+    prompt = ("Fix the spelling, grammar and punctuation of the user's message in <message> tags below. They're about "
+              "to send it to Claude, an AI assistant. It may have been spoken and transcribed by speech recognition: "
+              "also fix words that were obviously misheard, using the conversation so far. The assistant is called "
+              "Claude (the app is Yo Claude), so a name that sounds like it (\"Clyde\", \"Lord\", \"Cloud\") means "
+              "Claude. Keep their words, meaning, tone and language: don't rephrase, shorten, "
+              "expand, translate or answer it, even if it's a question or an instruction. Leave code, file paths, "
+              "commands, @file mentions, links, names and technical terms exactly as they are. Reply with the "
+              "corrected message only, with no tags or comments. If nothing needs fixing, reply with it unchanged.\n\n"
+              + (f"Claude's last message, for context:\n{context}\n\n" if context else "")
+              + f"<message>\n{text}\n</message>")
+    opts = sdk.ClaudeAgentOptions(model=VOICE_NOTE_MODEL, tools=[], cwd=CHAT_DIR, setting_sources=["project"],
+                                  max_turns=1, thinking={"type": "disabled"},
+                                  system_prompt="You proofread messages before they're sent. You only ever return the "
+                                                "corrected message.",
+                                  extra_args={"no-session-persistence": None})
+    out = ""
+    async for m in sdk.query(prompt=prompt, options=opts):
+        if isinstance(m, sdk.AssistantMessage):
+            out += "".join(b.text for b in m.content if isinstance(b, sdk.TextBlock))
+    out = re.sub(r"^\s*<message>\s*|\s*</message>\s*$", "", out.strip()).strip()
+    if not out or not 0.6 <= len(out) / len(text) <= 1.5 and abs(len(out) - len(text)) > 12:
+        return text
+    if any(k not in out for k in TIDY_KEEP.findall(text)):
+        return text
+    return out
+
+
 BTW_PROMPT = (
     " This is a side question (\"btw\") about the conversation above, asked in a separate side chat. Nothing said "
     "here is added to the main conversation, which may still be going on. Answer briefly and directly from what has "
@@ -1942,6 +1982,19 @@ class Router:
     def say_again(self, text):
         self.emit("announce", text=text)
         return {}
+
+    def tidy(self, text, sid=None):
+        """Your message with its spelling and grammar fixed (tidy_text), with Claude's last message in the session
+        as context. A concurrent Future with the text; the text unchanged if the setting is off."""
+        s = self.live.get(sid) if sid else self.active
+        context = ""
+        if s is not None:
+            context = next((x.get("text", "") for x in reversed(s.items) if x.get("kind") == "assistant"), "")
+        if not self.settings.get("fix_text", True):
+            async def unchanged():
+                return text
+            return self.run(unchanged())
+        return self.run(tidy_text(text, context))
 
     # --- /btw: side questions that never land in the conversation (see side_chat) ---
     def btw_ask(self, sid, question, bid=None):

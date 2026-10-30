@@ -94,6 +94,7 @@ const MENUS = {
     ["Read replies aloud", () => toggleSetting("voice_replies"), { checked: setting("voice_replies") }],
     ["Say when a session is done", () => toggleSetting("notify_done", true), { checked: setting("notify_done", true) }],
     ["Suggest my next message", () => toggleSetting("suggest_next"), { checked: setting("suggest_next") }],
+    ["Fix my spelling and grammar (typed and spoken)", () => toggleSetting("fix_text"), { checked: setting("fix_text") }],
     ["More accurate speech recognition (slower)", () => toggleSetting("accurate_speech", false), { checked: setting("accurate_speech", false) }],
     ["PC control (screen, keyboard, mouse)", () => toggleSetting("pc_control", false), { checked: setting("pc_control", false) }],
     "-",

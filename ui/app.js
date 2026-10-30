@@ -108,6 +108,7 @@ function handle(e) {
     case "display": S.display = e; showDisplay(); break;
     case "levels": inbar.event(e); avatar.levels(e.levels); break;
     case "speech": avatar.speech(e); break;
+    case "dictation": dictation(e); break;
     case "live": if (S.active && e.session === S.active.id) transcript.live(e.image); break;
     case "settings": S.settings = e.settings; renderToggles(); avatar.apply(); renderBusy(); break;
     case "folder": S.folder = e.folder; renderHead(); break;
@@ -1018,6 +1019,45 @@ function renderBusy() {
 }
 function setSuggest(text) { if ((S.suggest || "") !== (text || "")) { S.suggest = text || ""; renderBusy(); } }
 
+// ---------- your message, tidied by Haiku (sessions.tidy_text): spelling and grammar fixed as you pause typing (Ctrl+Z
+// undoes it), and what you say shows in the box, gets fixed, then is sent (yo_claude.py VoiceEngine.tidy) ----------
+const tidy = { busy: false, timer: 0, seen: new Set(), dictating: false };
+function dictation(e) {
+  const box = $("#input");
+  if (e.session && S.active && e.session !== S.active.id) return;
+  if (e.stage === "sent") {
+    if (tidy.dictating) { tidy.dictating = false; box.value = ""; box.classList.remove("dictating"); autosize(); }
+    return;
+  }
+  if (!tidy.dictating && box.value.trim()) return;   // you're typing something else: leave it be
+  tidy.dictating = true;
+  box.value = e.text || ""; tidy.seen.add(box.value);
+  box.classList.toggle("dictating", e.stage === "heard");   // grey while it's being fixed
+  autosize();
+}
+function tidySoon() {
+  clearTimeout(tidy.timer);
+  if (S.settings.fix_text !== false) tidy.timer = setTimeout(tidyNow, 1600);
+}
+async function tidyNow() {
+  const box = $("#input"), text = box.value, t = text.trim();
+  if (tidy.busy || tidy.dictating || tidy.seen.has(text) || t.split(/\s+/).length < 3 || t.startsWith("/")
+      || !$("#atlist").classList.contains("hidden")) return;
+  tidy.busy = true;
+  let fixed = text;
+  try { fixed = (await api().fix_text(text))?.text || text; } catch (_) { /* left as typed */ } finally { tidy.busy = false; }
+  if (box.value !== text) return tidySoon();   // you kept typing: again at your next pause
+  tidy.seen.add(text); tidy.seen.add(fixed);   // (so an undo isn't fixed all over again)
+  if (fixed === text || tidy.dictating || !$("#atlist").classList.contains("hidden")) return;
+  const fromEnd = text.length - box.selectionEnd, focused = document.activeElement === box;
+  box.focus(); box.select();
+  document.execCommand("insertText", false, fixed);   // one edit: Ctrl+Z puts back what you typed
+  const at = Math.max(0, fixed.length - fromEnd); box.setSelectionRange(at, at);
+  if (!focused) box.blur();
+  box.classList.add("tidied"); setTimeout(() => box.classList.remove("tidied"), 900);
+  autosize();
+}
+
 // ---------- files and media: chips, thumbnails, previews under replies, the viewer, open with… ----------
 const MEDIA_EXT = "png|jpe?g|gif|webp|bmp|svg|mp4|webm|mov|m4v|mp3|wav|ogg|m4a|flac|pdf";
 // Paths in plain text: folders may contain spaces ("D:\Oddly Based\..."), the file name may not.
@@ -1377,7 +1417,8 @@ let sending = false;
 async function send() {
   // Take the message and clear the box straight away: a second Enter while @mentions are looked up used to send
   // the text again (without the image, which the first send had already taken).
-  if (sending) return;
+  if (sending || tidy.dictating) return;   // (what you said sends itself, once it's fixed)
+  clearTimeout(tidy.timer);
   const box = $("#input");
   const text = box.value.trim(), chips = composer.files.slice(), images = composer.images.slice();
   if (!text && !chips.length && !images.length) return;
@@ -1427,6 +1468,7 @@ $("#input").addEventListener("keydown", (e) => {
 });
 $("#input").addEventListener("input", () => { autosize(); composer.autocomplete(); });
 $("#input").addEventListener("input", () => setSuggest(""));   // typing anything hides the suggestion
+$("#input").addEventListener("input", tidySoon);
 $("#sendBtn").onclick = send;
 $("#talkBtn").onclick = () => api().talk();
 document.addEventListener("keydown", (e) => {
