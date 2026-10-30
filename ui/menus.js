@@ -44,7 +44,7 @@ const MENUS = {
     "-",
     ["Compact mode (just the bar)", () => api().compact()],
     ["Close to tray", () => api().compact()],
-    ["Quit Yo Claude", () => api().request_quit()],
+    ["Exit", () => api().request_quit()],
   ],
   edit: () => [
     ["Copy", () => copyText(getSelection().toString()), { kbd: "Ctrl+C", disabled: !getSelection().toString() }],
