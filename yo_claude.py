@@ -31,7 +31,11 @@ DATA_DIR = os.path.join(os.path.expanduser("~"), ".yoclaude")
 
 # --- settings -----------------------------------------------------------------
 WAKE_PHRASE = "yo claude"
-EXTRA_WAKE = ["yo claudia"]   # with her face on, she's Yo Claudia: either name wakes her
+WAKE_PHRASES = {"male": "yo claude", "female": "yo claudia"}   # the character's name wakes it (Options > Assistant)
+
+
+def wake_phrase(settings):
+    return WAKE_PHRASES.get(settings.get("character") or "male", WAKE_PHRASE)
 VOSK_MODEL = os.path.join(DATA_DIR, "models", "vosk-model-small-en-us-0.15")
 WHISPER_MODEL = "small.en"   # standard speech recognition
 # "More accurate speech recognition": bigger and ~2x slower (1.5 GB). On clear speech small.en did as well in tests;
@@ -143,7 +147,7 @@ class VoskWake:
     that you stopped talking, the VAD's pause forces the result.
     """
 
-    DECOYS = ["yo", "you", "your", "close", "closed", "cloud", "claudia", "clod", "clause", "claws", "loud", "go",
+    DECOYS = ["yo", "you", "your", "close", "closed", "cloud", "claudia", "claude", "clod", "clause", "claws", "loud", "go",
               "load", "though", "hello", "what", "the", "a", "it", "is", "to", "glad", "called"]
 
     def __init__(self, phrase=WAKE_PHRASE, alternates=()):
@@ -159,10 +163,17 @@ class VoskWake:
     def set_alternates(self, alternates):
         """Extra phrases that count as the wake word for this person (from training: how they say it)."""
         import vosk
-        self.phrases = [self.phrase] + [a for a in [*EXTRA_WAKE, *alternates] if a and a != self.phrase]
+        self.alternates = list(alternates)
+        self.phrases = [self.phrase] + [a for a in alternates if a and a != self.phrase]
         words = {w for p in self.phrases for w in p.split()}
         grammar = self.phrases + [d for d in self.DECOYS if d not in words or d in self.phrase.split()] + ["[unk]"]
         self.rec = vosk.KaldiRecognizer(self.model, SAMPLE_RATE, json.dumps(grammar))
+
+    def set_phrase(self, phrase):
+        """Another character picked: their name is the wake word now (the other name is a decoy)."""
+        if phrase != self.phrase:
+            self.phrase = phrase
+            self.set_alternates(self.alternates)
 
     def feed(self, frame, speech_prob):
         self.last_text = None
@@ -415,7 +426,7 @@ class Assistant:
         self.emit("state", state="starting", text="")
         self.mic = Mic()
         self.vad = Vad()
-        self.wake = VoskWake(alternates=settings.get("wake_alternates", []))
+        self.wake = VoskWake(phrase=wake_phrase(settings), alternates=settings.get("wake_alternates", []))
         self.training = False        # training mode: report every judgement, never reply
         self.train_mute_until = 0.0
         self.peak = 0.0              # loudest frame of the speech being judged
@@ -597,8 +608,11 @@ class Assistant:
                 self.stop()
             elif cmd == "talk" and self.state in (IDLE, PAUSED):   # while active, only "stop" stops it
                 self.start_conversation()
-            elif cmd == "settings" and self.state in (IDLE, PAUSED):
-                self.go_idle()
+            elif cmd == "settings":
+                if getattr(self, "wake", None):   # (the character may have changed: its name wakes it)
+                    self.wake.set_phrase(wake_phrase(self.settings))
+                if self.state in (IDLE, PAUSED):
+                    self.go_idle()
             elif isinstance(cmd, tuple) and cmd[0] == "train":
                 self.training = cmd[1]
                 if self.training:

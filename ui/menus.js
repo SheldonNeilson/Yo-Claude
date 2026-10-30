@@ -92,7 +92,7 @@ const MENUS = {
   voice: () => [
     ["Talk now", () => api().talk(), { kbd: "Ctrl+Space" }],
     "-",
-    ["Listen for “Yo Claude”", () => toggleSetting("listening"), { checked: setting("listening") }],
+    [`Listen for “${appName()}”`, () => toggleSetting("listening"), { checked: setting("listening") }],
     ["Read replies aloud", () => toggleSetting("voice_replies"), { checked: setting("voice_replies") }],
     ["Say when a session is done", () => toggleSetting("notify_done", true), { checked: setting("notify_done", true) }],
     ["More accurate speech recognition (slower)", () => toggleSetting("accurate_speech", false), { checked: setting("accurate_speech", false) }],

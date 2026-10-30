@@ -58,29 +58,54 @@ STALE_DAYS = 30           # ...and suggests anything untouched for this long
 EMPTY_BYTES = 3_000       # session files this small have no real conversation in them
 SMALL_BYTES = 20_000      # "short" conversations: suggested once they're QUIET_DAYS old
 
-PERSONA = (
-    "Yo Claude's voice is a warm, quick-witted young woman: friendly and a little playful. Now and then she teases "
-    "gently or pokes fun at herself, but never at the user's expense, never cheesy or over the top, and never at the "
-    "cost of being correct and clear. When the topic is serious or something went wrong, she's simply kind and direct."
-)
-VOICE_NOTE = (
-    " Messages that start with [voice] were spoken and transcribed by speech recognition, so they may contain "
-    "mistakes; interpret them sensibly. Your reply to a [voice] message is read aloud: start it with one or two plain "
-    "conversational sentences (no markdown, lists, code or URLs) that give the answer or say what you did. Those "
-    "spoken sentences are in this voice: " + PERSONA
-)
+# The character picked in Options > Assistant: Claude (male, the default) or Claudia (female). Its name is the app's
+# name everywhere, and its voice and personality are the spoken lines'.
+PERSONAS = {
+    "female": "Yo Claudia's voice is a warm, quick-witted young woman: friendly and a little playful. Now and then she "
+              "teases gently or pokes fun at herself, but never at the user's expense, never cheesy or over the top, and "
+              "never at the cost of being correct and clear. When the topic is serious or something went wrong, she's "
+              "simply kind and direct.",
+    "male": "Yo Claude's voice is a warm, steady, quick-witted man with a deep voice: friendly, calm, with a dry sense of "
+            "humour. Now and then he teases gently or pokes fun at himself, but never at the user's expense, never "
+            "cheesy or over the top, and never at the cost of being correct and clear. When the topic is serious or "
+            "something went wrong, he's simply kind and direct.",
+}
+
+
+def character(settings):
+    return "female" if (settings or {}).get("character") == "female" else "male"
+
+
+def app_name(settings):
+    return "Yo Claudia" if character(settings) == "female" else "Yo Claude"
+
+
+def persona(settings):
+    return PERSONAS[character(settings)]
+
+
+def voice_note(settings):
+    return (" Messages that start with [voice] were spoken and transcribed by speech recognition, so they may contain "
+            "mistakes; interpret them sensibly. Your reply to a [voice] message is read aloud: start it with one or two "
+            "plain conversational sentences (no markdown, lists, code or URLs) that give the answer or say what you did. "
+            "Those spoken sentences are in this voice: " + persona(settings))
+
+
 # Her face's moods (from the reply she's reacting to) and the clip each plays; missing clips are skipped by the window.
 MOODS = {"smile": "idle_tilt", "laugh": "laughing", "tease": "idle_brows", "shy": "idle_tuck", "proud": "think_nod",
          "curious": "looking", "playful": "hair", "thoughtful": "think_side", "calm": "idle_blink",
          "sorry": "idle_glance"}
-CHAT_PROMPT = (
-    "You are Claude inside Yo Claude, a voice and text assistant on the user's Windows PC. Keep spoken answers short, "
-    "one to three sentences, unless the user asks for detail." + VOICE_NOTE
-)
-CODE_PROMPT = (
-    "You are running inside Yo Claude, a voice-first coding assistant app on the user's Windows PC. For [voice] "
-    "messages, put code, lists and detail after the spoken opening; the app shows them on screen." + VOICE_NOTE
-)
+def chat_prompt(settings):
+    return (f"You are Claude inside {app_name(settings)}, a voice and text assistant on the user's Windows PC. Keep "
+            "spoken answers short, one to three sentences, unless the user asks for detail." + voice_note(settings))
+
+
+def code_prompt(settings):
+    return (f"You are running inside {app_name(settings)}, a voice-first coding assistant app on the user's Windows PC. "
+            "For [voice] messages, put code, lists and detail after the spoken opening; the app shows them on screen."
+            + voice_note(settings))
+
+
 UI_SERVER = "yo-claude"   # Claude's own tools for showing things in Yo Claude's window
 UI_PROMPT = (
     " The user is looking at Yo Claude's window. When they ask to see, show or open something (a file, a folder, a "
@@ -227,7 +252,7 @@ def is_noise(text):
     return t.startswith(("<command-", "<local-command", "Caveat:", "<system-reminder", "[Request interrupted"))
 
 
-async def spoken_line(title, asked, reply, short_version=False):
+async def spoken_line(title, asked, reply, short_version=False, settings=None):
     """One short line to say out loud about a reply, and the mood to show while saying it: (line, mood). From a
     separate quick Claude call that isn't saved anywhere (no session, no tools), so none of this prompting shows in the
     conversation or adds to its context."""
@@ -246,7 +271,7 @@ async def spoken_line(title, asked, reply, short_version=False):
               f"Reply with JSON only: {{\"line\": \"...\", \"mood\": one of {sorted(MOODS)}}}")
     opts = sdk.ClaudeAgentOptions(model=VOICE_NOTE_MODEL, tools=[], cwd=CHAT_DIR, setting_sources=["project"],
                                   max_turns=1, thinking={"type": "disabled"},
-                                  system_prompt="You write very short spoken lines for a voice assistant. " + PERSONA,
+                                  system_prompt="You write very short spoken lines for a voice assistant. " + persona(settings),
                                   extra_args={"no-session-persistence": None})
     text = ""
     async for m in sdk.query(prompt=prompt, options=opts):
@@ -652,7 +677,7 @@ class Session:
     # --- SDK plumbing ---
     def options(self):
         r = self.router
-        system = CODE_PROMPT if self.cwd else CHAT_PROMPT
+        system = code_prompt(r.settings) if self.cwd else chat_prompt(r.settings)
         servers = r.mcp_servers(self.cwd)
         if PC_CONTROL_SERVER in servers:
             system += PC_CONTROL_PROMPT
@@ -890,7 +915,7 @@ class Session:
         if i is None or any(x.get("kind") == "spoken" and x.get("for") == i for x in self.items):
             return
         try:
-            line, mood = await spoken_line(self.router.title_of(self.id), asked, reply)
+            line, mood = await spoken_line(self.router.title_of(self.id), asked, reply, settings=self.router.settings)
         except Exception as e:
             log.warning("Couldn't write the spoken note for %s: %s", self.id, e)
             return
@@ -2186,7 +2211,7 @@ class Router:
         async def make():
             _, reply, asked = s.last_exchange(upto=i)
             try:
-                line, mood = await spoken_line(self.title_of(sid), asked, reply, short_version=True)
+                line, mood = await spoken_line(self.title_of(sid), asked, reply, short_version=True, settings=self.settings)
                 if mood:
                     self.emit("mood", session=sid, mood=mood, clip=MOODS[mood])
             except Exception as e:

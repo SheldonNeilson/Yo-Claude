@@ -29,7 +29,7 @@ import openwith
 import taskbar
 import workspace
 import yo_claude
-from sessions import Router, same_folder
+from sessions import Router, app_name, same_folder
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 UI = os.path.join(HERE, "ui")
@@ -224,7 +224,7 @@ class App:
         self.bus.put(("update", self.update_info))
         if not behind or behind == "0":
             if not quiet:
-                self.notify(f"Yo Claude {VERSION} is up to date.")
+                self.notify(f"{self.name()} {VERSION} is up to date.")
             return
         if quiet:
             if self.update_info.get("announced") != remote:
@@ -236,7 +236,7 @@ class App:
             self.notify("An update is ready, but Claude is in the middle of a reply. "
                         "Check for updates again when it's done.")
             return
-        self.notify("Updating Yo Claude… it restarts in a moment. Background tasks keep running.")
+        self.notify(f"Updating {self.name()}… it restarts in a moment. Background tasks keep running.")
         subprocess.Popen(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
                           os.path.join(HERE, "install.ps1"), "-Update"], cwd=HERE,
                          creationflags=subprocess.CREATE_NEW_CONSOLE)
@@ -245,7 +245,7 @@ class App:
     def notify(self, message):
         log.info("Notice: %s", message)
         try:
-            self.tray.notify(message, "Yo Claude")
+            self.tray.notify(message, self.name())
         except Exception:
             pass
 
@@ -440,11 +440,11 @@ class App:
             return lambda item: bool(s.get(key, True))
 
         menu = pystray.Menu(
-            pystray.MenuItem("Open Yo Claude", lambda: self.show_main(), default=True),
+            pystray.MenuItem(lambda item: f"Open {self.name()}", lambda: self.show_main(), default=True),
             pystray.MenuItem("Talk now", lambda: self.commands.put("talk")),
             pystray.MenuItem("Stop", lambda: self.api.stop()),
             pystray.Menu.SEPARATOR,
-            pystray.MenuItem("Listen for “Yo Claude”", toggle("listening"), checked=checked("listening")),
+            pystray.MenuItem(lambda item: f"Listen for “{self.name()}”", toggle("listening"), checked=checked("listening")),
             pystray.MenuItem("Voice replies", toggle("voice_replies"), checked=checked("voice_replies")),
             pystray.MenuItem("More accurate speech recognition (slower)",
                              toggle("accurate_speech", lambda on: self.commands.put(("accurate_speech", on))),
@@ -464,7 +464,7 @@ class App:
             pystray.MenuItem("Open log", lambda: os.startfile(LOG_PATH)),
             pystray.MenuItem("Quit", lambda: self.request_quit()),
         )
-        icon = pystray.Icon("YoClaude", icons.tray_frame("starting", 0), "Yo Claude – starting", menu)
+        icon = pystray.Icon("YoClaude", icons.tray_frame("starting", 0), f"{self.name()} – starting", menu)
         icon.run_detached()
         return icon
 
@@ -474,7 +474,7 @@ class App:
 
     def name(self):
         """Yo Claudia with the female character, Yo Claude with the male one (the default), face shown or not."""
-        return "Yo Claudia" if self.settings.get("character") == "female" else "Yo Claude"
+        return app_name(self.settings)
 
     def update_tray(self):
         if self.tray:
@@ -631,6 +631,12 @@ class Api:
         a.update_bar_visibility()
         a.emit_settings()
         if key == "character":
+            a.router.reconnect_all()   # (its name and personality are in the sessions' system prompt)
+            a.update_tray()
+            try:
+                a.tray.update_menu()   # (its items carry the name)
+            except Exception:
+                pass
             try:
                 a.main.set_title(a.name())
             except Exception as e:

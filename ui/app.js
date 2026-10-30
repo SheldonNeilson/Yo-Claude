@@ -159,10 +159,11 @@ function renderFolder() {
   $("#modeBadge").className = "badge " + (cwd ? "code" : "chat");
 }
 // Yo Claudia with the female character, Yo Claude with the male one (the default), whether the face shows or not
+const appName = () => (S.settings?.character === "female" ? "Yo Claudia" : "Yo Claude");
 function renderName() {
-  const her = S.settings?.character === "female";
-  $("#top .brand").textContent = her ? "YO CLAUDIA" : "YO CLAUDE";
-  document.title = her ? "Yo Claudia" : "Yo Claude";
+  $("#top .brand").textContent = appName().toUpperCase();
+  document.title = appName();
+  if (avatar.el) avatar.el.dataset.tip = `${appName()} · click to talk`;
 }
 function renderToggles() {
   $("#tListen").classList.toggle("on", S.settings.listening !== false);
@@ -807,8 +808,8 @@ function renderTranscript() {
   if (!S.items.length) {
     const cwd = S.active ? S.active.cwd : S.folder;
     t.appendChild(el("div", "empty", esc(cwd
-      ? `code session in ${cwd}\n\nsay “yo claude” or type below`
-      : "chat — no folder\n\nsay “yo claude” or type below\npick or add a folder (left) for coding")));
+      ? `code session in ${cwd}\n\nsay “${appName().toLowerCase()}” or type below`
+      : `chat — no folder\n\nsay “${appName().toLowerCase()}” or type below\npick or add a folder (left) for coding`)));
   }
   // a message Claude took up after it had waited shows where it was taken up (`at`), not where it was sent
   const place = (it) => (it.at != null ? it.at - 0.5 : it.i);
@@ -1757,7 +1758,7 @@ function confirmBox(text, done) {
   d.appendChild(el("div", "", esc(text)));
   addButtons(d, [["cancel", closeModal], ["yes", () => { closeModal(); done(); }, "danger"]]);
 }
-function alertBox(text) { const d = dialog("Yo Claude"); d.appendChild(el("div", "", esc(text))); addButtons(d, [["ok", closeModal, "primary"]]); }
+function alertBox(text) { const d = dialog(appName()); d.appendChild(el("div", "", esc(text))); addButtons(d, [["ok", closeModal, "primary"]]); }
 
 // ---------- start ----------
 window.addEventListener("pywebviewready", async () => {
