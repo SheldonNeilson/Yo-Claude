@@ -12,7 +12,8 @@ import subprocess
 import sys
 from pathlib import Path
 
-CLIPS = ["idle", "talking", "listening", "thinking", "laughing", "looking", "hair"]
+# idle, talking, listening, thinking, laughing, looking, hair, and extra mannerisms named idle_* and think_*
+SKIP = {"base"}
 CROP = (0.14, 0.03, 0.86, 0.66)   # out of the 480x832 clip: left, top, right, bottom (fractions)
 WIDTH = 320                       # pixels across: plenty for ~160 characters
 FPS = 12
@@ -22,9 +23,9 @@ OUT = Path(__file__).resolve().parent.parent / "ui" / "avatar"
 def main(folder: Path):
     OUT.mkdir(exist_ok=True)
     made = {}
-    for name in CLIPS:
-        src = folder / f"{name}.mp4"
-        if not src.exists():
+    for src in sorted(folder.glob("*.mp4")):
+        name = src.stem
+        if name in SKIP:
             continue
         l, t, r, b = CROP
         vf = (f"crop=iw*{r - l:.4f}:ih*{b - t:.4f}:iw*{l:.4f}:ih*{t:.4f},scale={WIDTH}:-2:flags=lanczos,fps={FPS},"

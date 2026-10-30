@@ -28,6 +28,7 @@ const avatar = {
     this.fps = manifest.fps || 12;
     for (const [name, count] of Object.entries(manifest.clips || {})) {
       try { this.clips[name] = await this.decode(`avatar/${name}.mp4`, count); } catch (e) { console.warn("avatar clip", name, e); }
+      if (name === "talking" && this.clips.talking) this.mouth = mouthOpenness(this.clips.talking, this.AH);
       if (name === "idle" && this.clips.idle) { this.ready = true; this.fit(); }   // start as soon as idle is in
     }
     if (!this.ready) return;
@@ -36,7 +37,9 @@ const avatar = {
     setInterval(() => this.tick(), 1000 / this.fps);
   },
   apply() { this.el?.classList.toggle("hidden", S.settings?.avatar === false); },
-  levels() {},   // app.js passes the voice loudness; the clips carry the mouth, so it isn't needed
+  levels(list) {   // the voice's loudness, as it plays: drives her mouth while she talks
+    if (list?.length) { this.level = Math.min(1, (list.at(-1) || 0) / 3000); this.levelAt = Date.now(); }
+  },
   // the clip's frames as greyscale at AW columns (decoded once, by seeking through it)
   async decode(src, count) {
     const v = document.createElement("video");
@@ -79,11 +82,16 @@ const avatar = {
     if (d.state === "thinking" || d.voice === "thinking") return "thinking";
     return d.state === "paused" ? "paused" : "idle";
   },
-  clipFor(st) {
-    const has = (c) => this.clips[c] ? c : "idle";
-    return { speaking: has("talking"), listening: has("listening"), thinking: has("thinking"), using_pc: has("looking"),
-             approval: has("listening") }[st] || "idle";
+  // the clips that suit a state; she picks among them at random, a new one each time one ends
+  group(st) {
+    const have = (names) => names.filter((n) => this.clips[n]), all = Object.keys(this.clips);
+    const g = st === "speaking" ? have(["talking"]) : st === "listening" || st === "approval" ? have(["listening"])
+      : st === "thinking" ? have(["thinking", ...all.filter((n) => n.startsWith("think_"))])
+      : st === "using_pc" ? have(["think_read", "looking"]) : [];
+    return g.length ? g : ["idle"];
   },
+  idleExtras() { return Object.keys(this.clips).filter((n) => n.startsWith("idle_") || ["looking", "hair", "laughing"].includes(n)); },
+  any(list, not) { const l = list.length > 1 ? list.filter((n) => n !== not) : list; return l[Math.floor(Math.random() * l.length)]; },
 
   // one frame of greyscale -> ASCII: down to the character grid, local contrast, her tones spread, the ramp
   toAscii(grey) {
@@ -117,28 +125,34 @@ const avatar = {
 
   tick() {
     if (!this.el || this.el.classList.contains("hidden") || document.hidden || !this.cols) return;
-    const st = this.state(), now = Date.now();
-    let want = this.clipFor(st);
-    if (want === "idle" && st === "idle") {
-      if (this.idleExtra && this.clip === this.idleExtra) want = this.idleExtra;   // let it finish
-      else if (now > this.nextIdleExtra) {
-        const pick = ["looking", "hair", "looking", "hair", "laughing"].filter((c) => this.clips[c]);
-        this.idleExtra = pick.length ? pick[Math.floor(Math.random() * pick.length)] : null;
-        this.nextIdleExtra = now + 15000 + Math.random() * 25000;
+    const st = this.state(), now = Date.now(), group = this.group(st);
+    let want = group.includes(this.clip) ? this.clip : this.any(group);   // stay on a suitable clip until it ends
+    if (st === "idle") {
+      want = "idle";
+      if (this.idleExtra && this.clip === this.idleExtra) want = this.idleExtra;   // let a mannerism finish
+      else if (now > this.nextIdleExtra) {   // now and then, something on her own
+        const extras = this.idleExtras();
+        this.idleExtra = extras.length ? this.any(extras, this.lastExtra) : null;
+        this.lastExtra = this.idleExtra;
+        this.nextIdleExtra = now + 8000 + Math.random() * 16000;
         want = this.idleExtra || "idle";
       }
     }
     const frames = this.clips[this.clip];
+    const lipSync = st === "speaking" && this.clip === "talking" && this.mouth && !this.rewinding;
     if (want !== this.clip && !this.rewinding) this.rewinding = true;   // back to the shared start frame first
     if (this.rewinding) {
       this.frame = Math.max(0, this.frame - 3);
       if (this.frame === 0) { this.rewinding = false; this.clip = want; this.dir = 1; }
+    } else if (lipSync) {
+      this.frame = this.lipFrame(now);
     } else {
       this.frame += this.dir;
       if (this.frame >= frames.length - 1) { this.frame = frames.length - 1; this.dir = -1; }
-      if (this.frame <= 0) {
+      if (this.frame <= 0) {   // a full play forward and back: what next?
         this.frame = 0; this.dir = 1;
         if (this.clip === this.idleExtra) { this.idleExtra = null; this.clip = "idle"; }
+        else if (group.length > 1 && st !== "idle") this.clip = this.any(group, this.clip);   // another of the kind
       }
     }
     this.glitchRow = Math.random() < 0.03 ? Math.floor(Math.random() * this.rows) : -1;
@@ -150,6 +164,39 @@ const avatar = {
     this.el.classList.toggle("asleep", st === "paused");
   },
 };
+
+// Lip sync: on each beat, the talking frame whose mouth is as open as the voice is loud right now, preferring frames
+// near the current one so her face doesn't jump about.
+avatar.lipFrame = function (now) {
+  const loud = now - (this.levelAt || 0) < 300 ? this.level : 0;
+  this.mouthGoal = (this.mouthGoal || 0) * 0.35 + Math.min(1, loud * 1.7) * 0.65;
+  const m = this.mouth, target = this.mouthGoal;
+  let best = this.frame, bestScore = Infinity;
+  for (let i = 0; i < m.length; i++) {
+    const score = Math.abs(m[i] - target) * 4 + Math.abs(i - this.frame) / m.length;
+    if (score < bestScore) { bestScore = score; best = i; }
+  }
+  return best;
+};
+
+// How open her mouth is in each talking frame (0 closed to 1 widest), ranked. The mouth is found as the part of the
+// lower face that changes most across the clip; open = darker there (the inside of the mouth).
+function mouthOpenness(frames, AH) {
+  const n = frames.length, x0 = Math.floor(AW * 0.3), x1 = Math.floor(AW * 0.7), y0 = Math.floor(AH * 0.35), y1 = Math.floor(AH * 0.75);
+  const W = x1 - x0, H = y1 - y0, sd = new Float32Array(W * H);
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    let s = 0, s2 = 0;
+    for (const f of frames) { const v = f[(y0 + y) * AW + x0 + x]; s += v; s2 += v * v; }
+    sd[y * W + x] = Math.sqrt(Math.max(0, s2 / n - (s / n) ** 2));
+  }
+  const cut = Float32Array.from(sd).sort()[Math.floor(sd.length * 0.95)];   // the most-changing 5%
+  const box = [];
+  for (let i = 0; i < sd.length; i++) if (sd[i] >= cut) box.push((y0 + Math.floor(i / W)) * AW + x0 + (i % W));
+  const dark = frames.map((f) => -box.reduce((a, j) => a + f[j], 0) / box.length);
+  const order = dark.map((v, i) => [v, i]).sort((a, b) => a[0] - b[0]), rank = new Float32Array(n);
+  order.forEach(([, i], k) => { rank[i] = k / Math.max(1, n - 1); });
+  return rank;
+}
 
 function boxBlur(a, W, H, r) {   // two passes of a running-sum box blur
   const tmp = new Float32Array(a.length), out = new Float32Array(a.length);

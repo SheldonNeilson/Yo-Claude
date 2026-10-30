@@ -2,6 +2,7 @@
  "fps": 12,
  "clips": {
   "idle": 61,
+  "listening": 61,
   "talking": 61
  }
 }
