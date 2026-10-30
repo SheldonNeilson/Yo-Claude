@@ -26,7 +26,7 @@ const avatar = {
     this.pre = el("pre");
     this.fxEl = el("div", "afx");
     this.el.append(this.pre, this.fxEl);
-    side.insertBefore(this.el, foot);
+    foot.after(this.el);   // at the very bottom, under clean up and trash
     this.apply();
     let manifest;
     try { manifest = await (await fetch("avatar/clips.json", { cache: "no-store" })).json(); } catch (_) { return; }
