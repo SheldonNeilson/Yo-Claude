@@ -183,6 +183,12 @@ $("#transcript").addEventListener("contextmenu", (e) => {
   const pre = e.target.closest("pre");
   const raw = msg && rawText.get(msg);
   const items = [];
+  const quote = sel.trim(), node = getSelection().anchorNode;   // (taken now: clicking the menu clears the selection)
+  if (quote && node && $("#transcript").contains(node)) {
+    items.push(["Reply to this", () => composer.addComment(quote, "")]);
+    items.push(["Comment on this…", () => commentBox(quote, { x: e.clientX, y: e.clientY }, "", (t) => composer.addComment(quote, t))]);
+    items.push("-");
+  }
   if (sel) items.push(["Copy", () => copyText(sel)]);
   if (pre) items.push(["Copy code", () => copyText(pre.querySelector("code")?.textContent ?? pre.textContent, "code copied")]);
   if (raw) items.push(["Copy message", () => copyText(raw, "message copied")]);

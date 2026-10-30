@@ -85,7 +85,10 @@ UI_PROMPT = (
     " The user is looking at Yo Claude's window. When they ask to see, show or open something (a file, a folder, a "
     "diff), use the yo-claude tools: show_file opens a file in front of them, show_folder opens the files panel at a "
     "folder, show_diff shows what changed in a file, show_panel switches the right-hand panel. Reading a file yourself "
-    "shows them nothing. Also use them when seeing it would help, but not for every file you touch."
+    "shows them nothing. Also use them when seeing it would help, but not for every file you touch. When the user "
+    "should pick several things from a list (which to do, keep, include or fix), use the yo-claude checklist tool "
+    "(mcp__yo-claude__checklist) instead of writing the list out: they tick yes or no for each item and can say why. "
+    "For one choice between a few options, use AskUserQuestion instead."
 )
 PC_CONTROL_PROMPT = (
     " You can see and control the user's screen, keyboard and mouse with the screen-control tools; use them when the "
@@ -617,6 +620,10 @@ class Session:
                         last.setdefault("image_paths", []).append(save_image(self.id, *pics[0]))
                 elif t == "thinking" and b.get("thinking"):
                     self.add({"kind": "thinking", "text": b["thinking"]})
+                elif t == "tool_use" and b.get("name") == f"mcp__{UI_SERVER}__checklist":   # its card, as it was
+                    inp = b.get("input") or {}
+                    self.add({"kind": "checklist", "id": b.get("id"), "title": inp.get("title") or "",
+                              "items": [str(x) for x in inp.get("items") or []], "status": "past"})
                 elif t == "tool_use":
                     self.add({"kind": "tool", "id": b.get("id"), "name": b.get("name"), "input": b.get("input", {}),
                               "result": None, "status": "done"})
@@ -713,7 +720,20 @@ class Session:
         async def show_panel(a):
             return act("panel", tab=a.get("tab", "files"))
 
-        return sdk.create_sdk_mcp_server(UI_SERVER, tools=[show_folder, show_file, show_diff, show_panel])
+        @sdk.tool("checklist", "Give the user a list to tick in Yo Claude's window: each item is a yes (ticked) or a no, "
+                  "they can say why for any item, and add a note. Their answers come as their next message, so end your "
+                  "reply after calling it. "
+                  "Use it whenever they should pick several things from a list (which to do, keep, include, fix).",
+                  {"type": "object", "properties": {
+                      "title": {"type": "string", "description": "What they're choosing, as a short question"},
+                      "items": {"type": "array", "items": {"type": "string"}, "description": "The options, one line each"},
+                      "checked": {"type": "array", "items": {"type": "string"},
+                                  "description": "Optional: items ticked to start with (your recommendation)"}},
+                   "required": ["title", "items"]})
+        async def checklist(a):
+            return reply(await sess.checklist(a))
+
+        return sdk.create_sdk_mcp_server(UI_SERVER, tools=[show_folder, show_file, show_diff, show_panel, checklist])
 
     async def can_use_tool(self, tool, inp, ctx):
         if tool.startswith(f"mcp__{UI_SERVER}__"):   # only shows things in the window
@@ -746,6 +766,20 @@ class Session:
         if always:
             self.always.add(tool)
         return sdk.PermissionResultAllow()
+
+    async def checklist(self, a):
+        """Claude's checklist tool: shows a card you tick (yes or no for each item, why for any of them, a note) and
+        returns at once, so Claude's reply ends there. Your answers go to Claude as your next message when you click
+        [submit] (Router.checklist_answer)."""
+        title = " ".join(str(a.get("title") or "").split()) or "Pick from the list"
+        items = [" ".join(str(x).split()) for x in a.get("items") or [] if str(x).strip()][:80]
+        if not items:
+            return "There were no items to show."
+        pre = {" ".join(str(x).split()) for x in a.get("checked") or []}
+        self.add({"kind": "checklist", "id": uuid.uuid4().hex[:12], "title": title, "items": items,
+                  "checked": [x for x in items if x in pre], "status": "pending"})
+        return ("Shown to the user as a checklist. Their answers (yes or no for each item, maybe with reasons) will come "
+                "as their next message. End your reply here, without writing the list out again.")
 
     async def ask_user(self, inp):
         """Claude's AskUserQuestion: show the questions as a card and hand the answers back to the tool.
@@ -2185,6 +2219,25 @@ class Router:
         future = s and s.approvals.get(aid)
         if future:
             self.loop.call_soon_threadsafe(lambda: future.done() or future.set_result((allow, always)))
+
+    def checklist_answer(self, sid, cid, picks, note=""):
+        """[submit] on a checklist card: the card shows your answers, and they go to Claude as your next message
+        (queued like any other while Claude is busy). picks: one {"yes": bool, "why": str} per item, in order."""
+        s = self.live.get(sid)
+        item = s and next((x for x in s.items if x.get("kind") == "checklist" and x.get("id") == cid), None)
+        if not item or item.get("status") != "pending" or not isinstance(picks, list) or len(picks) != len(item["items"]):
+            return {"error": "That checklist has been answered already."}
+        picks = [{"item": x, "yes": bool((p or {}).get("yes")), "why": " ".join(str((p or {}).get("why") or "").split())}
+                 for x, p in zip(item["items"], picks)]
+        note = (note or "").strip()
+        item.update(status="answered", picks=picks, note=note)
+        s.changed(item)
+        lines = [("✓ yes: " if p["yes"] else "✗ no: ") + p["item"] + (f"  (why: {p['why']})" if p["why"] else "")
+                 for p in picks]
+        text = (f"My answers to \"{item['title']}\" (ticked = yes):\n" + "\n".join(lines)
+                + (f"\n\nNote: {note}" if note else ""))
+        self.send(text, sid=sid)
+        return {}
 
     def answer(self, sid, aid, answers):
         """The user's answers to Claude's AskUserQuestion ({question: label(s)}), or None to skip it."""

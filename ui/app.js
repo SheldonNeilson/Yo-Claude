@@ -607,10 +607,119 @@ Click to open` : "What Claude saw · click to enlarge";
       addCopyButtons(node, it);
       if (it.ts && ["user", "assistant", "advisor"].includes(it.kind)) node.insertAdjacentHTML("beforeend", whenHtml(it.ts, "bubble-when"));
       else if (it.ts && (it.kind === "note" || it.kind === "error")) node.insertAdjacentHTML("beforeend", " " + whenHtml(it.ts, "inline-when"));
-      if (it.kind === "assistant" && !it.streaming) mediaUnder(node, it);
+      if (it.kind === "assistant" && !it.streaming) { mediaUnder(node, it); checklistUnder(node, it); }
     }
   },
 };
+
+// ---------- checklists: Claude's checklist tool as a card (and "- [ ]" lists in its messages): tick yes or no for each
+// item, say why for any of them, add a note, [submit]: it all goes to Claude as your next message ----------
+const checkState = new Map();   // "session:card" -> { yes: [bool], why: [text], open: [why box shown], note }
+function checkRow(label, st, k, done, onChange) {
+  const row = el("div", "crow");
+  const box = el("input"); box.type = "checkbox"; box.checked = st.yes[k]; box.disabled = done;
+  const text = el("span", "clabel"); text.textContent = label;
+  const whyBtn = el("button", "cwhybtn", st.why[k] ? "why ✎" : "+ why");
+  whyBtn.dataset.tip = "Say why (optional): it goes to Claude with your answer";
+  const why = el("input", "cwhy");
+  why.value = st.why[k];
+  const sync = () => {
+    row.classList.toggle("yes", st.yes[k]);
+    why.classList.toggle("hidden", !st.open[k]);
+    why.placeholder = st.yes[k] ? "why yes? (optional)" : "why not? (optional)";
+    whyBtn.textContent = st.why[k] ? "why ✎" : "+ why";
+  };
+  box.onchange = () => { st.yes[k] = box.checked; sync(); onChange(); };
+  row.onclick = (e) => {   // the whole line ticks, except the why parts
+    if (done || e.target === box || e.target.closest(".cwhybtn, .cwhy, a")) return;
+    box.checked = !box.checked; box.onchange();
+  };
+  whyBtn.onclick = (e) => { e.stopPropagation(); st.open[k] = !st.open[k]; sync(); if (st.open[k]) why.focus(); };
+  why.oninput = () => { st.why[k] = why.value; whyBtn.textContent = st.why[k] ? "why ✎" : "+ why"; };
+  why.onkeydown = (e) => { if (e.key === "Enter" || e.key === "Escape") { e.preventDefault(); if (!st.why[k].trim()) st.open[k] = false; sync(); } };
+  whyBtn.disabled = done; why.disabled = done;
+  row.append(box, text, whyBtn);
+  sync();
+  return [row, why];
+}
+function checkStateFor(key, n, ticked) {
+  if (!checkState.has(key)) checkState.set(key, { yes: ticked || Array(n).fill(false), why: Array(n).fill(""), open: Array(n).fill(false), note: "" });
+  return checkState.get(key);
+}
+function checklistCard(it) {
+  const items = it.items || [], n = el("div", "question checklist " + it.status);
+  if (it.status !== "pending") {   // answered (what you said), or from an earlier run (answered in the message after it)
+    n.appendChild(el("div", "q", it.status === "answered" ? "✓ you answered" : "☑ checklist"));
+    n.appendChild(el("div", "ctitle", esc(it.title || "")));
+    items.forEach((x, k) => {
+      const p = (it.picks || [])[k], r = el("div", "crow done" + (p?.yes ? " yes" : ""));
+      r.appendChild(el("span", "cmark", p ? (p.yes ? "✓" : "✗") : "·"));
+      const t = el("span", "clabel"); t.textContent = x; r.appendChild(t);
+      if (p?.why) { const w = el("span", "cwhydone"); w.textContent = "— " + p.why; r.appendChild(w); }
+      n.appendChild(r);
+    });
+    if (it.note) { const d = el("div", "cnote"); d.textContent = "Note: " + it.note; n.appendChild(d); }
+    return n;
+  }
+  const sid = S.active.id, st = checkStateFor(`${sid}:${it.id}`, items.length, items.map((x) => (it.checked || []).includes(x)));
+  n.appendChild(el("div", "q", "☑ Claude asks you to pick"));
+  n.appendChild(el("div", "ctitle", esc(it.title || "")));
+  const count = el("span", "dim"), upd = () => { count.textContent = `${st.yes.filter(Boolean).length} of ${items.length} ticked`; };
+  const list = el("div", "clist");
+  items.forEach((x, k) => list.append(...checkRow(x, st, k, false, upd)));
+  n.appendChild(list);
+  const note = el("input", "cnotein");
+  note.placeholder = "Anything else? (optional)"; note.value = st.note;
+  note.oninput = () => { st.note = note.value; };
+  n.appendChild(note);
+  const bar = el("div", "checkbar"), go = el("button", "primary", "[submit]");
+  go.dataset.tip = "Send your answers to Claude: ticked = yes, the rest = no";
+  go.onclick = async () => {
+    go.disabled = true;
+    const r = await api().checklist_answer(sid, it.id, st.yes.map((y, k) => ({ yes: y, why: st.why[k] })), st.note);
+    if (r?.error) { go.disabled = false; return toast(r.error, "error"); }
+    checkState.delete(`${sid}:${it.id}`);
+    follow.set("chat", true); follow.stickAll("chat");
+  };
+  const all = el("button", "", "[all]"), none = el("button", "", "[none]");
+  const setAll = (v) => list.querySelectorAll("input[type=checkbox]").forEach((b) => { b.checked = v; b.onchange(); });
+  all.onclick = () => setAll(true); none.onclick = () => setAll(false);
+  bar.append(go, all, none, count);
+  n.appendChild(bar);
+  upd();
+  return n;
+}
+
+// "- [ ] item" lists in Claude's messages: the same rows (tick, why), answered with [submit] as your next message
+const submittedLists = new Set();   // "session:message" already answered, so a re-render doesn't offer it again
+function checklistUnder(node, it) {
+  const lis = [...node.querySelectorAll("li")].filter((li) => li.querySelector(":scope > input[type=checkbox]"));
+  if (!lis.length || !S.active) return;
+  const key = `${S.active.id}:m${it.i}`, done = submittedLists.has(key);
+  const labels = lis.map((li) => li.textContent.replace(/\s+/g, " ").trim());
+  const st = checkStateFor(key, lis.length, lis.map((li) => li.querySelector("input").checked));
+  const count = el("span", "dim"), upd = () => { count.textContent = `${st.yes.filter(Boolean).length} of ${lis.length} ticked`; };
+  lis.forEach((li, k) => {   // each item becomes a row you can tick (its text kept plain)
+    const [row, why] = checkRow(labels[k], st, k, done, upd);
+    li.replaceChildren(row, why);
+    li.classList.add("checkitem");
+  });
+  const bar = el("div", "checkbar"), go = el("button", "primary", done ? "[sent]" : "[submit]");
+  go.disabled = done;
+  go.dataset.tip = "Send your answers to Claude: ticked = yes, the rest = no";
+  go.onclick = async (e) => {
+    e.stopPropagation();
+    const lines = labels.map((x, k) => (st.yes[k] ? "✓ yes: " : "✗ no: ") + x + (st.why[k].trim() ? `  (why: ${st.why[k].trim()})` : ""));
+    submittedLists.add(key);
+    node.querySelectorAll(".crow input, .crow button, .cwhy").forEach((b) => { b.disabled = true; });
+    go.disabled = true; go.textContent = "[sent]";
+    follow.set("chat", true); follow.stickAll("chat");
+    await api().send("My answers to the checklist (ticked = yes):\n" + lines.join("\n"), [], []);
+  };
+  bar.append(go, count);
+  upd();
+  lis.at(-1).closest("ul, ol").after(bar);
+}
 
 // ---------- when things happened: relative for recent ones ("4m ago"), a time or date for older ones ----------
 function whenText(ts) {
@@ -737,6 +846,7 @@ function buildItem(it) {
     }
     case "approval": return approvalCard(it);
     case "question": return questionCard(it);
+    case "checklist": return checklistCard(it);
     case "task": return taskCard(it);
     case "cancelled": return el("div", "hidden");   // a queued message you took back
     case "thinking": return thoughtBubble(it);
@@ -1299,8 +1409,9 @@ function showRewind(it) {
 
 // ---------- composer: text, attached files (chips or @mentions), pasted images ----------
 window.composer = {
-  files: [], images: [], fileList: null, fileListFor: undefined, pick: -1, matches: [],
+  files: [], images: [], comments: [], fileList: null, fileListFor: undefined, pick: -1, matches: [],
   attach(path) { if (!this.files.includes(path)) this.files.push(path); this.renderChips(); $("#input").focus(); },
+  addComment(quote, text) { this.comments.push({ quote, text: text || "" }); this.renderChips(); $("#input").focus(); },
   renderChips() {
     const c = $("#chips");
     c.innerHTML = "";
@@ -1310,6 +1421,20 @@ window.composer = {
       const img = el("img", "chipimg"); img.src = u; x.prepend(img);
       c.appendChild(x);
     });
+    this.comments.forEach((m, i) => {   // a reply (↩) or a comment (💬) on something Claude said: click to edit
+      const drop = () => { this.comments.splice(i, 1); this.renderChips(); };
+      const x = this.chip("", drop, () => commentBox(m.quote, null, m.text, (t) => { m.text = t; this.renderChips(); }, drop));
+      x.classList.add("cchip");
+      x.dataset.tip = m.quote;
+      x.prepend(el("span", "cq", `${m.text ? "💬" : "↩"} “${esc(shortText(m.quote, 40))}”` + (m.text ? ` <span class="ct">${esc(shortText(m.text, 40))}</span>` : "")));
+      c.appendChild(x);
+    });
+    if (this.comments.length > 1) {
+      const all = el("button", "chip cclear", "clear all");
+      all.dataset.tip = "Take all the replies and comments out of your message";
+      all.onclick = () => { this.comments = []; this.renderChips(); };
+      c.appendChild(all);
+    }
   },
   chip(label, remove, view) {
     const x = el("span", "chip", esc(label) + " <b>×</b>");
@@ -1440,6 +1565,37 @@ function runLocalCommand(text) {
   })[name]();
   return true;
 }
+// ---------- replies and comments on what Claude said: select text, right-click "Reply to this" or "Comment on this…".
+// Each is a chip above the box (the quote, and your comment); when you send, they go first, as "> quote" blocks, each
+// followed by its comment, then your message. (Typed sends only: a spoken message goes without them.) ----------
+const shortText = (t, n = 60) => { t = (t || "").replace(/\s+/g, " ").trim(); return t.length > n ? t.slice(0, n - 1) + "…" : t; };
+function withComments(text, comments) {
+  const blocks = comments.map((c) => c.quote.split("\n").map((l) => "> " + l).join("\n") + (c.text.trim() ? "\n\n" + c.text.trim() : ""));
+  return [...blocks, text].filter(Boolean).join("\n\n");
+}
+function commentBox(quote, at, initial, save, remove) {   // (remove: editing one that's there already)
+  document.querySelector(".cbox")?.remove();
+  const box = el("div", "cbox");
+  const q = el("div", "cboxq"); q.textContent = "“" + shortText(quote, 160) + "”";
+  const ta = el("textarea"); ta.rows = 3; ta.value = initial || ""; ta.placeholder = "Your comment on this (Enter adds it · Esc cancels)";
+  const ok = el("button", "primary", initial ? "[save]" : "[add comment]"), no = el("button", "", "[cancel]");
+  const close = () => box.remove();
+  const done = () => { const t = ta.value.trim(); close(); if (t || initial) save(t); };
+  ok.onclick = done; no.onclick = close;
+  ta.onkeydown = (e) => {
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); done(); }
+    if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); close(); }
+  };
+  const btns = el("div", "btns"); btns.append(ok, no);
+  if (remove) { const rm = el("button", "", "[remove]"); rm.dataset.tip = "Take this comment out of your message"; rm.onclick = () => { close(); remove(); }; btns.append(rm); }
+  box.append(q, ta, btns);
+  document.body.appendChild(box);
+  const r = box.getBoundingClientRect(), x = at ? at.x : innerWidth / 2 - r.width / 2, y = at ? at.y + 8 : innerHeight / 2 - r.height / 2;
+  box.style.left = Math.max(8, Math.min(innerWidth - r.width - 8, x)) + "px";
+  box.style.top = Math.max(8, Math.min(innerHeight - r.height - 8, y)) + "px";
+  ta.focus();
+}
+
 let sending = false;
 async function send() {
   // Take the message and clear the box straight away: a second Enter while @mentions are looked up used to send
@@ -1448,7 +1604,8 @@ async function send() {
   clearTimeout(tidy.timer);
   const box = $("#input");
   const text = box.value.trim(), chips = composer.files.slice(), images = composer.images.slice();
-  if (!text && !chips.length && !images.length) return;
+  const comments = text.startsWith("/") ? [] : composer.comments.slice();   // (a /command goes as it is: they wait)
+  if (!text && !chips.length && !images.length && !comments.length) return;
   if (text.startsWith("/") && !chips.length && !images.length && runLocalCommand(text)) {
     box.value = ""; autosize(); composer.closeList();
     return;
@@ -1460,10 +1617,10 @@ async function send() {
   sending = true;
   box.value = ""; autosize();
   follow.set("chat", true); follow.stickAll("chat");   // you sent something: follow the reply
-  composer.files = []; composer.images = []; composer.renderChips();
+  composer.files = []; composer.images = []; if (comments.length) composer.comments = []; composer.renderChips();
   try {
     const files = [...new Set([...chips, ...(await composer.mentions(text))])];
-    await api().send(text, files, images);
+    await api().send(withComments(text, comments), files, images);
   } finally {
     sending = false;
   }

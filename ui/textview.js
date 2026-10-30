@@ -13,6 +13,7 @@ function textView(d, f, path, cwd) {
     if (mode === "formatted") {
       const md_ = el("div", "mdview", md(text));
       body.appendChild(md_);
+      if (!f.truncated) wireChecklist(md_);
     } else if (mode === "source") {
       const pre = el("pre", "viewer"), code = el("code");
       code.textContent = text; pre.appendChild(code);
@@ -35,6 +36,27 @@ function textView(d, f, path, cwd) {
       setTimeout(() => ta.focus(), 0);
     }
     if (f.truncated) body.appendChild(el("div", "dim", "(showing the first 300 KB, so it can't be edited here)"));
+  };
+  // Task lists ("- [ ] item") are tickable in the formatted view: each tick flips that item's [ ]/[x] in the file and
+  // saves straight away, so a checklist Claude writes (e.g. a pick list) can be answered by clicking.
+  const TASK = /^(\s*(?:[-*+]|\d+[.)])\s+)\[( |x|X)\]/gm;
+  const wireChecklist = (view) => {
+    const boxes = [...view.querySelectorAll('li > input[type="checkbox"]')];
+    if (!boxes.length || boxes.length !== [...text.matchAll(TASK)].length) return;   // can't map boxes to lines safely
+    boxes.forEach((cb, n) => {
+      cb.disabled = false;
+      cb.closest("li").classList.add("tvtask");
+      cb.onchange = async () => {
+        let i = 0;
+        const next = text.replace(TASK, (m, lead, mark) => (i++ === n ? `${lead}[${cb.checked ? "x" : " "}]` : m));
+        cb.disabled = true;
+        const r = await api().save_text(f.full || path, next, mtime, cwd);
+        cb.disabled = false;
+        if (r?.error) { cb.checked = !cb.checked; toast(r.error, "error"); return; }
+        text = next; mtime = r.mtime;
+        note.textContent = "saved " + new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+      };
+    });
   };
   const editor = () => body.querySelector(".tveditor");
   const save = async () => {

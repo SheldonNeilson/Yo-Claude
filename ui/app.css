@@ -668,3 +668,30 @@ b.lo { color: var(--green); } b.mid { color: var(--amber); } b.hi { color: var(-
 #btwInput { margin: 0 8px 8px; border-style: dashed; }
 #btwInput:disabled { opacity: .5; }
 #btwBtn { color: var(--amber); border-style: dashed; }
+.mdview li.tvtask { list-style: none; margin-left: -1.2em; }
+.mdview li.tvtask > input[type="checkbox"] { cursor: pointer; accent-color: var(--orange); margin-right: 6px; }
+/* checklists: Claude's checklist card, and "- [ ]" lists in its messages. A row per item: tick = yes, "+ why" for a reason */
+.msg li.checkitem { list-style: none; margin-left: -1.4em; }
+.crow { display: flex; gap: 8px; align-items: baseline; padding: 2px 4px; cursor: pointer; }
+.crow:hover { background: #ffffff08; } .crow.done { cursor: default; } .crow.done:hover { background: none; }
+.crow > input[type="checkbox"] { cursor: pointer; accent-color: var(--orange); margin: 0; vertical-align: -2px; flex: none; }
+.crow .clabel { flex: 1; min-width: 0; color: var(--dim); } .crow.yes .clabel { color: var(--text); }
+.crow .cwhybtn { flex: none; padding: 0 6px; font-size: 11px; color: var(--faint); border-color: transparent; background: none; }
+.crow:hover .cwhybtn, .crow .cwhybtn:focus { color: var(--dim); border-color: var(--line); }
+.cwhy { display: block; width: calc(100% - 3em); margin: 2px 0 4px 2.2em; font-size: 12px; padding: 2px 6px; }
+.crow .cmark { flex: none; width: 1.2em; color: var(--dim); } .crow.yes .cmark { color: var(--green); }
+.crow .cwhydone { color: var(--dim); font-style: italic; }
+.question.checklist .ctitle { color: var(--text); margin: 4px 0 6px; }
+.question.checklist .clist { margin: 2px 0 6px; }
+.question.checklist .cnotein { width: 100%; box-sizing: border-box; font-size: 12px; margin: 4px 0; }
+.question.checklist .cnote { color: var(--dim); margin-top: 6px; }
+.checkbar { display: flex; gap: 10px; align-items: center; margin: 8px 0 4px; }
+
+/* replies and comments on what Claude said: chips above the box, and the little box you write a comment in */
+.chip.cchip { max-width: 46ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border-color: var(--amber); }
+.chip.cchip .cq { color: var(--amber); } .chip.cclear { color: var(--dim); border-style: dashed; cursor: pointer; background: none; } .chip.cchip .ct { color: var(--text); margin-left: 4px; }
+.cbox { position: fixed; z-index: 50; width: min(440px, 90vw); background: var(--bg2); border: 2px solid var(--amber);
+  padding: 8px 10px; box-shadow: 0 6px 24px #000a; }
+.cbox .cboxq { color: var(--dim); font-style: italic; margin-bottom: 6px; max-height: 5.5em; overflow: hidden; }
+.cbox textarea { width: 100%; box-sizing: border-box; resize: vertical; }
+.cbox .btns { display: flex; gap: 8px; margin-top: 6px; }

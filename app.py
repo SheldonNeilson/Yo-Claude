@@ -793,6 +793,10 @@ class Api:
     def approve(self, sid, aid, allow, always=False):
         self._app.router.approve(sid, aid, bool(allow), bool(always))
 
+    def checklist_answer(self, sid, cid, picks, note=""):
+        """[submit] on Claude's checklist card: your yes/no (and why) per item go to Claude as your next message."""
+        return self._app.router.checklist_answer(sid, cid, picks, note)
+
     def answer_question(self, sid, aid, answers=None):
         """Answers to Claude's AskUserQuestion card ({question: label or [labels]}); None skips it."""
         if isinstance(answers, dict):
