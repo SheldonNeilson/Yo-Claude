@@ -4,7 +4,7 @@ import ctypes
 import os
 import winreg
 
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFilter
 
 # From Claude Code's welcome screen block characters (" ▐▛███▜▌ / ▝▜█████▛▘ / ▘▘ ▝▝"), trimmed to its 16 used
 # columns. Pixels are taller than wide, like a quarter of a terminal cell.
@@ -35,44 +35,64 @@ def tray_size():
         return 32
 
 
-def draw(size, color, frame=CLAWD, dy=0, background=None):
-    """The mascot filling a `size` square with whole-pixel cells (crisp, no smoothing)."""
+def draw(size, color, frame=CLAWD, dy=0, background=None, outline=None):
+    """The mascot filling a `size` square with whole-pixel cells (crisp, no smoothing). With `outline` (a colour) it
+    gets a 1-pixel edge all round, so it shows on light and dark taskbars alike; where that leaves no room for its
+    full 16 columns, the arm tips go (14 columns), and it's a little squatter, leaving room to bob."""
     img = Image.new("RGBA", (size, size), background or (0, 0, 0, 0))
+    room = size - 2 if outline else size
+    if outline and room // len(frame[0]) < room // (len(frame[0]) - 2):
+        frame = [row[1:-1] for row in frame]
     cols, rows = len(frame[0]), len(frame)
-    cw = max(1, size // cols)
-    ch = max(1, min(size // rows, cw * 3))
+    cw = max(1, room // cols)
+    ch = max(1, min((room - (2 if outline else 0)) // rows, cw * 3))
     ox = (size - cw * cols) // 2
     oy = (size - ch * rows) // 2 + dy
-    d = ImageDraw.Draw(img)
+    mask = Image.new("L", (size, size), 0)
+    d = ImageDraw.Draw(mask)
     for y, row in enumerate(frame):
         for x, c in enumerate(row):
             if c == "#":
-                d.rectangle((ox + x * cw, oy + y * ch, ox + (x + 1) * cw - 1, oy + (y + 1) * ch - 1),
-                            fill=color + (255,))
+                d.rectangle((ox + x * cw, oy + y * ch, ox + (x + 1) * cw - 1, oy + (y + 1) * ch - 1), fill=255)
+    if outline:
+        img.paste(outline + (255,), mask=mask.filter(ImageFilter.MaxFilter(3)))
+    img.paste(color + (255,), mask=mask)
     return img
 
 
 def tray_frame(state, tick):
-    """Tray icon for `state` at animation step `tick` (the app advances it ~5 times a second)."""
+    """Tray icon for `state` at animation step `tick` (the app advances it ~5 times a second). Each state keeps
+    its own colour; the mascot moves instead: walks while Claude thinks, hops while it waits for you, strolls
+    slowly while a background task runs, bobs while listening, looks around while using your PC."""
     size = tray_size()
     color = STATE_COLORS.get(state, ORANGE)
     frame, dy = CLAWD, 0
-    if state in ("idle", "starting"):
-        frame = BLINK if tick % 20 == 0 else CLAWD
+    up = -max(1, size // 16)
+    if state in ("idle", "starting"):   # (redrawn twice every 4 s: a blink, then a glance)
+        frame = {0: BLINK, 20: LOOK_L}.get(tick % 40, CLAWD)
     elif state == "listening":
-        dy = -max(1, size // 16) if tick % 2 else 0
-    elif state == "thinking":
-        frame = BLINK if tick % 10 == 0 else CLAWD
-        k = 0.65 + 0.35 * abs((tick % 6) - 3) / 3
-        color = tuple(int(c * k) for c in color)
+        dy = up if tick % 4 < 2 else 0
+    elif state == "thinking":   # walking in place, glancing about, the odd blink
+        frame = WALK if tick % 2 else CLAWD
+        if tick % 8 in (2, 3):
+            frame = [LOOK_L[1] if i == 1 else r for i, r in enumerate(frame)]
+        elif tick % 8 in (6, 7):
+            frame = [LOOK_R[1] if i == 1 else r for i, r in enumerate(frame)]
+        elif tick % 16 == 0:
+            frame = BLINK
+        dy = up if tick % 4 == 1 else 0
     elif state == "speaking":
         frame = WALK if tick % 2 else CLAWD
+        dy = up if tick % 2 else 0
     elif state == "using_pc":
         frame = (LOOK_L, CLAWD, LOOK_R, CLAWD)[tick % 4]
-    elif state == "approval":
         if tick % 2:
-            color = ORANGE
-    return draw(size, color, frame, dy)
+            frame = frame[:4] + [WALK[4]]
+    elif state == "approval":   # hop, hop, wait: it needs you
+        dy = (0, 2 * up, 2 * up, up, 0, 0, 0, 0)[tick % 8]
+    elif state == "background":   # a slow stroll
+        frame = WALK if tick % 4 < 2 else CLAWD
+    return draw(size, color, frame, dy, outline=(0, 0, 0))
 
 
 def animated(state):
