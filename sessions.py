@@ -200,6 +200,20 @@ def is_noise(text):
     return t.startswith(("<command-", "<local-command", "Caveat:", "<system-reminder", "[Request interrupted"))
 
 
+def system_note(text):
+    """Notices stored in the transcript as if you'd typed them: background-task reports (<task-notification>) and
+    Yo Claude's own follow-ups ("[Yo Claude] ..."). Returns the note to show instead of your bubble, or None."""
+    t = text.lstrip()
+    if "<task-notification>" in t[:400]:
+        tag = lambda name: (re.search(rf"<{name}>(.*?)</{name}>", t, re.S) or [None, ""])[1].strip()
+        status = tag("status") or "update"
+        what = tag("summary") or tag("output-file") or tag("task-id")
+        return f"Background task {status}" + (f": {what}" if what else "")
+    if t.startswith("[Yo Claude] "):
+        return "Yo Claude: " + t[len("[Yo Claude] "):].strip()
+    return None
+
+
 def approval_summary(tool, inp):
     """What Claude wants to do, said in a few words (for the card and for voice)."""
     path = inp.get("file_path") or inp.get("notebook_path") or inp.get("path") or ""
@@ -281,7 +295,7 @@ class Session:
         except Exception as e:
             log.warning("Couldn't read session %s: %s", self.id, e)
             return
-        mark = self.router.meta.session(self.id).get("rewind")
+        mark = self.rewind_mark()
         stamps = message_times(self.router.session_file(self.id, self.cwd)[1])
         self.loading_history = True
         try:
@@ -304,7 +318,9 @@ class Session:
                 if not isinstance(b, dict):
                     continue
                 t = b.get("type")
-                if t == "text" and b.get("text", "").strip() and not is_noise(b["text"]):
+                if t == "text" and role == "user" and system_note(b.get("text", "")):
+                    self.add({"kind": "note", "text": system_note(b["text"])})
+                elif t == "text" and b.get("text", "").strip() and not is_noise(b["text"]):
                     text = b["text"]
                     voice = role == "user" and text.startswith("[voice] ")
                     attachments = []
@@ -359,7 +375,7 @@ class Session:
         )
         if self.resumed:
             opts["resume"] = self.id
-            mark = r.meta.session(self.id).get("rewind")
+            mark = self.rewind_mark()
             if mark:   # rewound: carry on from before the dropped message (a new branch of the same session)
                 opts.update(resume_session_at=mark["at"], resume_drops_turn=mark["drop"])
         else:
@@ -421,6 +437,23 @@ class Session:
             self.reader = asyncio.ensure_future(self.read_loop(self.client))
             self.router.evict(keep=self)
             asyncio.ensure_future(self.learn_commands())
+
+    def rewind_mark(self):
+        """The pending rewind, if it still applies: once anything new hangs off the rewind point (a message sent
+        since, from here or another window), the conversation has already moved on to the new branch."""
+        mark = self.router.meta.session(self.id).get("rewind")
+        if not mark:
+            return None
+        try:
+            with open(self.router.session_file(self.id, self.cwd)[1], encoding="utf-8") as f:
+                moved_on = any(e.get("parentUuid") == mark["at"] and e.get("uuid") != mark["drop"]
+                               and not e.get("isSidechain") for e in map(json.loads, filter(str.strip, f)))
+        except (OSError, ValueError):
+            moved_on = False
+        if moved_on:
+            self.router.meta.update(self.id, rewind=None)
+            return None
+        return mark
 
     async def rewind_files_to(self, uuid):
         """Put the folder's files back the way they were when that message was sent (Claude Code's checkpoints)."""
@@ -590,6 +623,8 @@ class Session:
                 return await self.turn_future or ""
             except Exception as e:
                 log.exception("Turn failed")
+                if "Resume rejected" in str(e):   # a rewind that no longer fits: drop it, a retry carries on as usual
+                    self.router.meta.update(self.id, rewind=None)
                 self.add({"kind": "error", "text": f"{type(e).__name__}: {e}"})
                 await self.disconnect()
                 return None
@@ -1357,6 +1392,17 @@ class Router:
                        "session_id": s.id}
             prompt = message()
         return self.run(s.turn(prompt, voice, item))
+
+    def retry(self, sid=None):
+        """Send your last message in a session again (after an error)."""
+        s = self.live.get(sid) if sid else self.active
+        last = next((i for i in reversed(s.items) if i.get("kind") == "user"), None) if s else None
+        if not last:
+            return {"error": "There's no message of yours to send again."}
+        if s.busy:
+            return {"error": "Claude is already working in this session."}
+        self.run(s.turn(("[voice] " if last.get("voice") else "") + last.get("text", ""), bool(last.get("voice"))))
+        return {}
 
     def cancel_queued(self, sid, i):
         """Take back a message that's still waiting its turn. Returns its text and attachments for the box."""

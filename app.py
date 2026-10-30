@@ -539,6 +539,10 @@ class Api:
                 "active": r.describe(active) if active else None, "items": active.items if active else [],
                 "display": {"state": a.display, "voice": a.voice_state, "work": a.work_state, "text": a.voice_text}}
 
+    def retry(self):
+        """Send your last message in the open session again (the retry button on an error)."""
+        return self._app.router.retry()
+
     def cancel_queued(self, i):
         """Take back a queued message in the open session (it goes back in the box)."""
         r = self._app.router

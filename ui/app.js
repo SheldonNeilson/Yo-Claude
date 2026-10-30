@@ -642,7 +642,21 @@ function buildItem(it) {
       return el("div", "msg result", esc(`— ${k(it.tokens)} tokens processed (${k(it.cached)} cached) · ` +
         `$${(it.cost || 0).toFixed(4)} api-equivalent · ${((it.duration || 0) / 1000).toFixed(1)}s`));
     }
-    case "error": return el("div", "msg error", "✗ " + esc(it.text));
+    case "error": {
+      const n = el("div", "msg error", "✗ " + esc(it.text));
+      const isLast = S.items.slice(it.i + 1).every((x) => !x || ["note", "result", "cancelled"].includes(x.kind));
+      if (isLast && S.items.some((x) => x?.kind === "user")) {   // only on the latest error: send your last message again
+        const b = el("button", "retrybtn", "↻ retry");
+        b.dataset.tip = "Send your last message again";
+        b.onclick = async (e) => {
+          e.stopPropagation(); b.disabled = true;
+          const r = await api().retry();
+          if (r?.error) { b.disabled = false; toast(r.error, "error"); } else b.remove();
+        };
+        n.appendChild(b);
+      }
+      return n;
+    }
   }
   return el("div", "msg dim", esc(JSON.stringify(it)));
 }
