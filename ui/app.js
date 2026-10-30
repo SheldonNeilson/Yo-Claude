@@ -110,7 +110,7 @@ function handle(e) {
     case "speech": avatar.speech(e); break;
     case "dictation": dictation(e); break;
     case "live": if (S.active && e.session === S.active.id) transcript.live(e.image); break;
-    case "settings": S.settings = e.settings; renderToggles(); avatar.apply(); renderBusy(); renderName(); break;
+    case "settings": S.settings = e.settings; renderToggles(); avatar.apply(); renderBusy(); renderName(); renderAwake(); break;
     case "folder": S.folder = e.folder; renderHead(); break;
     case "confirm_quit":
       confirmBox(`Claude is in the middle of a reply in ${e.busy.map((b) => `“${b.title}”`).join(", ")}. ` +
@@ -164,6 +164,13 @@ function renderName() {
   $("#top .brand").textContent = appName().toUpperCase();
   document.title = appName();
   if (avatar.el) avatar.el.dataset.tip = `${appName()} · click to talk`;
+}
+function renderAwake() {   // ☕ in the menu bar: lit while the PC is kept awake always
+  const b = $("#awakeBtn"), on = S.settings?.keep_awake === true;
+  b.classList.toggle("on", on);
+  b.title = on ? "The PC is kept awake (it won't go to sleep while Yo Claude runs). Click to let it sleep when idle."
+    : "Click to keep the PC awake always. (While Claude works it's kept awake anyway"
+      + (S.settings?.awake_while_working === false ? ": that's off too, in Options)" : ")");
 }
 function renderToggles() {
   $("#tListen").classList.toggle("on", S.settings.listening !== false);
@@ -1774,7 +1781,8 @@ window.addEventListener("pywebviewready", async () => {
   $("#sessionHead").insertBefore(follow.button("chat"), $("#sessionHead .spacer").nextSibling);
   renderToggles(); renderTree(); renderHead(); renderTranscript(); renderState(); planBox.update();
   setTimeout(() => composer.preload(), 1500);
-  avatar.wanted = true; avatar.apply(); renderName();   // (her face loads when it's turned on: Options > Face in Sidebar)
+  avatar.wanted = true; avatar.apply(); renderName(); renderAwake();
+  $("#awakeBtn").onclick = () => api().set_setting("keep_awake", S.settings?.keep_awake !== true);   // (her face loads when it's turned on: Options > Face in Sidebar)
   if (S.settings.panel_open) $("#app").classList.add("with-panel");
   if (S.settings.side_open === false) $("#app").classList.add("no-side");
   panes.render();
