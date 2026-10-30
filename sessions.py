@@ -283,7 +283,7 @@ class Session:
         self.stream_item = None
         self.think_item = None              # the thought streaming in now (the thinking bubble)
         self.last_used = time.time()
-        self.cost_seen = 0.0                # the CLI reports cost cumulatively per connection
+        self.cost_seen = 0.0                # Claude Code's running cost total for this session, as last seen
         self.lock = None                    # asyncio.Lock, made on the loop
         self.reader = None                  # the task reading everything Claude sends
         self.turn_future = None             # resolved with Claude's reply to the message being sent
@@ -457,7 +457,9 @@ class Session:
     async def connect(self):
         if self.client is None:
             self.client = sdk.ClaudeSDKClient(options=self.options())
-            self.cost_seen = 0.0
+            # Claude Code's cost total covers the whole session, earlier connections included: start from the total
+            # Yo Claude last saw for it (None when it doesn't know, e.g. a session also used elsewhere)
+            self.cost_seen = 0.0 if not self.resumed else self.router.meta.session(self.id).get("cost_total")
             await self.client.connect()
             try:   # remembered with background tasks, so a restart can tell whether they're still going
                 self.pid = self.client._transport._process.pid
@@ -852,14 +854,17 @@ class Session:
             u = m.usage or {}
             tokens = sum(u.get(k, 0) or 0 for k in ("input_tokens", "cache_creation_input_tokens",
                                                      "cache_read_input_tokens"))
-            total = m.total_cost_usd or 0.0   # cumulative for the CLI process: show this reply's share
-            cost = total - self.cost_seen if total >= self.cost_seen else total
+            total = m.total_cost_usd or 0.0   # the session's running total: this reply's share is the difference
+            known = self.cost_seen is not None and total >= self.cost_seen
+            cost = total - self.cost_seen if known else None   # unknown: show the tokens without a wrong price
             self.cost_seen = total
+            self.router.meta.update(self.id, cost_total=total)
             self.add({"kind": "result", "cost": cost, "tokens": tokens,
                       "cached": u.get("cache_read_input_tokens", 0), "duration": m.duration_ms,
                       "error": m.is_error})
-            log.info("Turn done in %.1fs: %d tokens processed (%d cached), $%.4f api-equivalent",
-                     (m.duration_ms or 0) / 1000, tokens, u.get("cache_read_input_tokens", 0) or 0, cost)
+            log.info("Turn done in %.1fs: %d tokens processed (%d cached), %s api-equivalent",
+                     (m.duration_ms or 0) / 1000, tokens, u.get("cache_read_input_tokens", 0) or 0,
+                     f"${cost:.4f}" if cost is not None else "cost unknown")
             return m.result or ""
         return None
 

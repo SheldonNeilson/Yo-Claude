@@ -667,7 +667,7 @@ function buildItem(it) {
     case "result": {
       const k = (n) => n >= 1e6 ? (n / 1e6).toFixed(1) + "M" : n >= 1000 ? (n / 1000).toFixed(1) + "k" : String(n || 0);
       return el("div", "msg result", esc(`— ${k(it.tokens)} tokens processed (${k(it.cached)} cached) · ` +
-        `$${(it.cost || 0).toFixed(4)} api-equivalent · ${((it.duration || 0) / 1000).toFixed(1)}s`));
+        (it.cost == null ? "" : `$${it.cost.toFixed(4)} api-equivalent · `) + `${((it.duration || 0) / 1000).toFixed(1)}s`));
     }
     case "error": {
       const n = el("div", "msg error", "✗ " + esc(it.text));
