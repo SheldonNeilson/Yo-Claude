@@ -112,7 +112,7 @@ class App:
         width, height = int((right - left) * 0.82), int((bottom - top) * 0.86)
         x, y = int(left + (right - left - width) / 2), int(top + (bottom - top - height) / 2)
         self.main = webview.create_window(
-            "Yo Claude", os.path.join(UI, "index.html"), js_api=self.api, width=width, height=height, x=x, y=y,
+            self.name(), os.path.join(UI, "index.html"), js_api=self.api, width=width, height=height, x=x, y=y,
             min_size=(760, 480), maximized=self.settings.get("start_maximized", True),   # (View > Start Maximized)
             background_color="#111110", hidden=not self.settings.get("show_window", True))
         self.bar = webview.create_window(
@@ -469,11 +469,15 @@ class App:
         self.show_main()
         self.bus.put(("open_training", {}))
 
+    def name(self):
+        """With her face on she's Yo Claudia; otherwise (no face) it's Yo Claude."""
+        return "Yo Claudia" if self.settings.get("avatar") is True else "Yo Claude"
+
     def update_tray(self):
         if self.tray:
             moving = self.settings.get("tray_animate", True)   # (Options > Animated Tray Icon)
             self.tray.icon = icons.tray_frame(self.display, self.tick if moving else 1)
-            self.tray.title = f"Yo Claude – {self.display.replace('_', ' ')}"
+            self.tray.title = f"{self.name()} – {self.display.replace('_', ' ')}"
 
     def animate(self):
         while True:
@@ -623,6 +627,11 @@ class Api:
         a.commands.put("settings")
         a.update_bar_visibility()
         a.emit_settings()
+        if key == "avatar":
+            try:
+                a.main.set_title(a.name())
+            except Exception as e:
+                log.debug("set_title: %s", e)
 
     # --- folders ---
     def pick_folder(self):

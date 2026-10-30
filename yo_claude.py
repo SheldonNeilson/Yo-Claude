@@ -31,6 +31,7 @@ DATA_DIR = os.path.join(os.path.expanduser("~"), ".yoclaude")
 
 # --- settings -----------------------------------------------------------------
 WAKE_PHRASE = "yo claude"
+EXTRA_WAKE = ["yo claudia"]   # with her face on, she's Yo Claudia: either name wakes her
 VOSK_MODEL = os.path.join(DATA_DIR, "models", "vosk-model-small-en-us-0.15")
 WHISPER_MODEL = "small.en"   # standard speech recognition
 # "More accurate speech recognition": bigger and ~2x slower (1.5 GB). On clear speech small.en did as well in tests;
@@ -156,7 +157,7 @@ class VoskWake:
     def set_alternates(self, alternates):
         """Extra phrases that count as the wake word for this person (from training: how they say it)."""
         import vosk
-        self.phrases = [self.phrase] + [a for a in alternates if a and a != self.phrase]
+        self.phrases = [self.phrase] + [a for a in [*EXTRA_WAKE, *alternates] if a and a != self.phrase]
         words = {w for p in self.phrases for w in p.split()}
         grammar = self.phrases + [d for d in self.DECOYS if d not in words or d in self.phrase.split()] + ["[unk]"]
         self.rec = vosk.KaldiRecognizer(self.model, SAMPLE_RATE, json.dumps(grammar))
@@ -250,7 +251,7 @@ class Transcriber:
 
 def strip_wake_words(text, alternates=()):
     """ "Yo Claude, what's the weather" -> "what's the weather" (however the wake words were transcribed)."""
-    names = "|".join(["claude", "cloud", "clod", "claud", "clawed", "clyde", "clode", "clued"] +
+    names = "|".join(["claudia", "claude", "cloud", "clod", "claud", "clawed", "clyde", "clode", "clued"] +
                      [re.escape(a.split()[-1]) for a in alternates if a])
     return re.sub(rf"^\W*(?:(?:hey|okay|ok)\W+)?(?:yo|yeah|you|your|yoh|yow|hello)?\W*(?:{names})\b\W*", "", text,
                   count=1, flags=re.I).strip()

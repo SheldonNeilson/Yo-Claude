@@ -110,7 +110,7 @@ function handle(e) {
     case "speech": avatar.speech(e); break;
     case "dictation": dictation(e); break;
     case "live": if (S.active && e.session === S.active.id) transcript.live(e.image); break;
-    case "settings": S.settings = e.settings; renderToggles(); avatar.apply(); renderBusy(); break;
+    case "settings": S.settings = e.settings; renderToggles(); avatar.apply(); renderBusy(); renderName(); break;
     case "folder": S.folder = e.folder; renderHead(); break;
     case "confirm_quit":
       confirmBox(`Claude is in the middle of a reply in ${e.busy.map((b) => `“${b.title}”`).join(", ")}. ` +
@@ -157,6 +157,12 @@ function renderFolder() {
   if (document.activeElement !== $("#folderPath")) $("#folderPath").value = cwd || "";
   $("#modeBadge").textContent = cwd ? "CODE" : "CHAT";
   $("#modeBadge").className = "badge " + (cwd ? "code" : "chat");
+}
+// with her face on she's Yo Claudia; otherwise Yo Claude
+function renderName() {
+  const her = S.settings?.avatar === true;
+  $("#top .brand").textContent = her ? "YO CLAUDIA" : "YO CLAUDE";
+  document.title = her ? "Yo Claudia" : "Yo Claude";
 }
 function renderToggles() {
   $("#tListen").classList.toggle("on", S.settings.listening !== false);
@@ -1767,7 +1773,7 @@ window.addEventListener("pywebviewready", async () => {
   $("#sessionHead").insertBefore(follow.button("chat"), $("#sessionHead .spacer").nextSibling);
   renderToggles(); renderTree(); renderHead(); renderTranscript(); renderState(); planBox.update();
   setTimeout(() => composer.preload(), 1500);
-  avatar.wanted = true; avatar.apply();   // (her face loads when it's turned on: Options > Face in Sidebar)
+  avatar.wanted = true; avatar.apply(); renderName();   // (her face loads when it's turned on: Options > Face in Sidebar)
   if (S.settings.panel_open) $("#app").classList.add("with-panel");
   if (S.settings.side_open === false) $("#app").classList.add("no-side");
   panes.render();
