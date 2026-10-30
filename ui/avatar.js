@@ -215,7 +215,7 @@ const avatar = {
   },
   // the start of an expression, played only part way and back: a glance, a moment's thought. Not the big-smile ones.
   microClips() {
-    return Object.keys(this.clips).filter((n) => !["idle", "talking", "hair", "idle_tuck", "laughing", "looking"].includes(n)
+    return Object.keys(this.clips).filter((n) => !["idle", "hair", "idle_tuck", "laughing", "looking"].includes(n) && !n.startsWith("talk")
       && !n.includes("blink") && (this.shutAt?.[n] ?? 99) >= 6);   // (not if her eyes shut for long straight away)
   },
   // idle, back at the start frame: a mannerism if one's due (or a mood to show), else now and then a small change of
