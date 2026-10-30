@@ -36,6 +36,7 @@ DATA_DIR = os.path.join(os.path.expanduser("~"), ".yoclaude")
 PC_CONTROL_DATA = os.path.join(DATA_DIR, "pc-control")   # its log, saved macros and kill-switch file
 CHAT_DIR = os.path.join(DATA_DIR, "home")       # cwd for chats: outside any project, so nothing project-level loads
 TRASH_DIR = os.path.join(DATA_DIR, "trash")
+VOICE_NOTE_MODEL = "claude-haiku-5-5"   # writes the short spoken lines (a separate call: nothing lands in the chat)
 REOPEN_RECENT_S = 3 * 3600   # at start-up, the last conversation comes back if you used it this recently
 TASKS_KEEP_S = 12 * 3600        # finished tasks stay in the tasks panel this long
 TASKS_SHOWN = 40
@@ -201,6 +202,30 @@ def is_noise(text):
     return t.startswith(("<command-", "<local-command", "Caveat:", "<system-reminder", "[Request interrupted"))
 
 
+async def spoken_line(title, asked, reply, short_version=False):
+    """One short line to say out loud about a reply, from a separate quick Claude call that isn't saved anywhere
+    (no session, no tools), so none of this prompting shows in the conversation or adds to its context."""
+    if short_version:
+        task = ("Say the short version of Claude's message below, out loud, in one or two sentences (at most 35 "
+                "words): the gist and anything it asks the user. Plain spoken English: no markdown, paths or code.")
+    else:
+        task = ("Claude just finished replying in the session below and is now waiting for the user, who may be away "
+                "from the screen. Write ONE short spoken sentence (at most 20 words) to tell them: start with the "
+                "session's short name, then the single most useful thing (the outcome, or the question it's asking). "
+                "Not a summary of everything. Plain spoken English: no markdown, paths or code.")
+    prompt = (f"{task}\n\nSession: {title}\n\nWhat the user asked:\n{(asked or '')[:1500]}\n\n"
+              f"Claude's message:\n{(reply or '')[:6000]}\n\nReply with the sentence only.")
+    opts = sdk.ClaudeAgentOptions(model=VOICE_NOTE_MODEL, tools=[], cwd=CHAT_DIR, setting_sources=["project"],
+                                  max_turns=1, thinking={"type": "disabled"},
+                                  system_prompt="You write very short spoken notifications for a voice assistant.",
+                                  extra_args={"no-session-persistence": None})
+    text = ""
+    async for m in sdk.query(prompt=prompt, options=opts):
+        if isinstance(m, sdk.AssistantMessage):
+            text += "".join(b.text for b in m.content if isinstance(b, sdk.TextBlock))
+    return " ".join(text.split()).strip(' "')
+
+
 def system_note(text):
     """Notices stored in the transcript as if you'd typed them: background-task reports (<task-notification>) and
     Yo Claude's own follow-ups ("[Yo Claude] ..."). Returns the note to show instead of your bubble, or None."""
@@ -304,6 +329,7 @@ class Session:
             self.load_messages(messages, mark, stamps)
         finally:
             self.loading_history, self.history_ts = False, None
+        self.restore_spoken()
 
     def load_messages(self, messages, mark, stamps):
         for m in messages:
@@ -441,6 +467,56 @@ class Session:
             self.router.evict(keep=self)
             asyncio.ensure_future(self.learn_commands())
 
+    def loading_history_flag(self):
+        return bool(getattr(self, "loading_history", False))
+
+    def last_exchange(self, upto=None):
+        """(index of Claude's last message, its text, what you asked before it), up to item `upto`."""
+        items = self.items[:upto + 1] if upto is not None else self.items
+        reply = next((i for i in reversed(items) if i.get("kind") == "assistant" and i.get("text", "").strip()), None)
+        if not reply:
+            return None, "", ""
+        asked = next((i for i in reversed(self.items[:reply["i"]]) if i.get("kind") == "user"), None)
+        return reply["i"], reply["text"], (asked or {}).get("text", "")
+
+    async def announce(self):
+        """Claude is done and waiting for you: say so in one short line, and show it as a voice bubble."""
+        st = self.router.settings
+        if not st.get("notify_done", True) or not st.get("voice_replies", True):
+            return
+        i, reply, asked = self.last_exchange()
+        if i is None or any(x.get("kind") == "spoken" and x.get("for") == i for x in self.items):
+            return
+        try:
+            line = await spoken_line(self.router.title_of(self.id), asked, reply)
+        except Exception as e:
+            log.warning("Couldn't write the spoken note for %s: %s", self.id, e)
+            return
+        if line:
+            self.add_spoken(i, line, say=True)
+
+    def add_spoken(self, i, line, say):
+        """A voice bubble under Claude's message `i` (kept in Yo Claude's notes, so it's there after a restart)."""
+        self.add({"kind": "spoken", "text": line, "for": i, "ts": time.time()})
+        notes = self.router.meta.session(self.id).get("spoken") or []
+        key = hashlib.sha1(self.items[i].get("text", "").encode("utf-8", "replace")).hexdigest()[:16]
+        self.router.meta.update(self.id, spoken=(notes + [{"key": key, "text": line}])[-200:])
+        if say:
+            self.router.emit("announce", session=self.id, text=line)
+
+    def restore_spoken(self):
+        """Voice bubbles from earlier, back under the messages they were about."""
+        notes = self.router.meta.session(self.id).get("spoken") or []
+        if not notes:
+            return
+        by_key = {}
+        for it in self.items:
+            if it.get("kind") == "assistant":
+                by_key[hashlib.sha1(it.get("text", "").encode("utf-8", "replace")).hexdigest()[:16]] = it["i"]
+        for n in notes:
+            if n.get("key") in by_key:
+                self.add({"kind": "spoken", "text": n["text"], "for": by_key[n["key"]]})
+
     def rewind_mark(self):
         """The pending rewind, if it still applies: once anything new hangs off the rewind point (a message sent
         since, from here or another window), the conversation has already moved on to the new branch."""
@@ -531,6 +607,9 @@ class Session:
 
     def after_turn(self):
         self.stream_item = None
+        if not self.voice_turn and not self.loading_history_flag():
+            asyncio.ensure_future(self.announce())
+        self.voice_turn = False   # a later reply on its own (a background task finished) gets announced
         if self.think_item is not None:   # a thought that never got its closing block (stopped mid-way)
             self.think_item["streaming"] = False
             self.changed(self.think_item)
@@ -1431,6 +1510,33 @@ class Router:
                        "session_id": s.id}
             prompt = message()
         return self.run(s.turn(prompt, voice, item))
+
+    def say_short(self, sid, i):
+        """The short spoken version of Claude's message `i`: said out loud and shown as a voice bubble under it."""
+        s = self.live.get(sid)
+        if not s or not (0 <= i < len(s.items)) or s.items[i].get("kind") != "assistant":
+            return {"error": "That message isn't there any more."}
+        done = next((x for x in s.items if x.get("kind") == "spoken" and x.get("for") == i), None)
+        if done:   # already have it: just say it again
+            self.emit("announce", session=sid, text=done["text"])
+            return {}
+
+        async def make():
+            _, reply, asked = s.last_exchange(upto=i)
+            try:
+                line = await spoken_line(self.title_of(sid), asked, reply, short_version=True)
+            except Exception as e:
+                log.warning("Couldn't write the short version: %s", e)
+                self.emit("notice", text="Couldn't make the short version just now.")
+                return
+            if line:
+                s.add_spoken(i, line, say=True)
+        self.run(make())
+        return {}
+
+    def say_again(self, text):
+        self.emit("announce", text=text)
+        return {}
 
     def retry(self, sid=None):
         """Send your last message in a session again (after an error)."""

@@ -335,6 +335,16 @@ code.pathlink:hover { color: var(--orange2); background: var(--bg3); }
 .thought.live .ttext::after { content: "▍"; color: var(--amber); animation: blink 1s steps(1) infinite; font-style: normal; }
 @keyframes blink { 50% { opacity: 0; } }
 
+/* voice bubbles: what Yo Claude said out loud about a message; and the 🔊 button on Claude's bubbles */
+.spoken { display: flex; align-items: baseline; gap: 8px; width: fit-content; max-width: min(80%, 110ch);
+  margin: -4px 0 12px 4ch; padding: 3px 10px; border: 1px dashed var(--amber); color: var(--amber); font-size: 12px; }
+.spoken .stext { font-style: italic; }
+.spoken button { padding: 0 6px; font-size: 11px; flex: none; opacity: .6; }
+.spoken:hover button { opacity: 1; }
+.msg.assistant .saybtn { position: absolute; top: -1.5em; right: 9ch; padding: 0 5px; font-size: 11px; opacity: 0;
+  background: var(--bg2); }
+.msg.assistant:hover .saybtn { opacity: 1; }
+
 /* pictures Claude looked at, under a step group's header */
 .gpics { display: flex; gap: 6px; padding: 4px 10px 8px 30px; flex-wrap: wrap; }
 .gpic { height: 110px; max-width: 260px; object-fit: contain; border: 1px solid var(--line2); background: #000; cursor: zoom-in; }

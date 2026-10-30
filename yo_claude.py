@@ -416,6 +416,7 @@ class Assistant:
         self.worker = ThreadPoolExecutor(6)   # Claude turns (one per queued voice request) and approvals meanwhile
         self.job = self.utterance = None
         self.backlog = []            # voice requests queued while Claude was answering one: (generation, future), in order
+        self.announcements = []      # short "it's done" lines waiting until the voice is free
         self.approval = None         # (session, id, summary) being asked about by voice
         self.approval_job = None
         self.generation = 0          # bumps on stop, so a cancelled job's late result is ignored
@@ -436,6 +437,9 @@ class Assistant:
         self.emit("state", state=state, text=text, hold=hold)
 
     def go_idle(self, text="", hold=0.0):
+        if self.announcements and self.settings["voice_replies"]:   # a session finished meanwhile: say so now
+            line = self.announcements.pop(0)
+            return self.say(line, lambda _: self.go_idle(line, TEXT_HOLD_S))
         if self.backlog:   # a request you queued by voice is next: wait for its reply instead of going idle
             self.job = self.backlog.pop(0)
             return self.set_state(THINKING, text, hold)
@@ -586,6 +590,10 @@ class Assistant:
                     self.mic.start()
                     self.set_state(IDLE, "Training: listening to how you say it", hold=3600)
                 else:
+                    self.go_idle()
+            elif isinstance(cmd, tuple) and cmd[0] == "announce":
+                self.announcements.append(cmd[1])
+                if self.state in (IDLE, PAUSED):   # free now; otherwise it waits until the voice is
                     self.go_idle()
             elif isinstance(cmd, tuple) and cmd[0] == "alternates":
                 self.wake.set_alternates(cmd[1])

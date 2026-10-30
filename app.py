@@ -268,6 +268,8 @@ class App:
                     self.write_status()
                 elif kind == "notice":
                     self.notify(d["text"])
+                elif kind == "announce":   # a session is done: the voice says its short line when it's free
+                    self.commands.put(("announce", d["text"]))
                 main_events.append({"kind": kind, **d})
             new_display = display_state(self.voice_state, self.work_state)
             if new_display != self.display or any(e["kind"] in ("state", "work") for e in main_events):
@@ -541,6 +543,14 @@ class Api:
                 "workspaces": r.workspaces(), "groups": r.meta.data["groups"], "sessions": r.list(r.folder),
                 "active": r.describe(active) if active else None, "items": active.items if active else [],
                 "display": {"state": a.display, "voice": a.voice_state, "work": a.work_state, "text": a.voice_text}}
+
+    def say_short(self, i):
+        """The 🔊 button on Claude's messages: the short spoken version of message `i` in the open session."""
+        r = self._app.router
+        return r.say_short(r.active.id, i) if r.active else {"error": "Open a session first."}
+
+    def say_again(self, text):
+        return self._app.router.say_again(text)
 
     def retry(self):
         """Send your last message in the open session again (the retry button on an error)."""

@@ -532,7 +532,14 @@ Click to open` : "What Claude saw · click to enlarge";
     } else {
       const node = buildItem(it);
       const old = this.els.get(it.i);
-      if (old) old.replaceWith(node); else { t.appendChild(node); this.last = { item: it.i }; }
+      const after = it.kind === "spoken" && this.els.get(it.for);
+      if (old) old.replaceWith(node);
+      else if (after) {   // under the message it's about, after any earlier voice bubbles for it
+        let at = after;
+        while (at.nextElementSibling?.classList.contains("spoken")) at = at.nextElementSibling;
+        at.after(node);
+        if (!after.nextElementSibling || after === t.lastElementChild) this.last = { item: it.i };
+      } else { t.appendChild(node); this.last = { item: it.i }; }
       this.els.set(it.i, node);
       node.querySelectorAll("pre code").forEach((c) => { try { hljs.highlightElement(c); } catch (_) {} });
       addCopyButtons(node, it);
@@ -570,6 +577,17 @@ function addCopyButtons(node, it) {
     b.title = "Copy this message";
     b.onclick = (e) => { e.stopPropagation(); copyText(raw, "message copied"); };
     node.appendChild(b);
+    if (it.kind === "assistant" && !it.streaming) {
+      const v = el("button", "saybtn", "🔊 say it");
+      v.dataset.tip = "Hear the short version of this message";
+      v.onclick = async (e) => {
+        e.stopPropagation(); v.disabled = true; v.textContent = "🔊 …";
+        const r = await api().say_short(it.i);
+        v.disabled = false; v.textContent = "🔊 say it";
+        if (r?.error) toast(r.error, "error");
+      };
+      node.appendChild(v);
+    }
   }
   node.querySelectorAll("pre").forEach((pre) => {
     const b = el("button", "codecopy", "copy");
@@ -637,6 +655,14 @@ function buildItem(it) {
     case "task": return taskCard(it);
     case "cancelled": return el("div", "hidden");   // a queued message you took back
     case "thinking": return thoughtBubble(it);
+    case "spoken": {   // what Yo Claude said out loud about Claude's message, in case you missed it
+      const n = el("div", "spoken", `<span class="sicon">🔊</span><span class="stext">“${esc(it.text)}”</span>`);
+      const b = el("button", "", "▶ again");
+      b.dataset.tip = "Say it again";
+      b.onclick = (e) => { e.stopPropagation(); api().say_again(it.text); };
+      n.appendChild(b);
+      return n;
+    }
     case "note": return el("div", "msg note", "⧗ " + esc(it.text));
     case "result": {
       const k = (n) => n >= 1e6 ? (n / 1e6).toFixed(1) + "M" : n >= 1000 ? (n / 1000).toFixed(1) + "k" : String(n || 0);
