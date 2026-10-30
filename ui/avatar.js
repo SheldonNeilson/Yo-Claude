@@ -2,15 +2,15 @@
 // ASCII live, frame by frame. The characters stay a fixed small size, so a wider panel gets more of them (more
 // detail); the height follows, within part of the panel. Every clip starts from the same frame, so she switches
 // clips seamlessly: a clip plays forward and back, and to change clips she rewinds quickly to that shared frame.
-// She follows the voice (talking, listening, thinking) and, when idle, now and then looks around, plays with her
-// hair or laughs.
+// She follows the voice (talking, listening, thinking). When idle, her expression shifts every couple of seconds (the
+// start of another clip, played part way and back), and 7 to 16 s after one mannerism ends she does another.
 "use strict";
 const RAMP = " .:-=+o/*#0@";   // sparse to dense: white on the dark window, so bright = dense
 const AW = 200;                // the analysis grid frames are decoded to (columns); more than any panel needs
 
 const avatar = {
   el: null, pre: null, fxEl: null, fps: 12, clips: {}, ready: false,
-  clip: "idle", frame: 0, dir: 1, rewinding: false, idleExtra: null, nextIdleExtra: 0,
+  clip: "idle", frame: 0, dir: 1, turnAt: 20, rewinding: false, idleExtra: null, nextIdleExtra: 0,
   cols: 0, rows: 0, AH: 0, lv: null, glitchRow: -1,
 
   async init() {
@@ -33,7 +33,7 @@ const avatar = {
     }
     if (!this.ready) return;
     new ResizeObserver(() => this.fit()).observe(side);
-    this.nextIdleExtra = Date.now() + 12000;
+    this.nextIdleExtra = Date.now() + 8000;
     setInterval(() => this.tick(), 1000 / this.fps);
   },
   apply() { this.el?.classList.toggle("hidden", S.settings?.avatar === false); },
@@ -93,6 +93,29 @@ const avatar = {
   // a mood from her reaction to a reply (sessions.py MOODS): that clip plays next, once, if she has it
   react(clip) { if (this.clips[clip]) { this.moodClip = clip; this.moodUntil = Date.now() + 20000; } },
   idleExtras() { return Object.keys(this.clips).filter((n) => n.startsWith("idle_") || ["looking", "hair", "laughing"].includes(n)); },
+  // the start of an expression, played only part way and back: a glance, a hint of a smile, a moment's thought
+  microClips() {
+    return Object.keys(this.clips).filter((n) => n !== "idle" && n !== "talking" && n !== "hair" && n !== "idle_tuck");
+  },
+  // idle, back at the start frame: a mannerism if one's due (or a mood to show), else a small change of expression
+  // (most of the time) or a short stretch of her idle sway. Something changes every couple of seconds.
+  nextIdle(now) {
+    this.microClip = null;
+    if (this.idleExtra && this.clip === this.idleExtra && !this.extraPending) {   // just played: the next in a while
+      this.idleExtra = null; this.nextIdleExtra = now + 7000 + Math.random() * 9000;
+    }
+    this.extraPending = false;
+    const extras = this.idleExtras();
+    if (!this.idleExtra && extras.length && now > this.nextIdleExtra) {
+      this.idleExtra = this.any(extras, this.lastExtra); this.lastExtra = this.idleExtra;
+    }
+    if (this.idleExtra) { this.clip = this.idleExtra; this.turnAt = 0; return; }   // the whole thing
+    const micro = this.microClips();
+    if (micro.length && Math.random() < 0.6) {
+      this.clip = this.microClip = this.any(micro, this.lastMicro); this.lastMicro = this.clip;
+      this.turnAt = 5 + Math.floor(Math.random() * 12);   // 0.4 to 1.4 s out, the same back
+    } else { this.clip = "idle"; this.turnAt = 10 + Math.floor(Math.random() * 26); }
+  },
   any(list, not) { const l = list.length > 1 ? list.filter((n) => n !== not) : list; return l[Math.floor(Math.random() * l.length)]; },
 
   // one frame of greyscale -> ASCII: down to the character grid, local contrast, her tones spread, the ramp
@@ -131,34 +154,30 @@ const avatar = {
     let want = group.includes(this.clip) ? this.clip : this.any(group);   // stay on a suitable clip until it ends
     if (this.moodClip && now > this.moodUntil) this.moodClip = null;   // too late to react to that now
     if (st === "idle" && this.moodClip) {   // reacting to what just happened (after she's done speaking)
-      this.idleExtra = this.moodClip; this.moodClip = null; this.nextIdleExtra = now + 9000 + Math.random() * 12000;
+      this.idleExtra = this.moodClip; this.extraPending = true; this.moodClip = null;
     }
-    if (st === "idle") {
-      want = "idle";
-      if (this.idleExtra) want = this.idleExtra;   // a mannerism about to play, or playing: let it finish
-      else if (now > this.nextIdleExtra) {   // now and then, something on her own
-        const extras = this.idleExtras();
-        this.idleExtra = extras.length ? this.any(extras, this.lastExtra) : null;
-        this.lastExtra = this.idleExtra;
-        this.nextIdleExtra = now + 8000 + Math.random() * 16000;
-        want = this.idleExtra || "idle";
-      }
-    }
+    if (st === "idle")   // idle picks its next move each time she's back at the start frame (nextIdle)
+      want = this.idleExtra || (this.clip === "idle" || this.clip === this.microClip ? this.clip : "idle");
+    else this.turnAt = 0;   // the other states play their clips all the way
     const frames = this.clips[this.clip];
     const lipSync = st === "speaking" && this.clip === "talking" && this.mouth && !this.rewinding;
     if (want !== this.clip && !this.rewinding) this.rewinding = true;   // back to the shared start frame first
     if (this.rewinding) {
       this.frame = Math.max(0, this.frame - 3);
-      if (this.frame === 0) { this.rewinding = false; this.clip = want; this.dir = 1; }
+      if (this.frame === 0) {
+        this.rewinding = false; this.dir = 1;
+        if (st === "idle") this.nextIdle(now); else { this.clip = want; this.turnAt = 0; }
+      }
     } else if (lipSync) {
       this.frame = this.lipFrame(now);
     } else {
+      const end = Math.min(frames.length - 1, this.turnAt || Infinity);   // a short play turns back early
       this.frame += this.dir;
-      if (this.frame >= frames.length - 1) { this.frame = frames.length - 1; this.dir = -1; }
-      if (this.frame <= 0) {   // a full play forward and back: what next?
+      if (this.frame >= end) { this.frame = end; this.dir = -1; }
+      if (this.frame <= 0) {   // forward and back: what next?
         this.frame = 0; this.dir = 1;
-        if (this.clip === this.idleExtra) { this.idleExtra = null; this.clip = "idle"; }
-        else if (group.length > 1 && st !== "idle") this.clip = this.any(group, this.clip);   // another of the kind
+        if (st === "idle") this.nextIdle(now);
+        else if (group.length > 1) this.clip = this.any(group, this.clip);   // another of the kind
       }
     }
     this.glitchRow = Math.random() < 0.03 ? Math.floor(Math.random() * this.rows) : -1;
