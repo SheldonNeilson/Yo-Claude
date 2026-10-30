@@ -49,7 +49,7 @@ window.panel = {
       `<button data-t="files" class="${this.tab === "files" ? "on" : ""}">files</button>` +
       `<button data-t="changes" class="${this.tab === "changes" ? "on" : ""}">changes${n ? ` <b>${n}</b>` : ""}</button>` +
       `<button data-t="git" class="${this.tab === "git" ? "on" : ""}">git</button>` +
-      `<button data-t="tasks" class="${this.tab === "tasks" ? "on" : ""}${running ? " busy" : ""}" title="Background commands and subagents` +
+      `<button data-t="tasks" class="${this.tab === "tasks" ? "on" : ""}${running ? " busy" : ""}${tasks.flashUntil > Date.now() ? " pulse" : ""}" title="Background commands and subagents` +
       `${running ? `
 ${running} running in this session` : ""}${elsewhere ? `
 ${elsewhere} running in other sessions` : ""}">` +

@@ -18,12 +18,11 @@ window.tasks = {
   async poll() {
     const list = await api().tasks() || [];
     const fresh = list.filter((t) => t.status === "running" && this.here(t) && this.seen && !this.seen.has(t.key));
-    const first = this.seen === null;
     this.seen = new Set(list.map((t) => t.key));
     this.list = list;
-    // A task starting in this session (or running when the window opens) brings the panel up on this tab.
-    if (fresh.length || (first && this.runningHere().length)) this.show();
-    else if (panel.shown() && panel.tab === "tasks") this.render();
+    // A task starting never switches the panel away from where you put it: the tasks tab just pulses for a bit.
+    if (fresh.length) this.flashUntil = Date.now() + 4000;
+    if (panel.shown() && panel.tab === "tasks") this.render();
     else panel.renderTabs();
     if (this.open && panel.shown() && panel.tab === "tasks") this.loadOutput();
   },

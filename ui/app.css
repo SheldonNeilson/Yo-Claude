@@ -161,6 +161,8 @@ pre:hover .codecopy { opacity: 1; }
 .ptabs button { white-space: nowrap; padding: 2px 7px; }
 .ptabs i { font-style: normal; color: var(--faint); }
 .ptabs button.busy b { color: var(--violet, #b9a3ff); }
+.ptabs button.pulse { animation: tabpulse 1s ease-in-out 4; }   /* a task started: noticed, not switched to */
+@keyframes tabpulse { 50% { border-color: #b9a3ff; color: #b9a3ff; box-shadow: 0 0 6px #b9a3ff; } }
 .tasklist .task { align-items: flex-start; gap: 8px; padding: 6px 10px; cursor: pointer; }
 .task .tstat { flex: none; width: 1.2em; text-align: center; }
 .task .tspin, .taskhead .tspin { color: #b9a3ff; }
