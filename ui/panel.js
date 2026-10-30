@@ -1,4 +1,5 @@
-// Right-hand panel: files / changes / git for the active session's folder, plus the header branch pill.
+// Right-hand panel: files / changes / git for the active session's folder, background tasks (tasks.js), and the
+// header branch pill.
 "use strict";
 window.panel = {
   tab: "files", openDirs: new Set([""]), dirs: {}, changes: null, git: null, timer: null,
@@ -29,17 +30,31 @@ window.panel = {
     return m;
   },
 
+  renderTabs() {
+    const p = $("#panel");
+    if (!p.querySelector(".ptabs")) return;
+    const n = this.changes?.files?.length || 0, running = tasks.running().length;
+    p.querySelector(".ptabs .tabs").innerHTML =
+      `<button data-t="files" class="${this.tab === "files" ? "on" : ""}">files</button>` +
+      `<button data-t="changes" class="${this.tab === "changes" ? "on" : ""}">changes${n ? ` <b>${n}</b>` : ""}</button>` +
+      `<button data-t="git" class="${this.tab === "git" ? "on" : ""}">git</button>` +
+      `<button data-t="tasks" class="${this.tab === "tasks" ? "on" : ""}${running ? " busy" : ""}" title="Background commands and subagents">` +
+      `tasks${running ? ` <b>${running}</b>` : tasks.list.length ? ` <i>${tasks.list.length}</i>` : ""}</button>`;
+    p.querySelectorAll("[data-t]").forEach((b) => b.onclick = async () => {
+      this.tab = b.dataset.t;
+      if (this.tab === "files") await this.loadDirs();
+      this.render();
+      if (this.tab === "tasks") tasks.poll();
+    });
+  },
   render() {
     const p = $("#panel");
-    const n = this.changes?.files?.length || 0;
-    p.innerHTML = `<div class="ptabs">
-      <button data-t="files" class="${this.tab === "files" ? "on" : ""}">files</button>
-      <button data-t="changes" class="${this.tab === "changes" ? "on" : ""}">changes${n ? ` <b>${n}</b>` : ""}</button>
-      <button data-t="git" class="${this.tab === "git" ? "on" : ""}">git</button>
+    p.innerHTML = `<div class="ptabs"><span class="tabs"></span>
       <span class="spacer"></span><button data-act="refresh" title="Refresh">⟳</button></div><div id="pbody"></div>`;
-    p.querySelectorAll("[data-t]").forEach((b) => b.onclick = async () => { this.tab = b.dataset.t; if (this.tab === "files") await this.loadDirs(); this.render(); });
-    p.querySelector("[data-act=refresh]").onclick = () => this.load();
+    this.renderTabs();
+    p.querySelector("[data-act=refresh]").onclick = () => this.tab === "tasks" ? tasks.poll() : this.load();
     const body = $("#pbody");
+    if (this.tab === "tasks") return tasks.render();
     if (!this.cwd) { body.innerHTML = `<div class="pempty">No folder.<br>Pick one at the top left to see files, changes and git.</div>`; return; }
     ({ files: () => this.renderFiles(body), changes: () => this.renderChanges(body), git: () => this.renderGit(body) })[this.tab]();
   },

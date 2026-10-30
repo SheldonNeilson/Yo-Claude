@@ -89,7 +89,32 @@ def read_file(root, rel, limit=MAX_PREVIEW):
         data = f.read(limit)
     if b"\0" in data[:8000]:
         return {"path": rel, "binary": True, "size": size}
-    return {"path": rel, "text": data.decode("utf-8", errors="replace"), "size": size, "truncated": size > limit}
+    try:   # only plain UTF-8 can be edited and saved back without changing anything else
+        data.decode("utf-8")
+        utf8 = True
+    except UnicodeDecodeError:
+        utf8 = False
+    return {"path": rel, "text": data.decode("utf-8", errors="replace").lstrip("﻿"), "size": size,
+            "truncated": size > limit, "editable": utf8 and size <= limit, "mtime": os.path.getmtime(full)}
+
+
+def write_text(full, text, mtime=None):
+    """Save an edited text file, keeping its line endings and byte-order mark. Refuses if it changed on disk since
+    it was opened (Claude may have edited it meanwhile)."""
+    if mtime is not None and abs(os.path.getmtime(full) - mtime) > 0.001:
+        return {"error": "This file changed on disk since you opened it, so saving would overwrite those changes. "
+                         "Copy your edits, close this, open the file again and paste them back.", "conflict": True}
+    with open(full, "rb") as f:
+        old = f.read()
+    text = text.replace("\r\n", "\n")
+    if b"\r\n" in old:
+        text = text.replace("\n", "\r\n")
+    data = (b"\xef\xbb\xbf" if old.startswith(b"\xef\xbb\xbf") else b"") + text.encode("utf-8")
+    tmp = full + ".yoclaude-tmp"
+    with open(tmp, "wb") as f:
+        f.write(data)
+    os.replace(tmp, full)
+    return {"mtime": os.path.getmtime(full), "size": len(data)}
 
 
 def attachment_text(root, rel):

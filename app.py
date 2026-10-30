@@ -646,7 +646,18 @@ class Api:
         full = self._resolve(path, cwd)
         if not full or not os.path.isfile(full):
             return {"error": missing(path, cwd)}
-        return workspace.read_file(os.path.dirname(full), os.path.basename(full))
+        return dict(workspace.read_file(os.path.dirname(full), os.path.basename(full)), full=full)
+
+    def save_text(self, path, text, mtime=None, cwd=None):
+        """Save a text file edited in the viewer."""
+        full = self._resolve(path, cwd)
+        if not full or not os.path.isfile(full):
+            return {"error": missing(path, cwd)}
+        try:
+            return workspace.write_text(full, text, mtime)
+        except OSError as e:
+            log.warning("save %s failed: %s", full, e)
+            return {"error": open_error(full, e)}
 
     def open_path(self, path, how="open", cwd=None):
         return self._open(path, cwd, how)
@@ -910,6 +921,12 @@ class Api:
 
     def stop_task(self, sid, task_id):
         return self._app.router.stop_task(sid, task_id)
+
+    def tasks(self):
+        return self._app.router.tasks_list()
+
+    def task_output(self, key):
+        return self._app.router.task_output(key)
 
     def ui_loaded(self, info):
         log.info("Window loaded: %s", str(info)[:300])

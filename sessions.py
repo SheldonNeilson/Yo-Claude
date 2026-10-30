@@ -35,6 +35,10 @@ DATA_DIR = os.path.join(os.path.expanduser("~"), ".yoclaude")
 PC_CONTROL_DATA = os.path.join(DATA_DIR, "pc-control")   # its log, saved macros and kill-switch file
 CHAT_DIR = os.path.join(DATA_DIR, "home")       # cwd for chats: outside any project, so nothing project-level loads
 TRASH_DIR = os.path.join(DATA_DIR, "trash")
+TASKS_KEEP_S = 12 * 3600        # finished tasks stay in the tasks panel this long
+TASKS_SHOWN = 40
+TASK_TAIL_BYTES = 64 * 1024     # how much of a background command's output the panel shows
+AGENT_QUIET_S = 120             # a subagent whose transcript hasn't changed for this long has probably stopped
 META_PATH = os.path.join(DATA_DIR, "sessions.json")
 PROJECTS_DIR = os.path.join(os.path.expanduser("~"), ".claude", "projects")
 PC_CONTROL_SERVER = "screen-control"
@@ -626,6 +630,39 @@ class Session:
 
 
 # --- the router -------------------------------------------------------------------------------------------------
+def agent_steps(path, limit=400):
+    """A subagent's transcript as readable lines: its brief, what it said, and each tool it used."""
+    lines = []
+
+    def brief(inp):
+        inp = inp or {}
+        for k in ("description", "command", "file_path", "pattern", "url", "query", "prompt"):
+            if inp.get(k):
+                return " ".join(str(inp[k]).split())[:160]
+        return ""
+    try:
+        with open(path, encoding="utf-8") as f:
+            for raw in f:
+                try:
+                    d = json.loads(raw)
+                except ValueError:
+                    continue
+                content = (d.get("message") or {}).get("content")
+                if d.get("type") == "user" and isinstance(content, str):
+                    lines.append("> " + content.strip())
+                elif d.get("type") == "assistant" and isinstance(content, list):
+                    for b in content:
+                        if b.get("type") == "text" and b.get("text", "").strip():
+                            lines.append(b["text"].strip())
+                        elif b.get("type") == "tool_use" and b.get("name") == "SubagentHandback":
+                            lines.append("✓ reported back:\n" + str((b.get("input") or {}).get("message", "")))
+                        elif b.get("type") == "tool_use":
+                            lines.append(f"⚙ {b.get('name')}  {brief(b.get('input'))}".rstrip())
+    except OSError as e:
+        return f"Couldn't read its transcript: {e}"
+    return "\n".join(lines[-limit:])
+
+
 class Router:
     """Owns the sessions. Thread-safe entry points; everything SDK runs on its own event loop."""
 
@@ -690,8 +727,7 @@ class Router:
         out = []
         for sid, state in self.work.items():
             s = self.live.get(sid)
-            title = (self.meta.session(sid).get("title") or (s.items[0].get("text", "")[:60] if s and s.items else "")
-                     or sid[:8])
+            title = self.title_of(sid)
             tasks = [t["description"] for t in s.running_tasks()] if s else \
                     [t.get("description") for t in self.detached.get(sid, [])]
             out.append({"id": sid, "title": title, "state": state, "tasks": tasks})
@@ -762,6 +798,83 @@ class Router:
         self.send("Yo Claude restarted while your background task kept running, so its completion notice didn't "
                   f"reach you. It has now finished: {names}. Check the result and carry on with what you said you'd "
                   "do when it was done.", sid=sid, origin="system")
+
+    # --- the tasks panel: background commands and subagents, across sessions ---
+    def title_of(self, sid):
+        s = self.live.get(sid)
+        return (self.meta.session(sid).get("title") or (s.items[0].get("text", "")[:60] if s and s.items else "")
+                or sid[:8])
+
+    def tasks_list(self):
+        """Background commands and subagents of the sessions Yo Claude has open or is following, newest first."""
+        out, cutoff = [], time.time() - TASKS_KEEP_S
+        sids = {sid: (s.cwd if s else None) for sid, s in self.live.items()}
+        for sid in self.detached:
+            sids.setdefault(sid, self.meta.session(sid).get("cwd"))
+        for sid, cwd in sids.items():
+            s, base = self.live.get(sid), {"session": sid, "title": self.title_of(sid), "cwd": cwd}
+            agents = self.subagents(sid, cwd)
+            agent_tools = {a["tool_use_id"] for a in agents}
+            shells = list(s.tasks.values()) if s else []
+            shells += [dict(t, status="running", detached=True) for t in self.detached.get(sid, [])]
+            for t in shells:
+                if t.get("tool_use_id") in agent_tools or (t.get("ended") or time.time()) < cutoff:
+                    continue
+                out.append({**base, "key": f"{sid}:{t['task_id']}", "kind": "shell", "task_id": t["task_id"],
+                            "description": t.get("description") or "background command", "status": t["status"],
+                            "started": t.get("started"), "ended": t.get("ended"), "summary": t.get("summary"),
+                            "detached": bool(t.get("detached")), "output_file": t.get("output_file")})
+            ids = {t.get("tool_use_id"): t["task_id"] for t in shells if t.get("tool_use_id")}
+            for a in agents:
+                a["task_id"] = ids.get(a["tool_use_id"])   # background agents can be stopped like commands
+                item = s.tool_item(a["tool_use_id"]) if s else None
+                if item and item.get("status") == "running":
+                    a["status"], a["ended"] = "running", None
+                if (a.get("ended") or time.time()) >= cutoff:
+                    out.append({**base, **a, "key": f"{sid}:{a['agent_id']}", "kind": "agent"})
+        return sorted(out, key=lambda t: (t["status"] != "running", -(t.get("started") or 0)))[:TASKS_SHOWN]
+
+    def subagents(self, sid, cwd):
+        """Claude Code keeps each subagent's transcript next to its session: <session>/subagents/agent-*.jsonl."""
+        folder = os.path.join(self.session_file(sid, cwd)[0], sid, "subagents")
+        out = []
+        try:
+            names = [n for n in os.listdir(folder) if n.endswith(".meta.json")]
+        except OSError:
+            return out
+        for n in names:
+            agent_id = n[len("agent-"):-len(".meta.json")]
+            log_file = os.path.join(folder, f"agent-{agent_id}.jsonl")
+            try:
+                with open(os.path.join(folder, n), encoding="utf-8") as f:
+                    m = json.load(f)
+                st = os.stat(log_file)
+            except (OSError, ValueError):
+                continue
+            recent = time.time() - st.st_mtime < AGENT_QUIET_S
+            running = recent and not m.get("finished")
+            out.append({"agent_id": agent_id, "tool_use_id": m.get("toolUseId"), "agent_type": m.get("agentType"),
+                        "description": m.get("description") or m.get("agentType") or "subagent",
+                        "background": m.get("requestShape") == "background", "agent_file": log_file,
+                        "status": "done" if m.get("finished") else "running" if recent else "stopped",
+                        "started": st.st_ctime, "ended": None if running else st.st_mtime})
+        return out
+
+    def task_output(self, key):
+        """The tail of a background command's output, or a subagent's steps so far, as text."""
+        t = next((t for t in self.tasks_list() if t["key"] == key), None)
+        if not t:
+            return {"error": "That task is no longer listed."}
+        if t["kind"] == "shell":
+            path = t.get("output_file")
+            if not path or not os.path.exists(path):
+                return {"text": "", "note": "No output yet." if path else "Its output file isn't known."}
+            size = os.path.getsize(path)
+            with open(path, "rb") as f:
+                f.seek(max(0, size - TASK_TAIL_BYTES))
+                text = f.read().decode("utf-8", "replace")
+            return {"text": text, "cut": size > TASK_TAIL_BYTES, "path": path}
+        return {"text": agent_steps(t["agent_file"]), "path": t["agent_file"]}
 
     def stop_task(self, sid, task_id):
         s = self.live.get(sid)

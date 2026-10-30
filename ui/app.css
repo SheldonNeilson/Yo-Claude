@@ -151,6 +151,21 @@ pre:hover .codecopy { opacity: 1; }
 .ptabs { display: flex; gap: 4px; padding: 6px 8px; border-bottom: 1px solid var(--line); }
 .ptabs button.on { color: var(--orange); border-color: var(--orange); }
 .ptabs b { color: var(--green); }
+.ptabs .tabs { display: flex; gap: 4px; }
+.ptabs i { font-style: normal; color: var(--faint); }
+.ptabs button.busy b { color: var(--violet, #b9a3ff); }
+.tasklist .task { align-items: flex-start; gap: 8px; padding: 6px 10px; cursor: pointer; }
+.task .tstat { flex: none; width: 1.2em; text-align: center; }
+.task .tspin, .taskhead .tspin { color: #b9a3ff; }
+.task .tmain { min-width: 0; flex: 1; }
+.task .tdesc { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
+.task.running .tdesc { color: #b9a3ff; }
+.task .tmeta { font-size: 11px; color: var(--faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tsess { color: var(--dim); }
+.taskhead .tdesc { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
+.taskout { margin: 0; max-height: none; flex: 1; font-size: 11.5px; white-space: pre-wrap; word-break: break-word; border: 0;
+           border-top: 1px solid var(--line); }
+.tcut { padding: 2px 10px; }
 #pbody { flex: 1; overflow-y: auto; }
 .phead { display: flex; align-items: center; gap: 6px; padding: 6px 10px; border-bottom: 1px solid var(--line); color: var(--dim); }
 .phead input { flex: 1; }
@@ -258,6 +273,29 @@ code.pathlink:hover { color: var(--orange2); background: var(--bg3); }
 #extraDirs .xdir { border: 1px solid #3c5f45; color: var(--green); padding: 0 6px; cursor: pointer; white-space: nowrap; }
 #extraDirs .xdir b { color: var(--dim); margin-left: 4px; } #extraDirs .xdir b:hover { color: var(--red); }
 #extraDirs button { padding: 0 6px; font-size: 11px; }
+
+/* text viewer: formatted / source / edit */
+.tvbar { display: flex; align-items: center; gap: 4px; margin: 6px 0; }
+.tvbar button { padding: 2px 10px; }
+.tvbar button.on { color: var(--orange); border-color: var(--orange); }
+.tvbar button:disabled { opacity: .45; cursor: default; }
+.tvdirty { color: var(--amber); font-size: 12px; margin-right: 4px; }
+.tvnote { font-size: 12px; margin-right: 6px; }
+.tvbody .viewer, .tveditor, .mdview { height: 62vh; max-height: 62vh; }
+.tveditor { display: block; width: 100%; box-sizing: border-box; resize: none; background: #0b0b0a; color: var(--text);
+            border: 1px solid var(--orange); padding: 10px 12px; font: inherit; font-size: 13px; line-height: 1.5; tab-size: 4; }
+.mdview { overflow-y: auto; background: #0b0b0a; border: 1px solid var(--line); padding: 10px 18px; line-height: 1.55; }
+.mdview h1, .mdview h2, .mdview h3, .mdview h4 { color: var(--orange); margin: 14px 0 6px; }
+.mdview h1 { font-size: 18px; } .mdview h2 { font-size: 15px; } .mdview h3, .mdview h4 { font-size: 13px; }
+.mdview h2 { border-bottom: 1px solid var(--line); padding-bottom: 3px; }
+.mdview p { margin: 0 0 8px; } .mdview ul, .mdview ol { margin: 0 0 8px; padding-left: 22px; }
+.mdview code { color: var(--amber); } .mdview pre { background: var(--bg2); border: 1px solid var(--line); padding: 8px; overflow-x: auto; }
+.mdview pre code { color: inherit; } .mdview a { color: var(--blue); }
+.mdview blockquote { border-left: 3px solid var(--line2); margin: 0 0 8px; padding-left: 10px; color: var(--dim); }
+.mdview table { border-collapse: collapse; margin: 0 0 8px; } .mdview td, .mdview th { border: 1px solid var(--line); padding: 3px 8px; }
+.tvask { display: flex; align-items: center; gap: 6px; padding: 6px 10px; margin-bottom: 6px; border: 1px solid var(--amber);
+         background: #221a0c; color: var(--amber); }
+.tvask span { flex: 1; }
 
 /* retro video player */
 .mthumb.vid { cursor: default; }

@@ -780,14 +780,7 @@ async function viewFile(path, cwd, opts = {}) {
     const f = await api().read_any(path, cwd);
     if (f.error) d.appendChild(el("div", "", esc(f.error)));
     else if (f.binary) d.appendChild(el("div", "dim", `binary file, ${f.size} bytes: use open or open with…`));
-    else {
-      const pre = el("pre", "viewer"), code = el("code"); code.textContent = f.text; pre.appendChild(code);
-      const ext = path.split(".").pop();
-      if (hljs.getLanguage(ext)) code.className = "language-" + ext;
-      try { hljs.highlightElement(code); } catch (_) {}
-      d.appendChild(pre);
-      if (f.truncated) d.appendChild(el("div", "dim", "(showing the first 300 KB)"));
-    }
+    else textView(d, f, path, cwd);
   }
   const buttons = [["pop out ⤢", () => { closeModal(); api().pop_out(m.path); }],
                    ["open", () => api().open_path(m.path, "open")],
@@ -944,6 +937,7 @@ function hideMenu() { $("#menu").classList.add("hidden"); }
 document.addEventListener("mousedown", (e) => { if (!e.target.closest("#menu")) hideMenu(); });
 function dialog(title) {
   const modal = $("#modal");
+  closeModal.guard = null;   // set by a dialog with unsaved work (the text editor)
   modal.innerHTML = ""; modal.classList.remove("hidden");
   const d = el("div", "dialog", `<h3>${esc(title)}</h3>`);
   modal.appendChild(d);
@@ -951,6 +945,8 @@ function dialog(title) {
   return d;
 }
 function closeModal() {
+  if (closeModal.guard && !closeModal.guard()) return;
+  closeModal.guard = null;
   $("#modal").querySelectorAll("video, audio").forEach((m) => m.pause());
   $("#modal").classList.add("hidden");
 }
