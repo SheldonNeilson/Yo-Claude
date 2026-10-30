@@ -768,6 +768,18 @@ class Session:
             self.always.add(tool)
         return sdk.PermissionResultAllow()
 
+    def save_pending(self):
+        """Your queued messages, kept in the session's details so a restart doesn't lose them: they're sent again,
+        in the same order, when the session is next opened (Router.open). Their text and attached files (not pasted
+        pictures)."""
+        pend = []
+        for i in self.order:
+            it = self.items[i]
+            if it.get("kind") == "user" and it.get("queued") and not it.get("cancelled") and not it.get("sent_now"):
+                pend.append({"text": it.get("text", ""), "attachments": list(it.get("attachments") or [])})
+        if pend or self.router.meta.session(self.id).get("pending"):
+            self.router.meta.update(self.id, pending=pend)
+
     async def checklist(self, a):
         """Claude's checklist tool: shows a card you tick (yes or no for each item, why for any of them, a note) and
         returns at once, so Claude's reply ends there. Your answers go to Claude as your next message when you click
@@ -1110,12 +1122,14 @@ class Session:
             self.waiting[item["i"]] = (prompt, text if text is not None else prompt)
             self.changed(item)
             self.order.append(item["i"])
+            self.save_pending()
             try:   # in line: it goes when it's first (you can reorder the line) and the reply before it is done
                 while not (item.get("cancelled") or item.get("sent_now")
                            or (self.order[0] == item["i"] and not self.lock.locked())):
                     await asyncio.sleep(0.15)
             finally:
                 self.order.remove(item["i"])
+                self.save_pending()
         async with self.lock:
             if item is not None:
                 self.waiting.pop(item["i"], None)
@@ -1944,6 +1958,13 @@ class Router:
                 s.tasks[t["task_id"]] = item
                 s.add(item)
             self.live[sid] = s
+            pending = self.meta.session(sid).get("pending") or []
+            if pending:   # queued when Yo Claude last closed: in the line again, in the same order
+                self.meta.update(sid, pending=[])
+                for p in pending:
+                    files = p.get("attachments") or []
+                    context = "\n\n".join(workspace.attachment_text(s.cwd, f) for f in files) if s.cwd else ""
+                    self.send(p.get("text", ""), sid=sid, context=context, attachments=files)
         s.picked = True
         self.active = s
         self.folder = s.cwd
@@ -2197,6 +2218,7 @@ class Router:
             for k, i in enumerate(s.order):   # (the window shows them in this order)
                 s.items[i]["qpos"] = k
                 s.changed(s.items[i])
+            s.save_pending()
         self.loop.call_soon_threadsafe(apply)
         return {}
 
