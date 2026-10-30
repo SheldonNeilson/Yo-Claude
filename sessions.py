@@ -506,7 +506,7 @@ class Session:
             code = earlier.get("exit_code")
         if code is not None:
             t.update(finished_card(code))
-        elif command_running(t.get("command"), running_shells()) or \
+        elif command_running(task_command(t), running_shells()) or \
                 any(d.get("task_id") == t["task_id"] for d in self.router.detached.get(self.id, [])):
             t.update(status="running", detached=True, summary=None, ended=None)
             self.router.follow(self.id, t)
@@ -790,11 +790,11 @@ class Router:
             out = t.get("output_file")
             if t.get("ended"):
                 continue
-            if command_running(t.get("command"), shells):
+            if command_running(task_command(t), shells):
                 return True
             if out and os.path.exists(out) and time.time() - os.path.getmtime(out) < 60:
                 return True
-            if t.get("command") and shells is not None:   # we know what to look for, and it's gone
+            if task_command(t) and shells is not None:   # we know what to look for, and it's gone
                 continue
             unknown = True
         return unknown and pid_alive(m.get("tasks_pid"))
@@ -820,8 +820,8 @@ class Router:
                     if t.get("ended"):
                         continue
                     code = exit_code(t.get("output_file"))
-                    gone = code is None and t.get("command") and shells is not None \
-                        and not command_running(t["command"], shells)
+                    gone = code is None and task_command(t) and shells is not None \
+                        and not command_running(task_command(t), shells)
                     if code is not None or gone:   # this one's done: its card says so now, not when they all are
                         t["ended"], t["exit_code"] = time.time(), code
                         self.detached_card(sid, t)
@@ -1348,6 +1348,15 @@ def running_shells():
     except Exception as e:
         log.debug("Couldn't list shells: %s", e)
         return None
+
+
+def task_command(t):
+    """A background command's text. Tasks saved before it was recorded have it as their description, unless Claude
+    gave one."""
+    if t.get("command"):
+        return t["command"]
+    d = t.get("description") or ""
+    return d if t.get("type") == "local_bash" and re.search(r"[|;&>]|^\S+ -", d) else None
 
 
 def command_running(command, shells):
