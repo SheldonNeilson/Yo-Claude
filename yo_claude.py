@@ -338,6 +338,10 @@ class Speaker:
         self.pcm, self.started = pcm, time.time()
         self.until = self.started + len(pcm) / TTS_RATE + 0.15
 
+    def ended(self):
+        """When the sound of what she's saying ends (busy stays true a little longer, for the device to finish)."""
+        return self.until - 0.15
+
     @property
     def busy(self):
         return time.time() < self.until
@@ -422,6 +426,7 @@ class Assistant:
         self.collect = collect   # --collect: only judge and save what it hears, never reply
         self.hits = self.tries = 0
         self.recent = deque(maxlen=int(FPS * 6))
+        self.tail = deque(maxlen=int(FPS * 1))   # mic frames while she speaks: the last second of them
         self.heard_speech = False
         self.emit("state", state="starting", text="")
         self.mic = Mic()
@@ -475,6 +480,13 @@ class Assistant:
     def listen(self, timeout_s=SPEECH_START_TIMEOUT_S, followup=False, text="", approval=False):
         self.vad.reset()
         self.utterance = Utterance(timeout_s, followup)
+        # what the mic heard since her voice actually stopped (the speaker waits a moment longer before listening):
+        # you may already have started talking, so it goes in front of what comes next
+        ended = self.speaker.ended()
+        for t, frame in self.tail:
+            if t > ended:
+                self.utterance.pre.append(frame)
+        self.tail.clear()
         self.utterance.text = text
         self.utterance.approval = approval
         self.set_state(LISTENING, text)
@@ -492,8 +504,14 @@ class Assistant:
             then(text)
 
     def start_conversation(self):
+        """After "yo claude": a beep and straight to listening (you can talk at once, nothing's missed); or, with
+        Voice > Say hello after the wake word, a spoken greeting first (what you say while it plays is lost)."""
         self.mic.start()
-        self.say(random.choice(GREETINGS), lambda _: self.listen())
+        if self.settings.get("greeting", False):
+            self.say(random.choice(GREETINGS), lambda _: self.listen())
+        else:
+            winsound.MessageBeep(winsound.MB_OK)
+            self.listen()
 
     def stop(self):
         self.generation += 1
@@ -827,6 +845,7 @@ class Assistant:
             self.say(reply, lambda text: self.listen(FOLLOWUP_LISTEN_S, followup=True, text=text), pcm)
 
     def on_speaking(self, frame, p):
+        self.tail.append((time.time(), frame))   # (see listen: the start of a quick follow-up)
         if not self.speaker.busy:
             then, self.after_speaking = self.after_speaking, None
             then()

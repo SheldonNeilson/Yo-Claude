@@ -94,6 +94,7 @@ const MENUS = {
     "-",
     [`Listen for “${appName()}”`, () => toggleSetting("listening"), { checked: setting("listening") }],
     ["Read replies aloud", () => toggleSetting("voice_replies"), { checked: setting("voice_replies") }],
+    [`Say Hello After “Yo ${Who()}” (Else a Beep)`, () => toggleSetting("greeting", false), { checked: setting("greeting", false) }],
     ["Say when a session is done", () => toggleSetting("notify_done", true), { checked: setting("notify_done", true) }],
     ["More accurate speech recognition (slower)", () => toggleSetting("accurate_speech", false), { checked: setting("accurate_speech", false) }],
     ["PC control (screen, keyboard, mouse)", () => toggleSetting("pc_control", false), { checked: setting("pc_control", false) }],
