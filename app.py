@@ -496,7 +496,7 @@ class Api:
         a = self._app
         r = a.router
         active = r.active
-        return {"version": VERSION, "update": getattr(a, "update_info", None),
+        return {"version": VERSION, "update": getattr(a, "update_info", None), "limits": r.limits,
                 "settings": dict(a.settings), "folder": r.folder, "folders": r.meta.data["recent_folders"],
                 "workspaces": r.workspaces(), "groups": r.meta.data["groups"], "sessions": r.list(r.folder),
                 "active": r.describe(active) if active else None, "items": active.items if active else [],

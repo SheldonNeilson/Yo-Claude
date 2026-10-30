@@ -245,6 +245,7 @@ class Session:
         self.tasks = {}                     # background task id -> its transcript item
         self.task_outputs = {}              # tool_use_id -> output file (named in the tool result)
         self.pid = None                     # this session's claude.exe
+        self.context = None                 # context window usage, measured after each reply
 
     @property
     def mode(self):
@@ -447,6 +448,8 @@ class Session:
 
     def after_turn(self):
         self.stream_item = None
+        if self.client:
+            asyncio.ensure_future(self.measure_context())
         if getattr(self, "reconnect_after", False) and not self.running_tasks():   # extra folders changed mid-reply
             self.reconnect_after = False
             asyncio.ensure_future(self.disconnect())
@@ -519,7 +522,33 @@ class Session:
                 self.voice_turn = False
                 self.after_turn()
 
+    async def measure_context(self):
+        """How full the context window is, by category (Claude Code's /context), for the meter and its breakdown."""
+        client = self.client
+        if not client:
+            return
+        try:
+            u = await client.get_context_usage()
+        except Exception as e:
+            log.debug("context usage: %s", e)
+            return
+        top = lambda items, n: sorted(({"name": i.get("name") or i.get("path") or i.get("serverName") or "?",
+                                        "tokens": i.get("tokens", 0), "server": i.get("serverName")}
+                                       for i in (items or []) if isinstance(i, dict)),
+                                      key=lambda i: -i["tokens"])[:n]
+        self.context = {"total": u.get("totalTokens", 0), "max": u.get("maxTokens", 0),
+                        "percentage": u.get("percentage", 0), "model": u.get("model"),
+                        "autocompact": u.get("autoCompactThreshold") if u.get("isAutoCompactEnabled") else None,
+                        "categories": [{"name": c["name"], "tokens": c["tokens"], "color": c.get("color"),
+                                        "deferred": bool(c.get("isDeferred"))} for c in u.get("categories", [])],
+                        "mcp": top(u.get("mcpTools"), 8), "memory": top(u.get("memoryFiles"), 6),
+                        "breakdown": {k: v for k, v in (u.get("messageBreakdown") or {}).items() if isinstance(v, int)}}
+        self.router.emit("context", session=self.id, context=self.context)
+
     def handle(self, m):
+        if isinstance(m, sdk.RateLimitEvent):
+            self.router.on_rate_limit(m.rate_limit_info)
+            return None
         if isinstance(m, sdk.StreamEvent):
             ev = m.event or {}
             if m.parent_tool_use_id:
@@ -609,6 +638,7 @@ class Router:
         self.folder = None                  # folder new sessions use; None = chat
         self.work = {}                      # session id -> "thinking" | "using_pc" | "awaiting_approval" | "background"
         self.detached = {}                  # session id -> background tasks still running from before a restart
+        self.limits = self.meta.data.get("limits")   # last known plan usage limits
         self.on_voice_approval = None       # set by the voice assistant
         os.makedirs(CHAT_DIR, exist_ok=True)
         os.makedirs(TRASH_DIR, exist_ok=True)
@@ -640,6 +670,20 @@ class Router:
             if s in states:
                 return s
         return "idle"
+
+    def on_rate_limit(self, info):
+        """Plan usage limits (5-hour and weekly windows), as Claude Code reports them with each reply."""
+        raw = info.raw or {}
+        windows = {k: {"utilization": v.get("utilization"), "resets_at": v.get("resetsAt")}
+                   for k, v in (raw.get("unifiedWindows") or {}).items() if isinstance(v, dict)}
+        if not windows and info.rate_limit_type:
+            windows[info.rate_limit_type] = {"utilization": info.utilization, "resets_at": info.resets_at}
+        self.limits = {"windows": windows, "status": info.status, "type": info.rate_limit_type,
+                       "overage": info.overage_status, "overage_reason": info.overage_disabled_reason,
+                       "using_overage": raw.get("isUsingOverage"), "updated": time.time()}
+        self.meta.data["limits"] = self.limits
+        self.meta.save()
+        self.emit("limits", limits=self.limits)
 
     def busy_report(self):
         """What would be lost by quitting now: sessions mid-reply, and background tasks (those survive a restart)."""
@@ -865,7 +909,8 @@ class Router:
 
     def describe(self, s):
         return {"id": s.id, "cwd": s.cwd, "mode": s.mode, "permission_mode": s.permission_mode, "busy": s.busy,
-                "model": s.model or "", "effort": s.effort or "", "extra_dirs": list(s.extra_dirs)}
+                "model": s.model or "", "effort": s.effort or "", "extra_dirs": list(s.extra_dirs),
+                "context": s.context}
 
     def set_extra_dirs(self, sid, dirs):
         """Folders a session may also read and write. Takes effect from its next message (a start-up option)."""

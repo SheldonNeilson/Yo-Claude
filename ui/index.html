@@ -13,6 +13,7 @@
     <button data-menu="session">Session</button><button data-menu="voice">Voice</button><button data-menu="tools">Tools</button>
     <button data-menu="help">Help</button>
     <span class="spacer"></span>
+    <span id="limitsMeter" class="hidden"></span>
     <button id="updateBadge" class="hidden" title="A newer version is on GitHub: click to update"></button>
     <span id="versionTag" title="Yo Claude version (Help → About)"></span>
   </nav>
@@ -56,6 +57,7 @@
     <div id="sessionHead">
       <span id="sessionTitle">new session</span>
       <span class="spacer"></span>
+      <span id="ctxMeter" class="meter hidden"></span>
       <select id="modelSel" title="Model"></select>
       <select id="effortSel" title="Effort"></select>
       <select id="permSel" title="Permissions (code sessions)"></select>
@@ -89,8 +91,10 @@
 <script src="mascot.js"></script>
 <script src="minibar.js"></script>
 <script src="app.js"></script>
+<script src="player.js"></script>
 <script src="panel.js"></script>
 <script src="training.js"></script>
 <script src="menus.js"></script>
+<script src="meters.js"></script>
 </body>
 </html>

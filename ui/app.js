@@ -112,6 +112,10 @@ function handle(e) {
     case "session_info":
       if (S.active && e.session.id === S.active.id) { Object.assign(S.active, e.session); renderExtraDirs(); }
       break;
+    case "context":
+      if (S.active && e.session === S.active.id) { S.active.context = e.context; renderContext(); }
+      break;
+    case "limits": renderLimits(e.limits); break;
     case "train": training.onJudgement(e); break;
     case "open_training": training.open(); break;
     case "tool_done": case "baseline":
@@ -360,6 +364,7 @@ function fillSelect(sel, options, value) {
   sel.value = value ?? options[0][0];
 }
 function renderHead() {
+  renderContext();
   const a = S.active;
   const title = a ? (findSession(a.id)?.title || "new session") : "new session";
   $("#sessionTitle").textContent = title + (a?.cwd ? `  ·  ${a.cwd}` : "");
@@ -715,7 +720,7 @@ function mediaThumb(path, cwd, info) {
     if (!m || m.error) { box.textContent = "missing: " + base(path); box.classList.add("missing"); return; }
     box.innerHTML = "";
     if (m.kind === "image") { const img = el("img"); img.src = m.url; box.appendChild(img); }
-    else if (m.kind === "video") { const v = el("video"); v.src = m.url; v.controls = true; v.preload = "metadata"; box.appendChild(v); v.onclick = (e) => e.stopPropagation(); }
+    else if (m.kind === "video") { box.classList.add("vid"); box.title = ""; box.appendChild(retroPlayer(m, { cwd })); }
     else if (m.kind === "audio") { box.classList.add("wide"); box.innerHTML = `<div class="mname">♪ ${esc(m.name)}</div>`; const a = el("audio"); a.src = m.url; a.controls = true; box.appendChild(a); a.onclick = (e) => e.stopPropagation(); }
     else box.innerHTML = `<div class="mname">${m.kind === "pdf" ? "▤ PDF" : "▤"} ${esc(m.name)}</div>`;
   });
@@ -760,7 +765,7 @@ async function viewFile(path, cwd, opts = {}) {
   d.classList.add("wide");
   d.appendChild(el("div", "dim small", esc(m.path)));
   if (m.kind === "image") { const img = el("img", "viewer-media"); img.src = m.url; d.appendChild(img); }
-  else if (m.kind === "video") { const v = el("video", "viewer-media"); v.src = m.url; v.controls = true; v.autoplay = true; d.appendChild(v); }
+  else if (m.kind === "video") d.appendChild(retroPlayer(m, { autoplay: true, big: true, cwd }));
   else if (m.kind === "audio") { const a = el("audio"); a.src = m.url; a.controls = true; a.autoplay = true; a.style.width = "100%"; d.appendChild(a); }
   else if (m.kind === "pdf") { const f = el("iframe", "viewer-pdf"); f.src = m.url; d.appendChild(f); }
   else {
@@ -970,6 +975,7 @@ window.addEventListener("pywebviewready", async () => {
   S.manual = s.settings.tree_manual || {};
   $("#versionTag").textContent = "v" + s.version;
   renderUpdate(s.update);
+  renderLimits(s.limits || null);
   if (s.settings.zoom) document.body.style.zoom = s.settings.zoom;
   await loadLists();
   renderToggles(); renderTree(); renderHead(); renderTranscript(); renderState();
