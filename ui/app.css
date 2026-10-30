@@ -38,7 +38,7 @@ select:focus, input:focus, textarea:focus { border-color: var(--orange); }
 .menu div .kbd { float: right; color: var(--faint); margin-left: 24px; }
 .menu div .chk { display: inline-block; width: 1.3em; color: var(--orange); }
 .menu div.disabled { color: var(--faint); cursor: default; } .menu div.disabled:hover { background: none; color: var(--faint); }
-#folderBox { display: flex; align-items: stretch; border: 1px solid var(--line2); min-width: 220px; max-width: 520px; flex: 0 1 520px; }
+#folderBox { display: flex; align-items: stretch; border: 1px solid var(--line2); min-width: 160px; max-width: 520px; flex: 0 1 520px; }
 #folderBox:focus-within { border-color: var(--orange); }
 #folderPath { flex: 1; min-width: 0; border: 0; background: var(--bg); color: var(--text); padding: 2px 8px; }
 #folderBox button { border: 0; border-left: 1px solid var(--line2); padding: 0 7px; }
@@ -59,7 +59,9 @@ pre:hover .codecopy { opacity: 1; }
 #top { grid-column: 1 / -1; display: flex; align-items: center; gap: 8px; padding: 0 10px;
        border-bottom: 2px solid var(--line2); background: var(--bg2); }
 #logo { image-rendering: pixelated; }
-.brand { color: var(--orange); font-weight: bold; letter-spacing: 2px; margin-right: 6px; }
+.brand { color: var(--orange); font-weight: bold; letter-spacing: 2px; margin-right: 6px; white-space: nowrap; }
+#top > button, #top .state { white-space: nowrap; flex: none; }
+#branchPill { min-width: 0; overflow: hidden; text-overflow: ellipsis; flex: 0 1 auto; }
 .pill { border: 1px solid var(--line2); padding: 2px 8px; color: var(--text); white-space: nowrap;
         max-width: 420px; overflow: hidden; text-overflow: ellipsis; }
 .badge { padding: 1px 6px; font-size: 11px; font-weight: bold; border: 1px solid currentColor; }
