@@ -58,7 +58,9 @@ const MENUS = {
     ["Find a session", () => $("#search").focus(), { kbd: "Ctrl+F" }],
   ],
   view: () => [
+    ["Sessions list", () => $("#sideBtn").click(), { checked: panes.side(), kbd: "Ctrl+Shift+B" }],
     ["Files, changes & git panel", () => $("#panelBtn").click(), { checked: $("#app").classList.contains("with-panel"), kbd: "Ctrl+B" }],
+    ["Just the chat (hide both)", () => panes.focus(), { checked: !panes.side() && !panes.files() }],
     ["Expand all folders", () => expandAll(true)],
     ["Collapse all folders", () => expandAll(false)],
     "-",
@@ -196,7 +198,7 @@ document.addEventListener("keydown", (e) => {
     if (k === "n") { e.preventDefault(); return e.shiftKey ? api().new_session(null) : api().new_session(); }
     if (k === "f") { e.preventDefault(); return $("#search").focus(); }
     if (k === "l") { e.preventDefault(); $("#folderPath").focus(); return $("#folderPath").select(); }
-    if (k === "b") { e.preventDefault(); return $("#panelBtn").click(); }
+    if (k === "b") { e.preventDefault(); return $(e.shiftKey ? "#sideBtn" : "#panelBtn").click(); }
     if (k === " ") { e.preventDefault(); return api().talk(); }
     if (k === "=" || k === "+") { e.preventDefault(); return zoom(0.1); }
     if (k === "-") { e.preventDefault(); return zoom(-0.1); }

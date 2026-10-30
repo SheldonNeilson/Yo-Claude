@@ -164,7 +164,7 @@ const avatar = {
   },
 
   tick() {
-    if (!this.el || this.el.classList.contains("hidden") || document.hidden || !this.cols) return;
+    if (!this.el || this.el.offsetParent === null || document.hidden || !this.cols) return;   // (not shown: no work)
     const st = this.state(), now = Date.now(), group = this.group(st);
     this.beat = (this.beat || 0) + 1;
     if (this.beat % 2 && !(st === "speaking" && this.clip === "talking" && this.mouth && !this.rewinding)) return;

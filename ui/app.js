@@ -215,11 +215,29 @@ $("#tPc").onclick = () => api().set_setting("pc_control", !S.settings.pc_control
 $("#compactBtn").onclick = () => api().compact();
 $("#helpBtn").onclick = () => training.open();
 $("#logo").onclick = () => api().talk();
-$("#panelBtn").onclick = () => {
-  const open = $("#app").classList.toggle("with-panel");
-  api().set_setting("panel_open", open);
-  panel.refresh();
+// ---------- the panes beside the chat: [sessions] on the left, [files] on the right, [focus] hides or brings back both ----------
+const panes = {
+  side() { return !$("#app").classList.contains("no-side"); },
+  files() { return $("#app").classList.contains("with-panel"); },
+  set(side, files) {
+    if (side !== this.side()) { $("#app").classList.toggle("no-side", !side); api().set_setting("side_open", side); }
+    if (files !== this.files()) { $("#app").classList.toggle("with-panel", files); api().set_setting("panel_open", files); panel.refresh(); }
+    this.render();
+  },
+  focus() {   // just the chat; again: the panes that were open before
+    if (this.side() || this.files()) { this.before = [this.side(), this.files()]; this.set(false, false); }
+    else this.set(...(this.before || [true, false]));
+  },
+  render() {
+    $("#sideBtn").classList.toggle("on", this.side());
+    $("#panelBtn").classList.toggle("on", this.files());
+    $("#focusBtn").classList.toggle("on", !this.side() && !this.files());
+  },
 };
+$("#panelBtn").onclick = () => panes.set(panes.side(), !panes.files());
+$("#sideBtn").onclick = () => panes.set(!panes.side(), panes.files());
+$("#focusBtn").onclick = () => panes.focus();
+new MutationObserver(() => panes.render()).observe($("#app"), { attributes: true, attributeFilter: ["class"] });   // (the panel opens itself too)
 
 // ---------- sidebar: folders and their sessions ----------
 async function loadLists() {
@@ -1561,6 +1579,8 @@ window.addEventListener("pywebviewready", async () => {
   setTimeout(() => composer.preload(), 1500);
   avatar.init();
   if (S.settings.panel_open) $("#app").classList.add("with-panel");
+  if (S.settings.side_open === false) $("#app").classList.add("no-side");
+  panes.render();
   panel.load();
   MASCOT.draw($("#logo"), "idle", 0, 1);
   showDisplay();
