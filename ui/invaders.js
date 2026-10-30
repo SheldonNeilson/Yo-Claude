@@ -82,7 +82,7 @@ const root = document.createElement("div");
 root.id = "invaders"; root.tabIndex = 0;
 root.setAttribute("aria-label", "Bug Invaders: a game to play while Claude works. Click to play, Esc hides it.");
 root.innerHTML = '<span class="inv-tag inv-title">[ bug invaders ]</span>' +
-  '<span class="inv-tag inv-ctl"><button data-act="sound"></button><button data-act="auto"></button>' +
+  '<span class="inv-tag inv-ctl"><button data-act="peek"></button><button data-act="sound"></button><button data-act="auto"></button>' +
   '<button data-act="close" title="Hide until Claude\'s next reply (Esc)">[✕]</button></span>' +
   '<span class="inv-tag inv-status"></span>' +
   '<span class="inv-tag inv-keys">[ ←→ move · space fire · P pause · M sound · Esc hide ]</span><canvas></canvas>';
@@ -95,7 +95,9 @@ const view = { cssW: 0, cssH: 0, z: 1, dpr: 1, s: 1, k: 1, W: 560, H: 400 };
 function layout() {
   const t = q("#transcript");
   if (!t || !t.offsetWidth || !t.offsetHeight) return false;
-  Object.assign(root.style, { left: t.offsetLeft + "px", top: t.offsetTop + "px", width: t.offsetWidth + "px", height: t.offsetHeight + "px" });
+  // with the chat sliver on, the bottom of the chat (Claude's latest) stays in view under the game
+  const peek = peekOn() ? Math.min(150, Math.round(t.offsetHeight * 0.28)) : 0;
+  Object.assign(root.style, { left: t.offsetLeft + "px", top: t.offsetTop + "px", width: t.offsetWidth + "px", height: t.offsetHeight - peek + "px" });
   root.classList.toggle("narrow", t.offsetWidth < 640);
   const w = cv.clientWidth, h = cv.clientHeight;
   if (w < 60 || h < 60) return false;
@@ -769,7 +771,10 @@ function paintStatus() {
   statusEl.textContent = `[ ${t} ]`;
 }
 const autoOn = () => app()?.settings?.invaders !== false;
+const peekOn = () => app()?.settings?.invaders_peek !== false;
 function paintCtl() {
+  btn("peek").textContent = peekOn() ? "[▤ chat]" : "[  chat]";
+  btn("peek").title = peekOn() ? "A strip of the chat shows under the game (Claude's latest). Click to hide it." : "Click to show a strip of the chat under the game.";
   btn("sound").textContent = soundOn ? "[♪ on]" : "[♪ off]";
   btn("sound").title = "Sound (M): quiet beeps";
   btn("auto").textContent = autoOn() ? "[✓ auto-pop]" : "[  auto-pop]";
@@ -817,6 +822,12 @@ ctl.addEventListener("click", (e) => {
   if (!b) return;
   e.stopPropagation();
   if (b.dataset.act === "sound") toggleSound();
+  else if (b.dataset.act === "peek") {
+    const on = !peekOn(), s = app();
+    if (s && s.settings) s.settings.invaders_peek = on;
+    callApi("set_setting", "invaders_peek", on);
+    view.cssW = 0; layout(); paintCtl();
+  }
   else if (b.dataset.act === "auto") {
     const on = !autoOn(), s = app();
     if (s && s.settings) s.settings.invaders = on;   // the settings event from Python replaces this shortly

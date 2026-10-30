@@ -127,6 +127,7 @@ const MENUS = {
     ["Activity on Floating Bar", () => toggleSetting("bar_feed"), { checked: setting("bar_feed") }],
     ["Animated Tray Icon", () => toggleSetting("tray_animate"), { checked: setting("tray_animate") }],
     ["Arcade While You Wait", () => toggleSetting("invaders"), { checked: setting("invaders") }],
+    ["Chat Sliver Under the Arcade", () => toggleSetting("invaders_peek"), { checked: setting("invaders_peek") }],
     ["Play Bug Invaders Now", () => window.invaders?.show()],
   ],
   help: () => [
