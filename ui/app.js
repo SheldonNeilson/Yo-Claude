@@ -667,7 +667,7 @@ function taskCard(it) {   // a background task: running timer, stop, its output
     n.appendChild(b);
   }
   const wrap = el("div", "taskwrap"); wrap.appendChild(n);
-  if (it.detached) wrap.appendChild(el("div", "dim small", "Started before Yo Claude restarted. It's still running; Claude will be told when it finishes."));
+  if (it.detached && running) wrap.appendChild(el("div", "dim small", "Started before Yo Claude restarted and still running; Claude will be told when it finishes."));
   if (it.summary && !running) wrap.appendChild(el("div", "dim small", esc(it.summary)));
   return wrap;
 }

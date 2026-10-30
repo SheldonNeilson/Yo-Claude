@@ -486,12 +486,26 @@ class Session:
             t["status"] = m.status or t["status"]
             t["summary"] = m.summary
             t["output_file"] = m.output_file or t["output_file"]
+        if t["status"] in ("stopped", "killed") and isinstance(m, sdk.TaskNotificationMessage):
+            self.correct_lost_task(t)
         if t["status"] not in ("pending", "running"):
-            t["ended"] = time.time()
+            t["ended"] = t.get("ended") or time.time()
         self.changed(t)
         self.save_tasks()
         if not self.busy:
             self.router.set_work(self, "background" if self.running_tasks() else "idle")
+
+    def correct_lost_task(self, t):
+        """After a restart Claude Code reports its old background commands as stopped, but they keep running on their
+        own. Say what really happened: finished (with its exit code), or still running."""
+        code = exit_code(t.get("output_file"))
+        earlier = self.router.finished_tasks.get(t["task_id"])
+        if code is None and earlier:
+            code = earlier.get("exit_code")
+        if code is not None:
+            t.update(finished_card(code))
+        elif any(d.get("task_id") == t["task_id"] for d in self.router.detached.get(self.id, [])):
+            t.update(status="running", detached=True, summary=None, ended=None)
 
     def save_tasks(self):
         """Running tasks, with this session's Claude process id: after a restart Yo Claude can follow them."""
@@ -675,6 +689,7 @@ class Router:
         self.folder = None                  # folder new sessions use; None = chat
         self.work = {}                      # session id -> "thinking" | "using_pc" | "awaiting_approval" | "background"
         self.detached = {}                  # session id -> background tasks still running from before a restart
+        self.finished_tasks = {}            # task id -> how a task from before a restart ended
         self.limits = self.meta.data.get("limits")   # last known plan usage limits
         self.on_voice_approval = None       # set by the voice assistant
         os.makedirs(CHAT_DIR, exist_ok=True)
@@ -764,20 +779,32 @@ class Router:
         unknown = False
         for t in self.detached.get(sid, []):
             out = t.get("output_file")
-            if out and os.path.exists(out):
-                if exit_marker(out):
-                    continue
-                if time.time() - os.path.getmtime(out) < 60:
-                    return True
+            if t.get("ended"):
+                continue
+            if out and os.path.exists(out) and time.time() - os.path.getmtime(out) < 60:
+                return True
             unknown = True
         return unknown and pid_alive(m.get("tasks_pid"))
 
     def watch_detached(self):
         while self.detached:
             for sid in list(self.detached):
+                for t in self.detached.get(sid, []):
+                    code = None if t.get("ended") else exit_code(t.get("output_file"))
+                    if code is not None:   # this one's done: its card says so now, not when they all are
+                        t["ended"], t["exit_code"] = time.time(), code
+                        self.detached_card(sid, t)
                 if not self.detached_alive(sid):
                     self.detached_finished(sid)
-            time.sleep(10)
+            time.sleep(5)
+
+    def detached_card(self, sid, t):
+        """Bring a restored task's card in the transcript up to date with how it ended."""
+        s = self.live.get(sid)
+        item = s.tasks.get(t.get("task_id")) if s else None
+        if item is not None:
+            item.update(finished_card(t.get("exit_code")), ended=t.get("ended") or time.time(), detached=False)
+            s.changed(item)
 
     def detached_finished(self, sid):
         """A task from before the restart is done: let its session know, so Claude checks it and reports back."""
@@ -786,6 +813,11 @@ class Router:
         cwd = m.get("cwd")
         self.meta.update(sid, tasks=[], tasks_pid=None)
         self.work.pop(sid, None)
+        for t in tasks:
+            if not t.get("ended"):
+                t["ended"], t["exit_code"] = time.time(), exit_code(t.get("output_file"))
+            self.finished_tasks[t.get("task_id")] = t
+            self.detached_card(sid, t)
         names = "; ".join(f"\"{t.get('description') or 'background task'}\"" +
                           (f" (output: {t['output_file']})" if t.get("output_file") else "") for t in tasks)
         log.info("Background task(s) of %s finished after the restart: %s", sid, names)
@@ -816,7 +848,8 @@ class Router:
             agents = self.subagents(sid, cwd)
             agent_tools = {a["tool_use_id"] for a in agents}
             shells = list(s.tasks.values()) if s else []
-            shells += [dict(t, status="running", detached=True) for t in self.detached.get(sid, [])]
+            shells += [dict(t, detached=True, **(finished_card(t.get("exit_code")) if t.get("ended") else {"status": "running"}))
+                       for t in self.detached.get(sid, []) if t.get("task_id") not in (s.tasks if s else {})]
             for t in shells:
                 if t.get("tool_use_id") in agent_tools or (t.get("ended") or time.time()) < cutoff:
                     continue
@@ -984,8 +1017,12 @@ class Router:
         if s is None:
             s = Session(self, cwd, sid, resumed=True)
             s.load_history()
-            for t in self.detached.get(sid, []):   # still running from before a restart
-                s.add({"kind": "task", "status": "running", "detached": True, **t})
+            for t in self.detached.get(sid, []):   # from before a restart: still running, or finished since
+                item = {"kind": "task", "status": "running", "detached": True, **t}
+                if t.get("ended"):
+                    item.update(finished_card(t.get("exit_code")), detached=False)
+                s.tasks[t["task_id"]] = item
+                s.add(item)
             self.live[sid] = s
         s.picked = True
         self.active = s
@@ -1256,14 +1293,24 @@ def pc_control_server():
                     "SCREEN_CONTROL_KILL_FILE": os.path.join(PC_CONTROL_DATA, "DISABLED")}}
 
 
-def exit_marker(path):
-    """Claude Code ends a background command's output file with "[exited with code N]"."""
+def exit_code(path):
+    """Claude Code ends a background command's output file with "[exited with code N]": N, or None while it runs."""
+    if not path:
+        return None
     try:
         with open(path, "rb") as f:
             f.seek(max(0, os.path.getsize(path) - 200))
-            return b"[exited with code" in f.read()
+            found = re.findall(rb"\[exited with code (-?\d+)\]", f.read())
     except OSError:
-        return False
+        return None
+    return int(found[-1]) if found else None
+
+
+def finished_card(code):
+    """How a background command's card should read once its output shows how it ended."""
+    if code is None:
+        return {"status": "stopped", "summary": "Its process has ended, but how it ended isn't known."}
+    return {"status": "completed" if code == 0 else "failed", "summary": f"Ran to the end (exit code {code})."}
 
 
 def pid_alive(pid):
