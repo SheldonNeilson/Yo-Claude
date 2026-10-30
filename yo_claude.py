@@ -59,6 +59,7 @@ FRAME_LENGTH = 512
 FPS = SAMPLE_RATE / FRAME_LENGTH
 TTS_RATE = 24000
 IDLE, PAUSED, LISTENING, THINKING, SPEAKING = "idle", "paused", "listening", "thinking", "speaking"
+MIC_LOST = "error"   # the only error state left: everything else recovers on its own
 
 log = logging.getLogger("yo_claude")
 
@@ -429,25 +430,72 @@ class Assistant:
 
     # main loop
     def run(self):
+        failures = 0
         try:
             while not self.quit:
                 self.handle_commands()
-                if self.state == PAUSED:
-                    self.mic.stop()
-                    time.sleep(0.05)
+                if self.state in (PAUSED, MIC_LOST):
+                    if self.state == MIC_LOST:
+                        self.recover_mic()
+                    else:
+                        self.mic.stop()
+                        time.sleep(0.05)
                     continue
-                self.mic.start()
-                frame = self.mic.read()
-                p = self.vad(frame)
-                level = self.speaker.level() if self.state == SPEAKING else rms(frame)
-                self.emit("level", level=level, speech=p > VAD_ON)
-                getattr(self, "on_" + self.state)(frame, p)
-        except Exception:
-            log.exception("Assistant crashed")
-            self.set_state("error", "Something broke. See the log (tray menu).")
+                try:
+                    self.mic.start()
+                    frame = self.mic.read()
+                except Exception as e:   # unplugged, asleep, or another app took it: wait and retry
+                    log.warning("Microphone failed: %s", e)
+                    self.mic_lost()
+                    continue
+                try:
+                    p = self.vad(frame)
+                    level = self.speaker.level() if self.state == SPEAKING else rms(frame)
+                    self.emit("level", level=level, speech=p > VAD_ON)
+                    getattr(self, "on_" + self.state)(frame, p)
+                    failures = 0
+                except Exception:
+                    failures += 1
+                    log.exception("Voice engine error (%d in a row)", failures)
+                    self.reset_voice()
+                    time.sleep(min(5, 0.2 * failures))
         finally:
             self.speaker.stop()
-            self.mic.stop()
+            try:
+                self.mic.stop()
+            except Exception:
+                pass
+
+    def reset_voice(self):
+        """Drop the voice conversation (not Claude's work: a reply still lands in the window)."""
+        self.generation += 1
+        self.speaker.stop()
+        self.job = self.approval = self.approval_job = self.utterance = None
+        self.go_idle()
+
+    def mic_lost(self):
+        self.reset_voice()
+        self.set_state(MIC_LOST, "Microphone unavailable. Retrying… (check it's plugged in and not in use)")
+        self.mic_retry_at = time.time() + 3
+
+    def recover_mic(self):
+        """Every few seconds, reopen the default microphone (it may have come back as a different device)."""
+        if time.time() < getattr(self, "mic_retry_at", 0):
+            time.sleep(0.1)
+            return
+        try:
+            try:
+                self.mic.rec.delete()
+            except Exception:
+                pass
+            self.mic = Mic()
+            self.mic.start()
+            log.info("Microphone back")
+            self.vad.reset()
+            self.go_idle()
+        except Exception as e:
+            log.debug("Microphone still unavailable: %s", e)
+            self.mic_retry_at = time.time() + 3
 
     def handle_commands(self):
         while True:

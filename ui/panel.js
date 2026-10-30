@@ -139,27 +139,13 @@ $("#branchPill").onclick = () => { $("#app").classList.add("with-panel"); panel.
 function fileMenu(ev, e) {
   showMenu(ev, [
     ["attach to message", () => composer.attach(e.path)],
-    e.dir ? null : ["preview", () => preview(e.path)],
-    ["open in vs code", () => api().open_in_editor(e.path)],
-    ["reveal in explorer", () => api().reveal(e.path)],
-  ].filter(Boolean));
+    ...(e.dir ? [["open in vs code", () => api().open_in_editor(e.path)], ["show in explorer", () => api().reveal(e.path)]]
+              : fileMenuItems(e.path, panel.cwd)),
+  ]);
 }
 
-async function preview(path) {
-  const f = await api().read_file(path);
-  const d = dialog(path);
-  d.classList.add("wide");
-  if (f.error) d.appendChild(el("div", "", esc(f.error)));
-  else if (f.binary) d.appendChild(el("div", "dim", `binary file, ${f.size} bytes`));
-  else {
-    const pre = el("pre", "viewer"); const code = el("code"); code.textContent = f.text; pre.appendChild(code);
-    const ext = path.split(".").pop();
-    if (hljs.getLanguage(ext)) code.className = "language-" + ext;
-    try { hljs.highlightElement(code); } catch (_) {}
-    d.appendChild(pre);
-    if (f.truncated) d.appendChild(el("div", "dim", "(showing the first 300 KB)"));
-  }
-  addButtons(d, [["attach to message", () => { composer.attach(path); closeModal(); }], ["open in vs code", () => api().open_in_editor(path)], ["close", closeModal, "primary"]]);
+function preview(path) {   // images, video, audio and PDFs play; anything else shows as text
+  return viewFile(path, panel.cwd, { attach: true });
 }
 
 async function showDiff(path) {

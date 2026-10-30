@@ -7,6 +7,9 @@ items for the UI, and routes tool approvals to the UI and to voice.
 """
 
 import asyncio
+import base64
+import hashlib
+import io
 import json
 import logging
 import os
@@ -35,7 +38,8 @@ PROJECTS_DIR = os.path.join(os.path.expanduser("~"), ".claude", "projects")
 PC_CONTROL_SERVER = "screen-control"
 WEB_TOOLS = ["WebSearch", "WebFetch"]
 CHAT_MODEL = "sonnet"
-MAX_LIVE = 3              # connected sessions kept warm
+MAX_LIVE = 6              # connected sessions kept warm (several folders can be working at once)
+ATTACH_DIR = os.path.join(os.path.expanduser("~"), ".yoclaude", "attachments")   # pasted images, kept viewable
 RESULT_PREVIEW = 4000     # characters of a tool result kept for the transcript
 
 VOICE_NOTE = (
@@ -80,6 +84,7 @@ class Meta:
                 self.data.update(json.load(f))
         except (OSError, ValueError):
             pass
+        self.data.setdefault("workspaces", list(self.data["recent_folders"]))   # folders in the sidebar tree
         self.lock = threading.Lock()
 
     def save(self):
@@ -103,6 +108,11 @@ class Meta:
         self.data["recent_folders"] = [folder] + folders[:11]
         self.save()
 
+    def set_workspace(self, folder, present):
+        ws = [f for f in self.data["workspaces"] if not same_folder(f, folder)]
+        self.data["workspaces"] = ws + [folder] if present else ws
+        self.save()
+
 
 # --- transcript items -------------------------------------------------------------------------------------------
 def result_text(content):
@@ -113,6 +123,48 @@ def result_text(content):
     else:
         text = "" if content is None else str(content)
     return text if len(text) <= RESULT_PREVIEW else text[:RESULT_PREVIEW] + f"\n… ({len(text) - RESULT_PREVIEW} more)"
+
+
+def block_get(b, key, default=None):
+    return b.get(key, default) if isinstance(b, dict) else getattr(b, key, default)
+
+
+def result_images(content):
+    """(media_type, base64) of the images in a tool result (screen-control screenshots, Read of an image)."""
+    out = []
+    for b in content if isinstance(content, list) else []:
+        if block_get(b, "type") == "image":
+            src = block_get(b, "source") or {}
+            if block_get(src, "type") == "base64" and block_get(src, "data"):
+                out.append((block_get(src, "media_type", "image/png"), block_get(src, "data")))
+    return out
+
+
+def thumbnail(data_b64, width=480):
+    """A small JPEG data: URL of an image, for the transcript (full screenshots would bloat it)."""
+    from PIL import Image
+    try:
+        img = Image.open(io.BytesIO(base64.b64decode(data_b64)))
+        img.thumbnail((width, width * 3))
+        buf = io.BytesIO()
+        img.convert("RGB").save(buf, "JPEG", quality=70)
+        return "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode()
+    except Exception as e:
+        log.debug("thumbnail failed: %s", e)
+        return None
+
+
+def save_image(sid, media_type, data_b64):
+    """Keep a pasted image on disk (named by its content) so it stays viewable in the conversation."""
+    ext = {"image/jpeg": "jpg", "image/gif": "gif", "image/webp": "webp", "image/bmp": "bmp"}.get(media_type, "png")
+    raw = base64.b64decode(data_b64)
+    folder = os.path.join(ATTACH_DIR, sid)
+    os.makedirs(folder, exist_ok=True)
+    path = os.path.join(folder, hashlib.sha1(raw).hexdigest()[:16] + "." + ext)
+    if not os.path.exists(path):
+        with open(path, "wb") as f:
+            f.write(raw)
+    return path
 
 
 def is_noise(text):
@@ -162,6 +214,7 @@ class Session:
         self.touched = []                   # files Claude's tools changed (for folders that aren't git repos)
         self.stream_item = None
         self.last_used = time.time()
+        self.cost_seen = 0.0                # the CLI reports cost cumulatively per connection
         self.lock = None                    # asyncio.Lock, made on the loop
 
     @property
@@ -211,6 +264,13 @@ class Session:
                         text = re.sub(r"\s*^Attached file \(read it as needed\): .+$", "", text, flags=re.M).strip()
                     self.add({"kind": role if role in ("user", "assistant") else "assistant",
                               "text": text[8:] if voice else text, "voice": voice, "attachments": attachments})
+                elif t == "image" and role == "user":   # a pasted image: back as a viewable picture
+                    pics = result_images([b])
+                    if pics:
+                        last = self.items[-1] if self.items and self.items[-1]["kind"] == "user" else None
+                        if last is None:
+                            last = self.add({"kind": "user", "text": "", "attachments": []})
+                        last.setdefault("image_paths", []).append(save_image(self.id, *pics[0]))
                 elif t == "thinking" and b.get("thinking"):
                     self.add({"kind": "thinking", "text": b["thinking"]})
                 elif t == "tool_use":
@@ -221,6 +281,9 @@ class Session:
                     if item:
                         item["result"] = result_text(b.get("content"))
                         item["status"] = "error" if b.get("is_error") else "done"
+                        pics = result_images(b.get("content"))
+                        if pics:
+                            item["image"] = thumbnail(pics[-1][1])
 
     # --- SDK plumbing ---
     def options(self):
@@ -288,6 +351,7 @@ class Session:
     async def connect(self):
         if self.client is None:
             self.client = sdk.ClaudeSDKClient(options=self.options())
+            self.cost_seen = 0.0
             await self.client.connect()
             self.router.evict(keep=self)
 
@@ -328,6 +392,8 @@ class Session:
                 self.busy = False
                 self.voice_turn = False
                 self.stream_item = None
+                if self.router.active is not self:   # finished while you were looking at another session
+                    self.router.meta.update(self.id, unseen=True)
                 self.router.set_work(self, "idle")
                 self.router.sessions_changed(self.cwd)
 
@@ -370,6 +436,9 @@ class Session:
                         if item:
                             item["result"] = result_text(b.content)
                             item["status"] = "error" if b.is_error else "done"
+                            pics = result_images(b.content)
+                            if pics:   # what Claude saw (screenshots), as a small thumbnail
+                                item["image"] = thumbnail(pics[-1][1])
                             self.changed(item)
                             path = (item["input"] or {}).get("file_path")
                             if path and item["name"] in ("Edit", "MultiEdit", "Write", "NotebookEdit") \
@@ -385,12 +454,14 @@ class Session:
             u = m.usage or {}
             tokens = sum(u.get(k, 0) or 0 for k in ("input_tokens", "cache_creation_input_tokens",
                                                      "cache_read_input_tokens"))
-            self.add({"kind": "result", "cost": m.total_cost_usd, "tokens": tokens,
+            total = m.total_cost_usd or 0.0   # cumulative for the CLI process: show this reply's share
+            cost = total - self.cost_seen if total >= self.cost_seen else total
+            self.cost_seen = total
+            self.add({"kind": "result", "cost": cost, "tokens": tokens,
                       "cached": u.get("cache_read_input_tokens", 0), "duration": m.duration_ms,
                       "error": m.is_error})
-            log.info("Turn done in %.1fs: %d context tokens (%d cached), $%.4f api-equivalent",
-                     (m.duration_ms or 0) / 1000, tokens, u.get("cache_read_input_tokens", 0) or 0,
-                     m.total_cost_usd or 0)
+            log.info("Turn done in %.1fs: %d tokens processed (%d cached), $%.4f api-equivalent",
+                     (m.duration_ms or 0) / 1000, tokens, u.get("cache_read_input_tokens", 0) or 0, cost)
             return m.result or ""
         return None
 
@@ -479,7 +550,7 @@ class Router:
             out.append({"id": s.session_id, "title": m.get("title") or s.custom_title or s.summary or s.first_prompt
                         or "(empty)", "first": s.first_prompt, "modified": s.last_modified, "created": s.created_at,
                         "branch": s.git_branch, "cwd": cwd, "tag": s.tag, "source": m.get("source", "claude code"),
-                        "pinned": bool(m.get("pinned")), "group": m.get("group"),
+                        "pinned": bool(m.get("pinned")), "group": m.get("group"), "unseen": bool(m.get("unseen")),
                         "live": s.session_id in self.live, "busy": s.session_id in self.work})
         for s in self.live.values():   # brand-new sessions not written to disk yet
             if s.id not in seen and same_folder(s.cwd, cwd):
@@ -494,19 +565,30 @@ class Router:
 
     # --- opening / creating ---
     def set_folder(self, folder):
-        """Switching folder starts afresh there: the next message opens a new session in it."""
+        """The folder voice's "new session" uses (follows the session you're in)."""
         self.folder = folder or None
         if folder:
             self.meta.add_folder(folder)
-        if self.active is not None and not same_folder(self.active.cwd, self.folder):
-            self.active = None
+
+    def workspaces(self):
+        return [f for f in self.meta.data["workspaces"] if os.path.isdir(f)]
+
+    def set_workspace(self, folder, present):
+        """Add or remove a folder in the sidebar tree (its files and sessions are never touched)."""
+        self.meta.set_workspace(folder, present)
+        self.emit("workspaces", workspaces=self.workspaces())
 
     def new_session(self, cwd="current", picked=False):
         cwd = self.folder if cwd == "current" else cwd
+        if cwd:
+            self.meta.add_folder(cwd)
+            if not any(same_folder(cwd, w) for w in self.meta.data["workspaces"]):
+                self.set_workspace(cwd, True)
         s = Session(self, cwd)
         s.picked = picked
         self.live[s.id] = s
         self.active = s
+        self.folder = cwd
         self.ensure_baseline(s, "start")
         self.emit("opened", session=self.describe(s), items=[])
         self.sessions_changed(cwd)
@@ -520,6 +602,10 @@ class Router:
             self.live[sid] = s
         s.picked = True
         self.active = s
+        self.folder = s.cwd
+        if self.meta.session(sid).get("unseen"):
+            self.meta.update(sid, unseen=False)
+            self.sessions_changed(cwd)
         self.ensure_baseline(s, "opened")
         self.emit("opened", session=self.describe(s), items=s.items)
         return s
@@ -566,7 +652,7 @@ class Router:
         if s is None:
             s = self.new_session()
         s.add({"kind": "user", "text": text, "voice": voice, "attachments": list(attachments),
-               "images": len(images)})
+               "image_paths": [save_image(s.id, mt, data) for mt, data in images]})
         prompt = (f"[voice] {text}" if voice else text) + (f"\n\n{context}" if context else "")
         if images:
             content = [{"type": "text", "text": prompt}] + [

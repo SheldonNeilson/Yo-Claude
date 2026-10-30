@@ -24,6 +24,7 @@ import pystray
 import webview
 
 import icons
+import media
 import taskbar
 import workspace
 import yo_claude
@@ -74,6 +75,7 @@ class App:
         self.bus = queue.Queue()
         self.commands = queue.Queue()
         self.router = Router(self.settings, lambda kind, data: self.bus.put((kind, data)))
+        self.media = media.MediaServer()
         self.voice_state, self.voice_text, self.voice_hold = "starting", "", 0.0
         self.work_state = "idle"
         self.display = "starting"
@@ -117,10 +119,33 @@ class App:
         threading.Thread(target=self.voice, daemon=True, name="voice").start()
         threading.Thread(target=self.dispatch, daemon=True, name="dispatch").start()
         threading.Thread(target=self.animate, daemon=True, name="tray").start()
+        threading.Thread(target=self.live_view, daemon=True, name="live").start()
         if self.settings.get("launch_at_login", True):
             set_launch_at_login(True)
         self.update_bar_visibility()
         threading.Thread(target=self.check_updates, args=(True,), daemon=True).start()
+
+    def live_view(self):
+        """While Claude is using the PC, a small picture of the screen about once a second for the transcript."""
+        from PIL import ImageGrab
+        import base64
+        import io
+        while True:
+            time.sleep(1.0)
+            users = [sid for sid, st in list(self.router.work.items()) if st == "using_pc"]
+            if not users or not self.main_visible:
+                continue
+            try:
+                img = ImageGrab.grab()
+                img.thumbnail((420, 420))
+                buf = io.BytesIO()
+                img.convert("RGB").save(buf, "JPEG", quality=60)
+                url = "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode()
+            except Exception as e:
+                log.debug("live view failed: %s", e)
+                continue
+            for sid in users:
+                self.bus.put(("live", {"session": sid, "image": url}))
 
     def on_main_loaded(self):
         if not self.settings.get("onboarded"):   # first run: the welcome + training walkthrough
@@ -419,7 +444,7 @@ class Api:
         r = a.router
         active = r.active
         return {"settings": dict(a.settings), "folder": r.folder, "folders": r.meta.data["recent_folders"],
-                "groups": r.meta.data["groups"], "sessions": r.list(r.folder),
+                "workspaces": r.workspaces(), "groups": r.meta.data["groups"], "sessions": r.list(r.folder),
                 "active": r.describe(active) if active else None, "items": active.items if active else [],
                 "display": {"state": a.display, "voice": a.voice_state, "work": a.work_state, "text": a.voice_text}}
 
@@ -451,9 +476,67 @@ class Api:
         a.bus.put(("folder", {"folder": a.router.folder, "folders": a.router.meta.data["recent_folders"]}))
 
     # --- sessions ---
-    def new_session(self):
+    def new_session(self, cwd="current"):
+        """cwd: a folder, null for a chat, or omitted for the folder of the session you're in."""
         r = self._app.router
-        return r.describe(r.new_session(picked=True))
+        return r.describe(r.new_session(cwd, picked=True))
+
+    def add_folder(self):
+        result = self._app.main.create_file_dialog(webview.FileDialog.FOLDER)
+        if result:
+            self._app.router.set_workspace(result[0], True)
+            return result[0]
+        return None
+
+    def remove_folder(self, folder):
+        self._app.router.set_workspace(folder, False)
+
+    # --- viewing files: attachments, things Claude made, the file tree ---
+    def _resolve(self, path, cwd=None):
+        if not path:
+            return None
+        cwd = cwd or self._cwd()
+        full = path if os.path.isabs(path) else os.path.join(cwd or "", path)
+        full = os.path.normpath(full)
+        return full if os.path.exists(full) else None
+
+    def media(self, path, cwd=None):
+        """How to show a file: {kind, url, path, name, size} (kind: image/video/audio/pdf/file)."""
+        full = self._resolve(path, cwd)
+        if not full or not os.path.isfile(full):
+            return {"error": f"Not found: {path}"}
+        return {"kind": media.kind_of(full), "url": self._app.media.url(full), "path": full,
+                "name": os.path.basename(full), "size": os.path.getsize(full)}
+
+    def resolve_media(self, paths, cwd=None):
+        """Of the paths mentioned in a reply, the existing images/video/audio/PDFs (shown under the message)."""
+        out = []
+        for p in (paths or [])[:12]:
+            info = self.media(p, cwd)
+            if "error" not in info and info["kind"] != "file":
+                out.append(info)
+        return out
+
+    def read_any(self, path, cwd=None):
+        """Text preview of any file you click on (attachments may live outside the session's folder)."""
+        full = self._resolve(path, cwd)
+        if not full or not os.path.isfile(full):
+            return {"error": f"Not found: {path}"}
+        return workspace.read_file(os.path.dirname(full), os.path.basename(full))
+
+    def open_path(self, path, how="open", cwd=None):
+        full = self._resolve(path, cwd)
+        if not full:
+            return f"Not found: {path}"
+        if how == "open":
+            os.startfile(full)
+        elif how == "openwith":   # Windows' own "Open with" chooser
+            subprocess.Popen(["rundll32.exe", "shell32.dll,OpenAs_RunDLL", full])
+        elif how == "reveal":
+            subprocess.Popen(["explorer", "/select,", full])
+        elif how == "code":
+            workspace.open_in_editor(os.path.dirname(full), os.path.basename(full))
+        return None
 
     def open_url(self, url):
         if isinstance(url, str) and url.lower().startswith(("http://", "https://")):
@@ -631,6 +714,9 @@ class Api:
         self._app.commands.put(("alternates", phrases))
         self._app.emit_settings()
 
+    def ui_loaded(self, info):
+        log.info("Window loaded: %s", str(info)[:300])
+
     def js_error(self, message):
         log.warning("page error: %s", str(message)[:2000])
 
@@ -657,8 +743,14 @@ def main():
 
     ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(APP_ID)   # own taskbar button, not Python's
     app = App(args)
+    # A new port each launch: on pywebview's fixed default (42001) the window's cache can serve an old interface
+    # after an update.
+    import socket
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]
     webview.start(app.started, private_mode=False, storage_path=os.path.join(DATA_DIR, "webview"),
-                  icon=icons.make_ico())
+                  icon=icons.make_ico(), http_port=port)
     del mutex
 
 

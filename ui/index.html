@@ -26,12 +26,15 @@
 
   <aside id="side">
     <div class="sidehead">
-      <button id="newBtn" class="primary">+ new session</button>
+      <div class="row">
+        <button id="addFolderBtn" class="primary" title="Add a folder to work in">+ folder</button>
+        <button id="newChatBtn" title="New chat without a folder">+ chat</button>
+      </div>
       <input id="search" placeholder="search sessions…">
     </div>
-    <div id="sessionList"></div>
+    <div id="tree"></div>
     <div class="sidefoot">
-      <button id="newGroupBtn" title="New group">+ group</button>
+      <span class="dim small">right-click folders and sessions for more</span>
       <span class="spacer"></span>
       <button id="trashBtn">trash</button>
     </div>
