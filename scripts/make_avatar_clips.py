@@ -27,6 +27,8 @@ CROP = (0.14, 0.03, 0.86, 0.66)   # out of the 480x832 clip: left, top, right, b
 WIDTH = 320                       # pixels across: plenty for ~160 characters
 FPS = 12
 OUT = Path(__file__).resolve().parent.parent / "ui" / "avatar"
+if os.environ.get("YOCLAUDE_CHARACTER") == "male":   # his clips (Claude, the male character) go in their own folder
+    OUT = OUT / "male"
 FACEMESH = os.environ.get("YOCLAUDE_FACEMESH", r"D:/Temp/yoclaude-scratch/facemesh/.venv/Scripts/python.exe")
 BLINK = 0.4                       # eyeBlink above this: her eyes are (nearly) shut
 GRIN = 0.75                       # mouthSmile above this: a big toothy grin (a "shark" in ASCII: lip sync avoids it)
