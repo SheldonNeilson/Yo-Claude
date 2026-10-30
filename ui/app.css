@@ -311,6 +311,14 @@ code.pathlink:hover { color: var(--orange2); background: var(--bg3); }
 .msg .copybtn { top: -1.5em; right: 1ch; }
 .msg.user .copybtn { right: auto; left: 1ch; }
 
+/* when things happened */
+.when { color: var(--faint); font-size: 11px; white-space: nowrap; font-weight: normal; }
+.msg .bubble-when { position: absolute; bottom: -1.5em; line-height: 1.5em; background: var(--bg); padding: 0 1ch; }   /* a gap in the frame */
+.msg.user .bubble-when { right: 5ch; } .msg.assistant .bubble-when { left: 5ch; }
+.ghead .gwhen { margin-right: 10px; }
+.alog-when { float: right; margin-left: 10px; }
+.alog-head .when { flex: none; }
+
 /* rewind */
 .msg.user .rewindbtn { position: absolute; top: -1.5em; left: 9ch; padding: 0 5px; font-size: 11px; opacity: 0; background: var(--bg2); }
 .msg.user:hover .rewindbtn { opacity: 1; }

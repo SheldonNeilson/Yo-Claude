@@ -8,6 +8,7 @@ items for the UI, and routes tool approvals to the UI and to voice.
 
 import asyncio
 import base64
+import datetime
 import ctypes
 import hashlib
 import io
@@ -250,12 +251,15 @@ class Session:
         self.task_outputs = {}              # tool_use_id -> output file (named in the tool result)
         self.pid = None                     # this session's claude.exe
         self.context = None                 # context window usage, measured after each reply
+        self.loading_history, self.history_ts = False, None   # items from history carry their message's time
 
     @property
     def mode(self):
         return "code" if self.cwd else "chat"
 
     def add(self, item):
+        if "ts" not in item:
+            item["ts"] = self.history_ts if self.loading_history else time.time()
         item["i"] = len(self.items)
         self.items.append(item)
         self.router.emit("item", session=self.id, item=item)
@@ -278,7 +282,16 @@ class Session:
             log.warning("Couldn't read session %s: %s", self.id, e)
             return
         mark = self.router.meta.session(self.id).get("rewind")
+        stamps = message_times(self.router.session_file(self.id, self.cwd)[1])
+        self.loading_history = True
+        try:
+            self.load_messages(messages, mark, stamps)
+        finally:
+            self.loading_history, self.history_ts = False, None
+
+    def load_messages(self, messages, mark, stamps):
         for m in messages:
+            self.history_ts = stamps.get(m.uuid)
             if mark and m.uuid == mark["drop"]:   # rewound here (until the next message makes the new branch)
                 break
             msg = m.message if isinstance(m.message, dict) else {}
@@ -712,6 +725,33 @@ class Session:
 
 
 # --- the router -------------------------------------------------------------------------------------------------
+def iso_time(text):
+    """Claude Code's ISO timestamps ("2026-10-30T09:12:44.123Z") as seconds since the epoch, or None."""
+    try:
+        return datetime.datetime.fromisoformat(str(text).replace("Z", "+00:00")).timestamp()
+    except (TypeError, ValueError):
+        return None
+
+
+def message_times(path):
+    """When each message of a session was written: message id -> seconds since the epoch."""
+    out = {}
+    try:
+        with open(path, encoding="utf-8") as f:
+            for raw in f:
+                if '"timestamp"' not in raw:
+                    continue
+                try:
+                    d = json.loads(raw)
+                except ValueError:
+                    continue
+                if d.get("uuid") and d.get("timestamp"):
+                    out[d["uuid"]] = iso_time(d["timestamp"])
+    except OSError:
+        pass
+    return out
+
+
 def agent_items(path, limit=400):
     """A subagent's transcript as items to show: its brief ("user"), what it said ("assistant", Markdown), each
     tool it used ("tool": name, a one-line brief, whether it failed) and its report back ("report")."""
@@ -730,8 +770,9 @@ def agent_items(path, limit=400):
             except ValueError:
                 continue
             content = (d.get("message") or {}).get("content")
+            ts = iso_time(d.get("timestamp"))
             if d.get("type") == "user" and isinstance(content, str):
-                items.append({"kind": "user", "text": content.strip()})
+                items.append({"kind": "user", "text": content.strip(), "ts": ts})
             elif d.get("type") == "user" and isinstance(content, list):
                 for b in content:   # results: mark the tools that failed
                     if isinstance(b, dict) and b.get("type") == "tool_result" and b.get("is_error"):
@@ -740,11 +781,12 @@ def agent_items(path, limit=400):
             elif d.get("type") == "assistant" and isinstance(content, list):
                 for b in content:
                     if b.get("type") == "text" and b.get("text", "").strip():
-                        items.append({"kind": "assistant", "text": b["text"].strip()})
+                        items.append({"kind": "assistant", "text": b["text"].strip(), "ts": ts})
                     elif b.get("type") == "tool_use" and b.get("name") == "SubagentHandback":
-                        items.append({"kind": "report", "text": str((b.get("input") or {}).get("message", ""))})
+                        items.append({"kind": "report", "text": str((b.get("input") or {}).get("message", "")), "ts": ts})
                     elif b.get("type") == "tool_use":
-                        item = tools[b.get("id")] = {"kind": "tool", "name": b.get("name"), "brief": brief(b.get("input"))}
+                        item = tools[b.get("id")] = {"kind": "tool", "name": b.get("name"), "brief": brief(b.get("input")),
+                                                     "ts": ts}
                         items.append(item)
     return items[-limit:]
 

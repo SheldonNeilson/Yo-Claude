@@ -181,7 +181,8 @@ Click to see its output`;
           `<b>${live ? `<span class="spin">${SPIN[Math.floor(Date.now() / 120) % SPIN.length]}</span> ` : ""}${run.length} step${run.length > 1 ? "s" : ""}</b>` +
           `<span class="dim">${Object.entries(counts).map(([n, c]) => esc(n.replace(/^mcp__[^_]+__/, "")) + (c > 1 ? ` ×${c}` : "")).join(" · ")}</span>` +
           (failed ? `<span class="del">${failed} failed</span>` : "") +
-          (live ? `<span class="alog-now">${esc(run.at(-1).name)} ${esc(run.at(-1).brief)}</span>` : ""));
+          (live ? `<span class="alog-now">${esc(run.at(-1).name)} ${esc(run.at(-1).brief)}</span>` : "") +
+          `<span class="spacer"></span>${whenHtml(run[0].ts)}`);
         head.onclick = () => {
           this.runOpen = this.runOpen || new Map();
           this.runOpen.set(start, !open);
@@ -197,9 +198,10 @@ Click to see its output`;
         continue;
       }
       i++;
-      if (it.kind === "user") log.appendChild(el("div", "alog-user", esc(it.text)));
-      else if (it.kind === "report") log.appendChild(el("div", "alog-report", `<div class="alog-rh">✓ reported back</div>${md(it.text)}`));
-      else log.appendChild(el("div", "alog-assistant", md(it.text)));
+      const at = whenHtml(it.ts, "alog-when");
+      if (it.kind === "user") log.appendChild(el("div", "alog-user", at + esc(it.text)));
+      else if (it.kind === "report") log.appendChild(el("div", "alog-report", `<div class="alog-rh">✓ reported back ${at}</div>${md(it.text)}`));
+      else log.appendChild(el("div", "alog-assistant", at + md(it.text)));
     }
     if (!items.length) log.appendChild(el("div", "pempty", "Nothing yet."));
     return log;

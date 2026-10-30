@@ -478,7 +478,8 @@ const transcript = {
     g.head.innerHTML = `<span class="gst">${run ? '<span class="spin">✻</span>' : sum.errors ? "!" : "●"}</span>` +
       `<span class="gtitle">${esc(sum.title)}</span><span class="gsum">${sum.steps > 1 ? `· ${sum.steps} steps · ` : "· "}${esc(sum.text)}` +
       `${sum.errors ? ` · <span class="del">${sum.errors} failed</span>` : ""}</span>` +
-      `${now ? `<span class="gnow">now: ${esc(now)}</span>` : ""}<span class="spacer"></span><span class="gtog">${g.open ? "▾ hide" : "▸ steps"}</span>`;
+      `${now ? `<span class="gnow">now: ${esc(now)}</span>` : ""}<span class="spacer"></span>${whenHtml(items[0]?.ts, "gwhen")}` +
+      `<span class="gtog">${g.open ? "▾ hide" : "▸ steps"}</span>`;
     const showLive = run && sum.pc && this.liveImage && g === this.last;
     g.live.classList.toggle("hidden", !showLive);
     if (showLive && g.live.src !== this.liveImage) g.live.src = this.liveImage;
@@ -519,10 +520,29 @@ const transcript = {
       this.els.set(it.i, node);
       node.querySelectorAll("pre code").forEach((c) => { try { hljs.highlightElement(c); } catch (_) {} });
       addCopyButtons(node, it);
+      if (it.ts && (it.kind === "user" || it.kind === "assistant")) node.insertAdjacentHTML("beforeend", whenHtml(it.ts, "bubble-when"));
+      else if (it.ts && (it.kind === "note" || it.kind === "error")) node.insertAdjacentHTML("beforeend", " " + whenHtml(it.ts, "inline-when"));
       if (it.kind === "assistant" && !it.streaming) mediaUnder(node, it);
     }
   },
 };
+
+// ---------- when things happened: relative for recent ones ("4m ago"), a time or date for older ones ----------
+function whenText(ts) {
+  const d = new Date(ts * 1000), ago_s = (Date.now() - d) / 1000;
+  if (ago_s < 45) return "just now";
+  if (ago_s < 3600) return Math.round(ago_s / 60) + "m ago";
+  if (ago_s < 4 * 3600) return Math.floor(ago_s / 3600) + "h ago";
+  const time = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }), now = new Date();
+  if (d.toDateString() === now.toDateString()) return time;
+  if (now - d < 6 * 86400e3) return d.toLocaleDateString([], { weekday: "short" }) + " " + time;
+  return d.toLocaleDateString([], { day: "numeric", month: "short", ...(d.getFullYear() !== now.getFullYear() ? { year: "numeric" } : {}) }) + " " + time;
+}
+const fullWhen = (ts) => new Date(ts * 1000).toLocaleString([], { weekday: "long", day: "numeric", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit" });
+function whenHtml(ts, cls = "") {
+  return ts ? `<span class="when ${cls}" data-ts="${ts}" data-tip="${esc(fullWhen(ts))}">${esc(whenText(ts))}</span>` : "";
+}
+setInterval(() => document.querySelectorAll(".when[data-ts]").forEach((w) => { w.textContent = whenText(+w.dataset.ts); }), 30000);
 
 const rawText = new WeakMap();   // message element -> its text as written (markdown), for "Copy message"
 function addCopyButtons(node, it) {
@@ -668,7 +688,7 @@ function taskCard(it) {   // a background task: running timer, stop, its output
   n.innerHTML = `<span class="ticon">${icon}</span><span class="tlabel">background task</span>` +
     `<span class="tdesc">${esc(it.description || "")}</span>` +
     (running ? `<span class="elapsed" data-start="${(it.started || 0) * 1000}"></span>` : `<span class="tstat">${esc(it.status)}</span>`) +
-    (it.last_tool ? `<span class="dim">· ${esc(it.last_tool)}</span>` : "") + `<span class="spacer"></span>`;
+    (it.last_tool ? `<span class="dim">· ${esc(it.last_tool)}</span>` : "") + `<span class="spacer"></span>` + whenHtml(it.started, "gwhen");
   if (running && !it.detached) {
     const b = el("button", "danger", "[stop]");
     b.onclick = async () => { const err = await api().stop_task(S.active.id, it.task_id); if (err) alertBox(err); };
