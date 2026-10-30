@@ -44,6 +44,7 @@ const MENUS = {
     "-",
     ["Compact mode (just the bar)", () => api().compact()],
     ["Close to tray", () => api().compact()],
+    [`Restart ${appName()}`, async () => { if (await api().request_restart()) toast("Restarting once the reply in progress is done"); }],
     ["Exit", () => api().request_quit()],
   ],
   edit: () => [

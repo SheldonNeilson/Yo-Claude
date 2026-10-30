@@ -10,6 +10,9 @@ https://github.com/SheldonNeilson/Yo-Claude (private); their installs update fro
   it in a clone with `git config core.hooksPath hooks`.
 - **Before restarting Yo Claude**, read `~/.yoclaude/status.json`: it lists sessions mid-reply and background tasks.
   Restarting cuts off replies in progress (background tasks survive and are picked up again).
+- **To restart Yo Claude**, create the empty file `~/.yoclaude/restart-request` (or File → Restart). It waits until
+  no session is mid-reply, quits the normal way and starts again; don't kill its process (that ends background tasks
+  with it). Tasks a restart cut off are reported to their session, which starts them again.
 - Screenshots in `docs/screenshots/` use made-up demo content only: never real sessions, folders or chats.
 - Test scripts that drive the Agent SDK create real sessions, which then show up in the user's session list. Move the
   ones a test made into `~/.yoclaude/trash/<project folder>/` when it's done.

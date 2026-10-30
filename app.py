@@ -145,6 +145,7 @@ class App:
         threading.Thread(target=self.dispatch, daemon=True, name="dispatch").start()
         threading.Thread(target=self.animate, daemon=True, name="tray").start()
         threading.Thread(target=self.keep_awake, daemon=True, name="awake").start()
+        threading.Thread(target=self.restart_when_asked, daemon=True, name="restart").start()
         threading.Thread(target=self.live_view, daemon=True, name="live").start()
         if self.settings.get("launch_at_login", True):
             set_launch_at_login(True)
@@ -528,6 +529,31 @@ class App:
                 json.dump({"updated": time.time(), "pid": os.getpid(), "busy": self.router.busy_report()}, f, indent=1)
         except Exception as e:
             log.debug("status.json: %s", e)
+
+    def restart_when_asked(self):
+        """A restart asked for (File > Restart, or a restart-request file in ~/.yoclaude, e.g. from Claude when you
+        ask it to restart Yo Claude): done gently once no session is in the middle of a reply. It quits the normal
+        way, so background tasks are recorded and followed again after the start (or restarted, when they were cut
+        off), then starts again."""
+        flag = os.path.join(DATA_DIR, "restart-request")
+        while not getattr(self, "quitting", False):
+            time.sleep(3)
+            if os.path.exists(flag) and not self.replying():
+                try:
+                    os.remove(flag)
+                except OSError:
+                    pass
+                log.info("Restarting, as asked")
+                self.restart()
+                return
+
+    def restart(self):
+        """Quit, and start again a few seconds later (once this one has let go)."""
+        exe = os.path.join(HERE, ".venv", "Scripts", "pythonw.exe")
+        subprocess.Popen(["powershell", "-NoProfile", "-WindowStyle", "Hidden", "-Command",
+                          f"Start-Sleep -Seconds 4; Start-Process '{exe}' -ArgumentList '\"{os.path.join(HERE, 'app.py')}\"' "
+                          f"-WorkingDirectory '{HERE}'"], creationflags=subprocess.CREATE_NO_WINDOW)
+        self.quit()
 
     def request_quit(self):
         """From the tray: ask first if a reply is in progress."""
@@ -1104,6 +1130,11 @@ class Api:
 
     def request_quit(self):
         threading.Thread(target=self._app.request_quit, daemon=True).start()
+
+    def request_restart(self):
+        """File > Restart: once no session is in the middle of a reply (see App.restart_when_asked)."""
+        open(os.path.join(DATA_DIR, "restart-request"), "w").close()
+        return "busy" if self._app.replying() else None
 
     def quit(self, force=False):
         a = self._app

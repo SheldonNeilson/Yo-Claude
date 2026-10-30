@@ -1822,9 +1822,13 @@ class Router:
             s.load_history()
             self.live[sid] = s
         s.add({"kind": "note", "text": f"Background task ended while Yo Claude was restarting: {names}"})
+        cut = [t for t in tasks if t.get("exit_code") is None]   # (no exit marker: ended by the restart, not finished)
+        again = (" The ones that were stopped, not finished, were cut off by the restart: start each of them again now, "
+                 "the same way (in the background, so it shows in the tasks panel; a subagent: resume it), unless "
+                 "it's no longer needed or its work was done already, then carry on." if cut else "")
         self.send(f"Yo Claude restarted while {'these background tasks' if len(tasks) > 1 else 'this background task'} "
-                  f"kept running, so Claude Code's notice didn't reach you. Now: {names}. Check the result and carry on "
-                  "with what you said you'd do when it was done (if you already knew, just say so briefly).",
+                  f"kept running, so Claude Code's notice didn't reach you. Now: {names}.{again} Check the results and "
+                  "carry on with what you said you'd do when they were done (if you already knew, just say so briefly).",
                   sid=sid, origin="system")
 
     # --- the tasks panel: background commands and subagents, across sessions ---
