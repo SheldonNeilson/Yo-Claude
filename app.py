@@ -95,6 +95,12 @@ class App:
         self.ready = {}            # window -> loaded
         self.tick = 0
         self.taskbar = None
+        if not self.settings.get("face_off_v1"):   # once: the face is now off unless turned on; keep it for who had it
+            if self.settings.get("avatar", True) and "avatar" in self.settings:
+                self.settings.setdefault("bar_avatar", True)
+                self.settings["avatar"] = True
+            self.settings["face_off_v1"] = True
+            self.settings.save()
         if not self.settings.get("face_max_v1"):   # once: the sidebar at its widest, so her face shows at its biggest
             self.settings.update(side_width=560, face_max_v1=True)
             self.settings.save()

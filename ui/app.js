@@ -1767,7 +1767,7 @@ window.addEventListener("pywebviewready", async () => {
   $("#sessionHead").insertBefore(follow.button("chat"), $("#sessionHead .spacer").nextSibling);
   renderToggles(); renderTree(); renderHead(); renderTranscript(); renderState(); planBox.update();
   setTimeout(() => composer.preload(), 1500);
-  avatar.init();
+  avatar.wanted = true; avatar.apply();   // (her face loads when it's turned on: Options > Face in Sidebar)
   if (S.settings.panel_open) $("#app").classList.add("with-panel");
   if (S.settings.side_open === false) $("#app").classList.add("no-side");
   panes.render();

@@ -111,7 +111,11 @@ const avatar = {
       }
     } finally { this.refreshing = false; }
   },
-  apply() { this.el?.classList.toggle("hidden", S.settings?.[this.mount ? "bar_avatar" : "avatar"] === false); },
+  apply() {   // (off unless turned on; in the window, nothing's loaded until it is)
+    const on = S.settings?.[this.mount ? "bar_avatar" : "avatar"] === true;
+    if (on && this.wanted && !this.el) this.init();
+    this.el?.classList.toggle("hidden", !on);
+  },
   levels(list) {   // the voice's loudness, as it plays: her mouth's fallback if she has no speech envelope
     if (list?.length) { this.level = Math.min(1, (list.at(-1) || 0) / 3000); this.levelAt = Date.now(); }
   },

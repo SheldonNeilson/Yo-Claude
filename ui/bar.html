@@ -100,7 +100,7 @@ function renderFeed() {
 
 // ---------- her face and the feed, each optional (View menu) ----------
 function applyMore() {
-  const face = S.settings.bar_avatar !== false, feed = S.settings.bar_feed !== false;
+  const face = S.settings.bar_avatar === true, feed = S.settings.bar_feed !== false;   // (her face: off unless turned on)
   $("#face").classList.toggle("hidden", !face);
   $("#feed").classList.toggle("hidden", !feed);
   $("#more").classList.toggle("hidden", !face && !feed);
