@@ -337,6 +337,10 @@ code.pathlink:hover { color: var(--orange2); background: var(--bg3); }
 .thought.live .ttext::after { content: "▍"; color: var(--amber); animation: blink 1s steps(1) infinite; font-style: normal; }
 @keyframes blink { 50% { opacity: 0; } }
 
+/* a row Claude pointed you at */
+#panel .node.flash { animation: rowflash .5s ease-in-out 4; }
+@keyframes rowflash { 50% { background: var(--orange); color: var(--bg); } }
+
 /* voice bubbles: what Yo Claude said out loud about a message; and the 🔊 button on Claude's bubbles */
 .spoken { display: flex; align-items: baseline; gap: 8px; width: fit-content; max-width: min(80%, 110ch);
   margin: -4px 0 12px 4ch; padding: 3px 10px; border: 1px dashed var(--amber); color: var(--amber); font-size: 12px; }

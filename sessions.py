@@ -69,6 +69,13 @@ CODE_PROMPT = (
     "You are running inside Yo Claude, a voice-first coding assistant app on the user's Windows PC. For [voice] "
     "messages, put code, lists and detail after the spoken opening; the app shows them on screen." + VOICE_NOTE
 )
+UI_SERVER = "yo-claude"   # Claude's own tools for showing things in Yo Claude's window
+UI_PROMPT = (
+    " The user is looking at Yo Claude's window. When they ask to see, show or open something (a file, a folder, a "
+    "diff), use the yo-claude tools: show_file opens a file in front of them, show_folder opens the files panel at a "
+    "folder, show_diff shows what changed in a file, show_panel switches the right-hand panel. Reading a file yourself "
+    "shows them nothing. Also use them when seeing it would help, but not for every file you touch."
+)
 PC_CONTROL_PROMPT = (
     " You can see and control the user's screen, keyboard and mouse with the screen-control tools; use them when the "
     "user asks you to do something on their PC, then say briefly what you did. Before anything hard to undo "
@@ -389,6 +396,8 @@ class Session:
         servers = r.mcp_servers(self.cwd)
         if PC_CONTROL_SERVER in servers:
             system += PC_CONTROL_PROMPT
+        servers[UI_SERVER] = self.ui_tools()
+        system += UI_PROMPT
         opts = dict(
             cwd=self.cwd or CHAT_DIR,
             can_use_tool=self.can_use_tool,
@@ -426,7 +435,42 @@ class Session:
             opts["effort"] = self.effort
         return sdk.ClaudeAgentOptions(**opts)
 
+    def ui_tools(self):
+        """Tools for Claude to show things in Yo Claude's window: they only act while this session is the one
+        open there (otherwise they say so), so a session working in the background can't pull the view away."""
+        sess = self
+
+        def reply(text):
+            return {"content": [{"type": "text", "text": text}]}
+
+        def act(action, **args):
+            return reply(sess.router.ui_action(sess, action, **args))
+
+        @sdk.tool("show_folder", "Open the files panel in Yo Claude's window at a folder (expanded, highlighted), so "
+                  "the user can see it. Path: absolute, or relative to the session folder.", {"path": str})
+        async def show_folder(a):
+            return act("folder", path=a.get("path", ""))
+
+        @sdk.tool("show_file", "Open a file in Yo Claude's viewer for the user to see (text, Markdown, pictures, "
+                  "video, PDF). Path: absolute, or relative to the session folder.", {"path": str})
+        async def show_file(a):
+            return act("file", path=a.get("path", ""))
+
+        @sdk.tool("show_diff", "Show the user what changed in a file in this session (the changes panel's diff).",
+                  {"path": str})
+        async def show_diff(a):
+            return act("diff", path=a.get("path", ""))
+
+        @sdk.tool("show_panel", "Show a tab of the right-hand panel: files, changes, git or tasks (or 'close').",
+                  {"tab": str})
+        async def show_panel(a):
+            return act("panel", tab=a.get("tab", "files"))
+
+        return sdk.create_sdk_mcp_server(UI_SERVER, tools=[show_folder, show_file, show_diff, show_panel])
+
     async def can_use_tool(self, tool, inp, ctx):
+        if tool.startswith(f"mcp__{UI_SERVER}__"):   # only shows things in the window
+            return sdk.PermissionResultAllow()
         if tool.startswith(f"mcp__{PC_CONTROL_SERVER}__"):
             self.router.set_work(self, "using_pc")
             return sdk.PermissionResultAllow()   # turned on deliberately from the tray
@@ -1515,6 +1559,44 @@ class Router:
                        "session_id": s.id}
             prompt = message()
         return self.run(s.turn(prompt, voice, item))
+
+    def ui_action(self, s, action, **args):
+        """Claude showing the user something in the window (see Session.ui_tools). Returns what happened."""
+        if self.active is not s:
+            return "Not shown: the user has another conversation open in Yo Claude right now."
+        if action == "panel":
+            tab = args.get("tab", "files")
+            if tab not in ("files", "changes", "git", "tasks", "close"):
+                return "Unknown tab: use files, changes, git, tasks or close."
+            self.emit("ui", action="panel", tab=tab)
+            return f"Showing the {tab} tab." if tab != "close" else "Closed the panel."
+        path = (args.get("path") or "").strip().strip('"')
+        full = os.path.normpath(path if os.path.isabs(path) or not s.cwd else os.path.join(s.cwd, path))
+        if not os.path.exists(full):
+            return f"Not found: {full}"
+        rel = None
+        if s.cwd and same_folder(os.path.commonpath([os.path.normcase(full), os.path.normcase(s.cwd)]), s.cwd):
+            rel = os.path.relpath(full, s.cwd).replace("\\", "/")
+            rel = "" if rel == "." else rel
+        if action == "folder":
+            if rel is None:
+                return "Only folders inside this session's folder can be shown in the files panel."
+            if not os.path.isdir(full):   # a file: show it in its folder, highlighted
+                self.emit("ui", action="folder", rel=os.path.dirname(rel).replace("\\", "/"), select=rel)
+                return f"Showing {rel} in the files panel."
+            self.emit("ui", action="folder", rel=rel, select=rel)
+            return f"Showing {rel or 'the session folder'} in the files panel."
+        if action == "file":
+            if os.path.isdir(full):
+                return "That's a folder: use show_folder."
+            self.emit("ui", action="file", path=full, rel=rel)
+            return f"Opened {os.path.basename(full)} in the viewer."
+        if action == "diff":
+            if rel is None:
+                return "Only files in this session's folder have a diff here."
+            self.emit("ui", action="diff", rel=rel)
+            return f"Showing the changes in {rel}."
+        return "Unknown action."
 
     def say_short(self, sid, i):
         """The short spoken version of Claude's message `i`: said out loud and shown as a voice bubble under it."""

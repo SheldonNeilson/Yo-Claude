@@ -133,6 +133,7 @@ function handle(e) {
       if (S.active && e.session === S.active.id) { S.active.context = e.context; renderContext(); }
       break;
     case "limits": renderLimits(e.limits); break;
+    case "ui": showForClaude(e); break;
     case "train": training.onJudgement(e); break;
     case "open_training": training.open(); break;
     case "tool_done": case "baseline":
@@ -939,6 +940,32 @@ function thoughtBubble(it) {
     e.stopPropagation(); it.expanded = !it.expanded; renderItem(it);
   };
   return n;
+}
+
+// Claude showing you something (its yo-claude tools): the files panel at a folder, a file, a diff, a tab
+async function showForClaude(e) {
+  const open = (tab) => { $("#app").classList.add("with-panel"); api().set_setting("panel_open", true); panel.tab = tab; };
+  if (e.action === "panel") {
+    if (e.tab === "close") { $("#app").classList.remove("with-panel"); api().set_setting("panel_open", false); return; }
+    open(e.tab); await panel.load(); if (e.tab === "tasks") tasks.poll(); return;
+  }
+  if (e.action === "folder") {
+    open("files");
+    panel.openPath(e.rel);
+    await panel.load();
+    panel.select([e.select], e.select);
+    const row = panel.rows.get(e.select);
+    if (row) { row.scrollIntoView({ block: "center" }); row.classList.add("flash"); setTimeout(() => row.classList.remove("flash"), 2000); }
+    return;
+  }
+  if (e.action === "file") {
+    if (e.rel != null && S.active?.cwd) {   // also point at it in the files panel, if it's open
+      panel.openPath(panel.parentOf(e.rel));
+      if (panel.shown() && panel.tab === "files") { await panel.load(); panel.select([e.rel], e.rel); }
+    }
+    return viewFile(e.path, S.active?.cwd);
+  }
+  if (e.action === "diff") { open("changes"); await panel.load(); return showDiff(e.rel); }
 }
 
 function showPicture(src, title) {   // a screenshot or picture from a tool result, big
