@@ -68,10 +68,98 @@ function showContext() {
     `${mcp ? `<h4>biggest MCP tools</h4><table class="ctxtab">${mcp}</table>` : ""}` +
     `${mem ? `<h4>memory files</h4><table class="ctxtab">${mem}</table>` : ""}</div></div>` +
     (tips.length ? `<ul class="tips">${tips.map((t) => `<li>${esc(t)}</li>`).join("")}</ul>` : "")));
+  if (c.servers || c.skills) d.appendChild(loadoutView(c));
   addButtons(d, [["compact this conversation", () => { closeModal(); api().send("/compact"); }],
                  ["new session", () => { closeModal(); api().new_session(); }], ["close", closeModal, "primary"]]);
 }
 $("#ctxMeter").onclick = showContext;
+
+// ---------- what's loaded: MCP servers, skills and memory files, with their cost and a switch ----------
+let loadoutTab = "mcp";
+function loadoutView(c) {
+  const off = c.off || { mcp: [], skills: [], plugins: [] };
+  const wrap = el("div", "loadout");
+  const pending = new Set();   // switched since this was measured: applies from the next message
+  const draw = () => {
+    const servers = [...(c.servers || [])];
+    for (const n of off.mcp) if (!servers.some((s) => s.name === n)) servers.push({ name: n, status: "off", tools: 0, tokens: 0 });
+    const skills = c.skills || [];
+    const groups = new Map();   // plugin id ("" = your own and the folder's skills) -> skills
+    for (const k of skills) {   // plugins by id; your own skills and the folder's under "~user" / "~project"
+      const g = k.plugin_id || (k.source === "projectSettings" ? "~project" : "~user");
+      if (!groups.has(g)) groups.set(g, { name: k.plugin || (g === "~project" ? "this folder's skills" : "your skills"), skills: [] });
+      groups.get(g).skills.push(k);
+    }
+    for (const pid of off.plugins) if (!groups.has(pid)) groups.set(pid, { name: pid.split("@")[0], skills: [] });
+    const offSkills = off.skills.filter((n) => !skills.some((k) => k.name === n));
+    const tabs = [["mcp", `MCP servers <i>${servers.length}</i>`], ["skills", `skills <i>${skills.length}</i> <span class="dim">${fmtTok(c.skills_tokens || 0)}</span>`],
+                  ["memory", `memory files <i>${(c.memory || []).length}</i>`]];
+    wrap.innerHTML = `<h4>what's loaded</h4><div class="ldtabs">${tabs.map(([k, l]) => `<button data-k="${k}" class="${loadoutTab === k ? "on" : ""}">${l}</button>`).join("")}</div>`;
+    wrap.querySelectorAll("[data-k]").forEach((b) => b.onclick = () => { loadoutTab = b.dataset.k; draw(); });
+    const list = el("div", "ldlist");
+    const row = (on, label, meta, cost, toggle, cls = "", tip = "") => {
+      const r = el("div", "ldrow " + cls, `<span class="ldchk">${toggle ? (on ? "[x]" : "[ ]") : "   "}</span><span class="ldname">${label}</span>` +
+        `<span class="ldmeta">${meta}</span><span class="ldcost">${cost}</span>`);
+      if (tip) r.dataset.tip = tip;
+      if (toggle) { r.classList.add("switch"); r.onclick = toggle; }
+      list.appendChild(r);
+    };
+    const flip = (kind, name, on, apply = true) => {
+      const key = { mcp: "mcp", skill: "skills", plugin: "plugins" }[kind];
+      off[key] = on ? off[key].filter((n) => n !== name) : [...off[key], name];
+      pending.add(kind + ":" + name);
+      if (apply) api().set_loadout(kind, name, on);
+      draw();
+    };
+    if (loadoutTab === "mcp") {
+      if (!servers.length) list.appendChild(el("div", "dim", "No MCP servers in this session."));
+      for (const s of servers) {
+        const isOff = off.mcp.includes(s.name) || (s.name === "screen-control" && !S.settings.pc_control);
+        const status = isOff ? "off" : s.status === "connected" ? `${s.tools} tool${s.tools === 1 ? "" : "s"}` : s.status;
+        const toggle = () => s.name === "screen-control"
+          ? (api().set_setting("pc_control", isOff), pending.add("mcp:" + s.name), draw())
+          : flip("mcp", s.name, isOff);
+        row(!isOff, esc(s.name === "screen-control" ? "PC control (screen-control)" : s.name),
+          `<span class="${s.status === "failed" && !isOff ? "del" : ""}">${esc(status)}</span>${pending.has("mcp:" + s.name) ? ' <span class="ldpend">next message</span>' : ""}`,
+          s.tokens ? fmtTok(s.tokens) : isOff ? "" : '<span class="dim" data-tip="Its tools load only when Claude needs them">on demand</span>',
+          toggle, isOff ? "off" : "", s.error || "");
+      }
+    } else if (loadoutTab === "skills") {
+      for (const [pid, g] of groups) {
+        const plugin = !pid.startsWith("~"), pluginOff = plugin && off.plugins.includes(pid);
+        const total = g.skills.reduce((a, k) => a + k.tokens, 0);
+        if (plugin) row(!pluginOff, `<b>${esc(g.name)}</b>`, `plugin · ${g.skills.length} skill${g.skills.length === 1 ? "" : "s"}` +
+          (pending.has("plugin:" + pid) ? ' <span class="ldpend">next message</span>' : ""), total ? fmtTok(total) : "",
+          () => flip("plugin", pid, pluginOff), "ldgroup" + (pluginOff ? " off" : ""), "Turns off every skill and command in this plugin");
+        else list.appendChild(el("div", "ldrow ldgroup", `<span class="ldchk">   </span><span class="ldname"><b>${esc(g.name)}</b></span>`));
+        if (pluginOff) continue;
+        for (const k of g.skills.sort((a, b) => b.tokens - a.tokens)) {
+          const short = plugin ? k.name.replace(/^[^:]+:/, "") : k.name;
+          row(true, esc(short), pending.has("skill:" + k.name) ? '<span class="ldpend">next message</span>' : "", fmtTok(k.tokens),
+            () => flip("skill", k.name, false), "ldskill");
+        }
+      }
+      if (offSkills.length) {
+        list.appendChild(el("div", "ldrow ldgroup", `<span class="ldchk">   </span><span class="ldname"><b>turned off</b></span>`));
+        for (const n of offSkills) row(false, esc(n), pending.has("skill:" + n) ? '<span class="ldpend">next message</span>' : "", "",
+          () => flip("skill", n, true), "ldskill off");
+      }
+      if (!skills.length && !offSkills.length) list.appendChild(el("div", "dim", "No skills in this session."));
+    } else {
+      for (const m of c.memory || []) {
+        const r = el("div", "ldrow switch", `<span class="ldchk">   </span><span class="ldname">${esc(m.name)}</span><span class="ldmeta">click to open</span><span class="ldcost">${fmtTok(m.tokens)}</span>`);
+        r.onclick = () => viewFile(m.name);
+        list.appendChild(r);
+      }
+      if (!(c.memory || []).length) list.appendChild(el("div", "dim", "No memory files (CLAUDE.md, AGENTS.md) here."));
+      list.appendChild(el("div", "dim small ldnote", "These are your CLAUDE.md / AGENTS.md files: always loaded. Edit them to make them shorter."));
+    }
+    wrap.appendChild(list);
+    if (pending.size) wrap.appendChild(el("div", "dim small ldnote", "Switched for all of Yo Claude's sessions (not your Claude Code). It applies from each session's next message; the numbers here update after it."));
+  };
+  draw();
+  return wrap;
+}
 
 // ---------- plan usage limits (account-wide, in the menu bar) ----------
 function renderLimits(l) {

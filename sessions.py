@@ -331,7 +331,7 @@ class Session:
             can_use_tool=self.can_use_tool,
             permission_mode=self.permission_mode,
             include_partial_messages=True,
-            settings=json.dumps({"disableAllHooks": True}),
+            settings=json.dumps(r.loadout_settings()),
             strict_mcp_config=True,
             mcp_servers=servers,
             system_prompt={"type": "preset", "preset": "claude_code", "append": system},
@@ -582,6 +582,27 @@ class Session:
                                         "deferred": bool(c.get("isDeferred"))} for c in u.get("categories", [])],
                         "mcp": top(u.get("mcpTools"), 8), "memory": top(u.get("memoryFiles"), 6),
                         "breakdown": {k: v for k, v in (u.get("messageBreakdown") or {}).items() if isinstance(v, int)}}
+        skills = u.get("skills") or {}
+        self.context["skills"] = [{"name": k.get("name"), "tokens": k.get("tokens", 0), "source": k.get("source"),
+                                   "plugin": k.get("pluginName"), "plugin_id": k.get("pluginId")}
+                                  for k in skills.get("skillFrontmatter") or [] if isinstance(k, dict)]
+        self.context["skills_tokens"] = skills.get("tokens", 0)
+        self.context["commands_tokens"] = (u.get("slashCommands") or {}).get("tokens", 0)
+        tool_tokens = {}
+        for t in u.get("mcpTools") or []:
+            if isinstance(t, dict):
+                tool_tokens[t.get("serverName")] = tool_tokens.get(t.get("serverName"), 0) + t.get("tokens", 0)
+        try:
+            status = (await client.get_mcp_status() or {}).get("mcpServers") or []
+        except Exception as e:
+            log.debug("mcp status: %s", e)
+            status = []
+        self.context["servers"] = [{"name": m.get("name"), "status": m.get("status"), "error": m.get("error"),
+                                    "tools": len(m.get("tools") or []), "source": m.get("source"),
+                                    "tokens": tool_tokens.get(m.get("name"), 0)} for m in status if isinstance(m, dict)]
+        off = self.router.settings
+        self.context["off"] = {"mcp": off.get("off_mcp") or [], "skills": off.get("off_skills") or [],
+                               "plugins": off.get("off_plugins") or []}
         self.router.emit("context", session=self.id, context=self.context)
 
     def handle(self, m):
@@ -997,6 +1018,40 @@ class Router:
             asyncio.ensure_future(connected.pop(0).disconnect())
 
     # --- MCP servers ---
+    def loadout_settings(self):
+        """Claude Code settings for Yo Claude's sessions: no hooks, and the skills and plugins you turned off."""
+        out = {"disableAllHooks": True}
+        skills = self.settings.get("off_skills") or []
+        plugins = self.settings.get("off_plugins") or []
+        if skills:
+            out["skillOverrides"] = {name: "off" for name in skills}
+        if plugins:
+            out["enabledPlugins"] = {pid: False for pid in plugins}
+        return out
+
+    def set_loadout(self, kind, name, on):
+        """Turn an MCP server, skill or plugin on or off for Yo Claude's sessions. MCP servers switch at once in
+        connected sessions; the rest apply from each session's next message (they're start-up options)."""
+        key = {"mcp": "off_mcp", "skill": "off_skills", "plugin": "off_plugins"}[kind]
+        off = [n for n in (self.settings.get(key) or []) if n != name] + ([] if on else [name])
+        self.settings[key] = off
+        self.settings.save()
+        if kind == "mcp" and not on:
+            for sess in self.live.values():
+                if sess.client:
+                    self.run(self.toggle_mcp(sess, name, False))
+        else:
+            self.reconnect_all()
+        return None
+
+    async def toggle_mcp(self, sess, name, on):
+        try:
+            await sess.client.toggle_mcp_server(name, on)
+        except Exception as e:
+            log.debug("toggle %s on %s: %s", name, sess.id, e)
+        if sess is self.active:
+            await sess.measure_context()
+
     def mcp_servers(self, cwd):
         """Your user MCP servers (+ the folder's .mcp.json) for code sessions; screen-control only with PC control."""
         servers = {}
@@ -1013,6 +1068,8 @@ class Router:
                     servers.update(json.load(f).get("mcpServers", {}))
             except (OSError, ValueError):
                 pass
+        for name in self.settings.get("off_mcp") or []:   # turned off in the context window view
+            servers.pop(name, None)
         servers.pop(PC_CONTROL_SERVER, None)
         if self.settings.get("pc_control"):
             server = pc_control_server() or user.get(PC_CONTROL_SERVER)

@@ -311,6 +311,25 @@ code.pathlink:hover { color: var(--orange2); background: var(--bg3); }
 .msg .copybtn { top: -1.5em; right: 1ch; }
 .msg.user .copybtn { right: auto; left: 1ch; }
 
+/* what's loaded (in the context window view): MCP servers, skills, memory files with their cost and a switch */
+.loadout { margin-top: 14px; border-top: 1px solid var(--line); padding-top: 10px; }
+.loadout h4 { margin: 0 0 6px; color: var(--dim); font-size: 11px; letter-spacing: 1px; text-transform: uppercase; }
+.ldtabs { display: flex; gap: 4px; margin-bottom: 6px; }
+.ldtabs button { padding: 2px 10px; } .ldtabs button.on { color: var(--orange); border-color: var(--orange); }
+.ldtabs i { font-style: normal; color: var(--faint); }
+.ldlist { max-height: 34vh; overflow-y: auto; border: 1px solid var(--line); background: #0b0b0a; padding: 4px 0; }
+.ldrow { display: flex; gap: 10px; align-items: baseline; padding: 1px 10px; white-space: nowrap; }
+.ldrow.switch { cursor: pointer; } .ldrow.switch:hover { background: var(--bg3); }
+.ldrow.switch:hover .ldchk { color: var(--orange2); }
+.ldchk { color: var(--orange); white-space: pre; flex: none; }
+.ldname { color: var(--text); overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.ldmeta { color: var(--faint); font-size: 12px; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 1; }
+.ldcost { color: var(--dim); flex: none; text-align: right; min-width: 6ch; }
+.ldrow.off .ldname, .ldrow.off .ldchk { color: var(--faint); }
+.ldrow.ldgroup { margin-top: 4px; } .ldrow.ldskill { padding-left: 28px; }
+.ldpend { color: var(--amber); }
+.ldnote { margin-top: 6px; }
+
 /* a subagent's log in the tasks tab: the conversation look from before the bubbles, full width */
 .agentlog { padding: 6px 12px 16px; border-top: 1px solid var(--line); }
 .alog-user { color: var(--orange2); white-space: pre-wrap; margin: 8px 0; max-height: 9.5em; overflow-y: auto; }

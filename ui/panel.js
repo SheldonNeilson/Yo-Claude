@@ -3,6 +3,8 @@
 "use strict";
 window.panel = {
   tab: "files", openDirs: new Set([""]), dirs: {}, changes: null, git: null, timer: null,
+  // file explorer state: selected paths, Shift-range anchor, copied/cut items, rows in display order
+  sel: new Set(), anchor: null, clip: null, visible: [], rows: new Map(), treeFocus: false, dragging: null,
 
   shown() { return $("#app").classList.contains("with-panel"); },
   refresh(soon = false) {
@@ -11,6 +13,7 @@ window.panel = {
   },
   async load() {
     const cwd = S.active ? S.active.cwd : S.folder;
+    if (!sameFolder(cwd, this.cwd)) { this.sel = new Set(); this.anchor = null; }
     this.cwd = cwd;
     if (!cwd) { this.git = null; this.changes = null; this.dirs = {}; renderBranch(); if (this.shown()) this.render(); return; }
     const [git, changes] = await Promise.all([api().git_info(), api().changes()]);
@@ -20,8 +23,15 @@ window.panel = {
     if (this.shown()) this.render();
   },
   async loadDirs() {
-    this.dirs = {};
-    for (const rel of this.openDirs) this.dirs[rel] = (await api().tree(rel)).entries || [];
+    const dirs = {};
+    for (const rel of [...this.openDirs]) {
+      const r = await api().tree(rel);
+      if (r.error && rel) { this.openDirs.delete(rel); continue; }   // renamed, moved or deleted
+      dirs[rel] = r.entries || [];
+    }
+    this.dirs = dirs;
+    const seen = new Set(Object.values(dirs).flat().map((e) => e.path));
+    for (const p of [...this.sel]) if (!seen.has(p)) this.sel.delete(p);
   },
   changedMap() {
     const m = new Map();
@@ -53,6 +63,8 @@ ${elsewhere} running in other sessions` : ""}">` +
   },
   render() {
     const p = $("#panel");
+    const keepTop = this.tab === "files" && this.renderedTab === "files" ? $("#pbody")?.scrollTop || 0 : 0;
+    this.renderedTab = this.tab;
     p.innerHTML = `<div class="ptabs"><span class="tabs"></span>
       <span class="spacer"></span><button data-act="refresh" title="Refresh">⟳</button></div><div id="pbody"></div>`;
     this.renderTabs();
@@ -61,6 +73,7 @@ ${elsewhere} running in other sessions` : ""}">` +
     if (this.tab === "tasks") return tasks.render();
     if (!this.cwd) { body.innerHTML = `<div class="pempty">No folder.<br>Pick one at the top left to see files, changes and git.</div>`; return; }
     ({ files: () => this.renderFiles(body), changes: () => this.renderChanges(body), git: () => this.renderGit(body) })[this.tab]();
+    if (keepTop) body.scrollTop = keepTop;
   },
 
   // ---------- files ----------
@@ -70,7 +83,17 @@ ${elsewhere} running in other sessions` : ""}">` +
     const code = el("button", "", "vs code"); code.onclick = () => api().open_in_editor("");
     const rev = el("button", "", "explorer"); rev.onclick = () => api().reveal("");
     head.append(code, rev); body.appendChild(head);
-    const tree = el("div", "tree");
+    const tools = el("div", "phead ftools");
+    const tool = (label, title, fn) => { const b = el("button", "", label); b.title = title; b.onclick = fn; tools.appendChild(b); return b; };
+    tool("+ file", "New file (in the selected folder, else the top folder)", () => this.newItem(false, this.targetFolder()));
+    tool("+ folder", "New folder (in the selected folder, else the top folder)", () => this.newItem(true, this.targetFolder()));
+    this.pasteBtn = tool("paste", "Paste copied or cut items (Ctrl+V)", () => this.paste(this.targetFolder()));
+    tools.appendChild(el("span", "spacer"));
+    tool("⟳", "Refresh the file tree", () => this.load());
+    body.appendChild(tools);
+    const tree = el("div", "tree ftree");
+    tree.tabIndex = 0;
+    this.visible = []; this.rows = new Map();
     const walk = (rel, depth) => {
       for (const e of this.dirs[rel] || []) {
         const row = el("div", "node" + (e.dir ? " dir" : ""));
@@ -79,20 +102,246 @@ ${elsewhere} running in other sessions` : ""}">` +
         const dirChanged = e.dir && [...changed.keys()].some((k) => k.startsWith(e.path + "/"));
         row.innerHTML = `<span class="tw">${e.dir ? (this.openDirs.has(e.path) ? "▾" : "▸") : " "}</span>` +
           `<span class="nm ${st ? "st-" + st : dirChanged ? "st-M" : ""}">${esc(e.name)}</span>${st ? `<span class="badge-st st-${st}">${st}</span>` : ""}`;
-        row.onclick = async () => {
-          if (e.dir) {
-            if (this.openDirs.has(e.path)) this.openDirs.delete(e.path);
-            else { this.openDirs.add(e.path); this.dirs[e.path] = (await api().tree(e.path)).entries || []; }
-            this.render();
-          } else preview(e.path);
+        row.title = e.path;
+        row.onclick = (ev) => this.clickRow(ev, e);
+        row.oncontextmenu = (ev) => {
+          ev.preventDefault(); ev.stopPropagation(); this.treeFocus = true;
+          if (!this.sel.has(e.path)) this.select([e.path], e.path);
+          fileMenu(ev, e);
         };
-        row.oncontextmenu = (ev) => { ev.preventDefault(); fileMenu(ev, e); };
+        this.dragRow(row, e);
+        this.visible.push(e); this.rows.set(e.path, row);
         tree.appendChild(row);
         if (e.dir && this.openDirs.has(e.path)) walk(e.path, depth + 1);
       }
     };
     walk("", 0);
+    tree.onkeydown = (ev) => this.treeKey(ev);
+    tree.onfocus = () => { this.treeFocus = true; };
+    body.oncontextmenu = (ev) => {   // empty space: the top folder
+      if (ev.target.closest(".node") || ev.target.closest("input, button")) return;
+      ev.preventDefault(); ev.stopPropagation(); this.treeFocus = true; this.select([]); this.rootMenu(ev);
+    };
+    body.ondragover = (ev) => { if (!this.dragging || ev.target.closest(".node")) return; ev.preventDefault(); this.dropMark(tree); };
+    body.ondrop = (ev) => { if (!this.dragging || ev.target.closest(".node")) return; ev.preventDefault(); ev.stopPropagation(); this.dropOn("", ev.ctrlKey); };
     body.appendChild(tree);
+    this.paintSel();
+    if (this.treeFocus && $("#modal").classList.contains("hidden")) tree.focus({ preventScroll: true });
+  },
+
+  // ---------- file explorer ----------
+  parentOf: (p) => p.includes("/") ? p.slice(0, p.lastIndexOf("/")) : "",
+  fullPath(rel) { return this.cwd.replace(/[\\/]+$/, "") + (rel ? "\\" + rel.replace(/\//g, "\\") : ""); },
+  targets() { return this.visible.filter((e) => this.sel.has(e.path)); },   // selected, in display order
+  topLevel(items) {   // drop items whose folder is also selected (deleting/moving the folder covers them)
+    const dirs = items.filter((e) => e.dir).map((e) => e.path + "/");
+    return items.filter((e) => !dirs.some((d) => e.path.startsWith(d)));
+  },
+  targetFolder() {   // where new items and pastes go: the selected folder, a selected file's folder, else the top
+    const t = this.targets();
+    return t.length === 1 ? (t[0].dir ? t[0].path : this.parentOf(t[0].path)) : "";
+  },
+  clipHere() { return !!(this.clip?.paths.length && sameFolder(this.clip.cwd, this.cwd)); },
+  select(paths, anchor) {
+    this.sel = new Set(paths);
+    if (anchor !== undefined) this.anchor = anchor;
+    this.paintSel();
+  },
+  paintSel() {
+    const cut = this.clip?.cut && this.clipHere() ? new Set(this.clip.paths) : null;
+    for (const [p, row] of this.rows) {
+      row.classList.toggle("sel", this.sel.has(p));
+      row.classList.toggle("cut", !!cut?.has(p));
+    }
+    if (this.pasteBtn) this.pasteBtn.disabled = !this.clipHere();
+  },
+  openPath(rel) {   // make a folder and its parents open so new things in it show
+    for (let p = rel; p; p = this.parentOf(p)) this.openDirs.add(p);
+  },
+  async toggleDir(e) {
+    if (this.openDirs.has(e.path)) {
+      this.openDirs.delete(e.path);
+      for (const p of [...this.sel]) if (p.startsWith(e.path + "/")) this.sel.delete(p);
+    } else { this.openDirs.add(e.path); this.dirs[e.path] = (await api().tree(e.path)).entries || []; }
+    this.render();
+  },
+  clickRow(ev, e) {
+    this.treeFocus = true;
+    if (ev.ctrlKey || ev.metaKey) {
+      this.sel.has(e.path) ? this.sel.delete(e.path) : this.sel.add(e.path);
+      this.anchor = e.path; return this.paintSel();
+    }
+    if (ev.shiftKey && this.anchor) {
+      const i = this.visible.findIndex((x) => x.path === this.anchor), j = this.visible.findIndex((x) => x.path === e.path);
+      if (i >= 0 && j >= 0) return this.select(this.visible.slice(Math.min(i, j), Math.max(i, j) + 1).map((x) => x.path));
+    }
+    this.select([e.path], e.path);
+    if (e.dir) this.toggleDir(e); else preview(e.path);
+  },
+  async done(r, selectPaths) {   // after any change: report problems, refresh the tree (open folders kept) and changes
+    if (r?.error) toast(r.error, "error");
+    if (selectPaths?.length) { this.sel = new Set(selectPaths); this.anchor = selectPaths[0]; }
+    this.treeFocus = true;
+    await this.load();
+  },
+  badName(name) {
+    if (/[\\/]/.test(name)) { toast("Names can't contain / or \\.", "error"); return true; }
+    return false;
+  },
+  newItem(isDir, folder) {
+    ask(`new ${isDir ? "folder" : "file"} in ${folder || base(this.cwd)}`, "", async (name) => {
+      if (this.badName(name)) return;
+      const r = isDir ? await api().new_folder(folder, name) : await api().new_file(folder, name);
+      this.openPath(folder);
+      this.done(r, r?.path ? [r.path] : null);
+    });
+  },
+  rename(e) {
+    ask(`rename ${e.path}`, e.name, async (name) => {
+      if (name === e.name || this.badName(name)) return;
+      const r = await api().rename_path(e.path, name);
+      if (r?.path && e.dir) {   // keep the folder (and folders inside it) open under the new name
+        for (const p of [...this.openDirs]) if (p === e.path || p.startsWith(e.path + "/")) { this.openDirs.delete(p); this.openDirs.add(r.path + p.slice(e.path.length)); }
+      }
+      this.done(r, r?.path ? [r.path] : null);
+    });
+    const dot = e.dir ? -1 : e.name.lastIndexOf(".");   // select the name without its extension, like Explorer
+    if (dot > 0) setTimeout(() => { const i = $("#modal input"); if (i) i.setSelectionRange(0, dot); }, 10);
+  },
+  del(items) {
+    items = this.topLevel(items);
+    if (!items.length) return;
+    const names = items.slice(0, 5).map((e) => e.name).join(", ") + (items.length > 5 ? ` and ${items.length - 5} more` : "");
+    const what = items.length === 1 ? `"${items[0].name}"${items[0].dir ? " and everything in it" : ""}` : `these ${items.length} items (${names})`;
+    confirmBox(`Move ${what} to the Recycle Bin?`, async () => {
+      const r = await api().delete_paths(items.map((e) => e.path));
+      if (this.clip) this.clip.paths = this.clip.paths.filter((p) => !(r?.paths || []).includes(p));
+      this.done(r, []);
+    });
+  },
+  setClip(items, cut) {
+    items = this.topLevel(items);
+    if (!items.length) return;
+    this.clip = { cut, paths: items.map((e) => e.path), cwd: this.cwd };
+    this.paintSel();
+    toast(`${items.length === 1 ? items[0].name : items.length + " items"} ${cut ? "cut" : "copied"}: paste with Ctrl+V`);
+  },
+  async paste(dest) {
+    if (!this.clip?.paths.length) return toast("Nothing to paste: copy or cut something first.", "error");
+    if (!this.clipHere()) return toast("Those were copied in another folder. Copy them again here.", "error");
+    const { cut, paths } = this.clip;
+    const r = cut ? await api().move_paths(paths, dest) : await api().copy_paths(paths, dest);
+    if (cut) this.clip = null;   // a copy can be pasted again (it gets a "(copy 2)" name)
+    this.openPath(dest);
+    this.done(r, r?.paths);
+  },
+  async duplicate(items) {
+    items = this.topLevel(items);
+    if (!items.length) return;
+    const r = await api().duplicate_paths(items.map((e) => e.path));
+    this.done(r, r?.paths);
+  },
+  copyPaths(items, relative) {
+    const list = items.map((e) => relative ? e.path.replace(/\//g, "\\") : this.fullPath(e.path));
+    copyText(list.join("\n"), list.length === 1 ? (relative ? "relative path copied" : "path copied") : `${list.length} paths copied`);
+  },
+
+  // drag a selection onto a folder (or empty space for the top folder) to move it; hold Ctrl to copy
+  dragRow(row, e) {
+    row.draggable = true;
+    row.ondragstart = (ev) => {
+      if (!this.sel.has(e.path)) this.select([e.path], e.path);
+      this.dragging = this.topLevel(this.targets()).map((x) => x.path);
+      ev.dataTransfer.setData("text/x-yoclaude-paths", this.dragging.join("\n"));
+      ev.dataTransfer.effectAllowed = "copyMove";
+    };
+    row.ondragend = () => { this.dragging = null; this.dropMark(null); };
+    row.ondragover = (ev) => {
+      if (!this.dragging) return;   // files dragged in from outside go to the window's own drop (attach)
+      ev.preventDefault(); ev.stopPropagation();
+      ev.dataTransfer.dropEffect = ev.ctrlKey ? "copy" : "move";
+      const dest = e.dir ? e.path : this.parentOf(e.path);
+      this.dropMark(dest ? this.rows.get(dest) : row.closest(".ftree"));
+    };
+    row.ondrop = (ev) => {
+      if (!this.dragging) return;
+      ev.preventDefault(); ev.stopPropagation();
+      this.dropOn(e.dir ? e.path : this.parentOf(e.path), ev.ctrlKey);
+    };
+  },
+  dropMark(node) {
+    if (this.dropNode === node) return;
+    this.dropNode?.classList.remove("drop");
+    this.dropNode = node; node?.classList.add("drop");
+  },
+  async dropOn(dest, copy) {
+    const paths = this.dragging || [];
+    this.dragging = null; this.dropMark(null);
+    if (!paths.length) return;
+    if (!copy && paths.every((p) => this.parentOf(p) === dest)) return;   // dropped where it already is
+    const r = copy ? await api().copy_paths(paths, dest) : await api().move_paths(paths, dest);
+    this.openPath(dest);
+    this.done(r, r?.paths);
+  },
+
+  itemMenu(ev, e) {
+    const items = this.targets().length ? this.targets() : [e], many = items.length > 1;
+    const dest = e.dir ? e.path : this.parentOf(e.path);
+    const edit = [
+      ["cut", () => this.setClip(items, true), { kbd: "Ctrl+X" }],
+      ["copy", () => this.setClip(items, false), { kbd: "Ctrl+C" }],
+      [e.dir && !many ? "paste into this folder" : "paste", () => this.paste(dest), { kbd: "Ctrl+V", disabled: !this.clipHere() }],
+      ["duplicate", () => this.duplicate(items)],
+      ["rename…", () => this.rename(e), { kbd: "F2", disabled: many }],
+      ["delete (to Recycle Bin)", () => this.del(items), { kbd: "Del" }],
+    ];
+    const attach = ["attach to message", () => items.forEach((x) => composer.attach(x.path))];
+    const newHere = [["new file…", () => this.newItem(false, dest)], ["new folder…", () => this.newItem(true, dest)]];
+    const relPath = ["copy relative path", () => this.copyPaths(items, true)];
+    if (many) return showMenu(ev, [["sub:" + items.length + " items"], attach, "-", ...edit, "-",
+      ["copy paths", () => this.copyPaths(items, false)], ["copy relative paths", () => this.copyPaths(items, true)]]);
+    if (!e.dir) return showFileMenu(ev, e.path, this.cwd, [attach, ["open in vs code", () => api().open_in_editor(e.path)], "-",
+      ...edit, "-", ...newHere, relPath, "-"]);
+    showMenu(ev, [["sub:" + e.name], attach, ["open in vs code", () => api().open_in_editor(e.path)],
+      ["show in explorer", () => api().reveal(e.path)], "-", ...newHere, "-", ...edit, "-",
+      ["copy path", () => this.copyPaths(items, false)], relPath]);
+  },
+  rootMenu(ev) {
+    showMenu(ev, [["sub:" + base(this.cwd)],
+      ["new file…", () => this.newItem(false, "")], ["new folder…", () => this.newItem(true, "")],
+      ["paste", () => this.paste(""), { kbd: "Ctrl+V", disabled: !this.clipHere() }], "-",
+      ["open in vs code", () => api().open_in_editor("")], ["show in explorer", () => api().reveal("")],
+      ["copy path", () => copyText(this.fullPath(""), "path copied")], ["refresh", () => this.load()]]);
+  },
+  treeKey(ev) {
+    if (ev.target !== ev.currentTarget) return;
+    const k = ev.key, ctrl = (ev.ctrlKey || ev.metaKey) && !ev.altKey, items = this.targets(), one = items.length === 1 ? items[0] : null;
+    const act = (fn) => { ev.preventDefault(); ev.stopPropagation(); fn(); };
+    if (ctrl) {
+      const c = k.toLowerCase();
+      if (c === "c" && items.length) return act(() => this.setClip(items, false));
+      if (c === "x" && items.length) return act(() => this.setClip(items, true));
+      if (c === "v") return act(() => this.paste(this.targetFolder()));
+      if (c === "a") return act(() => this.select(this.visible.map((e) => e.path)));
+      return;
+    }
+    if (k === "F2" && one) return act(() => this.rename(one));
+    if (k === "Delete" && items.length) return act(() => this.del(items));
+    if (k === "Enter" && one) return act(() => one.dir ? this.toggleDir(one) : preview(one.path));
+    if (k === "Escape" && (this.clip || this.sel.size)) return act(() => { if (this.clip) this.clip = null; else this.sel.clear(); this.paintSel(); });
+    if ((k === "ArrowDown" || k === "ArrowUp") && this.visible.length) return act(() => {
+      const i = this.visible.findIndex((x) => x.path === this.anchor);
+      const j = i < 0 ? 0 : Math.max(0, Math.min(this.visible.length - 1, i + (k === "ArrowDown" ? 1 : -1)));
+      const to = this.visible[j].path;
+      if (ev.shiftKey) { this.sel.add(to); this.anchor = to; this.paintSel(); } else this.select([to], to);
+      this.rows.get(to)?.scrollIntoView({ block: "nearest" });
+    });
+    if (k === "ArrowRight" && one?.dir && !this.openDirs.has(one.path)) return act(() => this.toggleDir(one));
+    if (k === "ArrowLeft" && one) return act(() => {
+      if (one.dir && this.openDirs.has(one.path)) return this.toggleDir(one);
+      const up = this.parentOf(one.path);
+      if (up) { this.select([up], up); this.rows.get(up)?.scrollIntoView({ block: "nearest" }); }
+    });
   },
 
   // ---------- changes ----------
@@ -155,11 +404,11 @@ function renderBranch() {
 }
 $("#branchPill").onclick = () => { $("#app").classList.add("with-panel"); panel.tab = "git"; panel.load(); };
 
-function fileMenu(ev, e) {
-  const attach = ["attach to message", () => composer.attach(e.path)];
-  if (!e.dir) return showFileMenu(ev, e.path, panel.cwd, [attach]);
-  showMenu(ev, [attach, ["open in vs code", () => api().open_in_editor(e.path)], ["show in explorer", () => api().reveal(e.path)]]);
-}
+function fileMenu(ev, e) { panel.itemMenu(ev, e); }   // right-click on a file or folder in the files tab
+
+// The tree keeps keyboard focus across re-renders until you click or tab somewhere else (menus and dialogs don't count).
+document.addEventListener("mousedown", (e) => { if (!e.target.closest?.(".ftree, #menu, #modal")) panel.treeFocus = false; });
+document.addEventListener("focusin", (e) => { if (!e.target.closest?.(".ftree, #modal")) panel.treeFocus = false; });
 
 function preview(path) {   // images, video, audio and PDFs play; anything else shows as text
   return viewFile(path, panel.cwd, { attach: true });

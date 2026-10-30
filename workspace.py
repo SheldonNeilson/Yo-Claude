@@ -8,6 +8,7 @@ Folders that aren't git repositories fall back to the files Claude's tools touch
 
 import logging
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -276,3 +277,196 @@ def reveal(root, rel):
     if not os.path.exists(full):
         raise FileNotFoundError(f"Not found: {full}. It may have been moved, renamed or deleted.")
     subprocess.Popen(["explorer", "/select,", full] if rel else ["explorer", full])
+
+
+# --- file explorer operations ----------------------------------------------------------------------------------
+# Every path is relative to the session folder and checked with safe_path. Problems come back as plain-English
+# messages: {"error": ...} (plus "paths" for whatever did work when several items were involved).
+BAD_NAME_CHARS = set('<>:"/\\|?*')
+RESERVED_NAMES = {"CON", "PRN", "AUX", "NUL", *(f"COM{i}" for i in range(1, 10)), *(f"LPT{i}" for i in range(1, 10))}
+
+
+def _rel(root, full):
+    return os.path.relpath(full, os.path.normpath(root)).replace("\\", "/")
+
+
+def _check_name(name):
+    name = (name or "").strip()
+    if not name or name in (".", ".."):
+        raise ValueError("Type a name.")
+    if "/" in name or "\\" in name:
+        raise ValueError(f'"{name}" has a slash in it. Names can\'t contain / or \\.')
+    bad = sorted({c for c in name if c in BAD_NAME_CHARS or ord(c) < 32})
+    if bad:
+        raise ValueError(f'"{name}" contains characters Windows doesn\'t allow in names: {" ".join(bad)}')
+    if name.endswith("."):
+        raise ValueError(f'"{name}" ends with a dot, which Windows doesn\'t allow.')
+    if name.split(".")[0].upper() in RESERVED_NAMES:
+        raise ValueError(f'"{name}" is a name Windows reserves for devices. Pick another.')
+    return name
+
+
+def _safe(root, rel):
+    try:
+        return safe_path(root, rel)
+    except ValueError:
+        raise ValueError(f"{rel} is outside the session folder, so Yo Claude won't touch it.") from None
+
+
+def _item(root, rel, what="item"):
+    """Full path of an existing item inside the folder (never the folder itself)."""
+    full = _safe(root, rel or "")
+    if not rel or os.path.normcase(full) == os.path.normcase(os.path.normpath(root)):
+        raise ValueError(f"The session folder itself can't be used as the {what}.")
+    if not os.path.lexists(full):
+        raise FileNotFoundError(f"{rel} isn't there any more. It may have been moved, renamed or deleted.")
+    return full
+
+
+def _folder(root, rel):
+    full = _safe(root, rel or "")
+    if not os.path.isdir(full):
+        raise NotADirectoryError(f"{rel or 'The session folder'} isn't a folder (any more).")
+    return full
+
+
+def _new_item(root, folder_rel, name, make):
+    name = _check_name(name)
+    full = os.path.join(_folder(root, folder_rel), name)
+    _safe(root, _rel(root, full))
+    if os.path.lexists(full):
+        return {"error": f'"{name}" already exists there.'}
+    make(full)
+    return {"path": _rel(root, full)}
+
+
+def _make_empty_file(full):
+    with open(full, "x", encoding="utf-8"):
+        pass
+
+
+def create_file(root, folder_rel, name):
+    return _new_item(root, folder_rel, name, _make_empty_file)
+
+
+def create_folder(root, folder_rel, name):
+    return _new_item(root, folder_rel, name, os.mkdir)
+
+
+def rename_path(root, rel, new_name):
+    full = _item(root, rel)
+    new_name = _check_name(new_name)
+    dest = os.path.join(os.path.dirname(full), new_name)
+    if dest == full:
+        return {"path": rel}
+    # a change of letter case only is fine; anything else that exists is a clash
+    if os.path.lexists(dest) and os.path.normcase(dest) != os.path.normcase(full):
+        return {"error": f'"{new_name}" already exists there.'}
+    os.rename(full, dest)
+    return {"path": _rel(root, dest)}
+
+
+def _copy_name(folder, name):
+    """name -> "name (copy).ext", "name (copy 2).ext", ... whichever is free in folder."""
+    full = os.path.join(folder, name)
+    if not os.path.lexists(full):
+        return full
+    stem, ext = (name, "") if os.path.isdir(full) else os.path.splitext(name)
+    stem = re.sub(r" \(copy(?: \d+)?\)$", "", stem)
+    n = 1
+    while True:
+        cand = os.path.join(folder, f"{stem} (copy{'' if n == 1 else f' {n}'}){ext}")
+        if not os.path.lexists(cand):
+            return cand
+        n += 1
+
+
+def _inside(child, parent):
+    c, p = os.path.normcase(os.path.normpath(child)), os.path.normcase(os.path.normpath(parent))
+    return c == p or c.startswith(p.rstrip("\\/") + os.sep)
+
+
+def _transfer(root, rels, dest_rel, move):
+    dest = _folder(root, dest_rel) if dest_rel is not None else None
+    done, errors = [], []
+    for rel in rels or []:
+        try:
+            src = _item(root, rel)
+            target_dir = dest if dest is not None else os.path.dirname(src)
+            if os.path.isdir(src) and _inside(target_dir, src):
+                raise ValueError(f"Can't put {rel} inside itself.")
+            if move and os.path.normcase(os.path.dirname(src)) == os.path.normcase(os.path.normpath(target_dir)):
+                done.append(rel)   # cut and pasted back where it was: nothing to do
+                continue
+            out = _copy_name(target_dir, os.path.basename(src))
+            _safe(root, _rel(root, out))
+            if move:
+                shutil.move(src, out)
+            elif os.path.isdir(src) and not os.path.islink(src):
+                shutil.copytree(src, out, symlinks=True)
+            else:
+                shutil.copy2(src, out, follow_symlinks=False)
+            done.append(_rel(root, out))
+        except Exception as e:
+            msg = str(e)
+            errors.append(msg if rel and rel in msg else f"{rel}: {msg}")
+    out = {"paths": done}
+    if errors:
+        verb = "move" if move else "copy"
+        out["error"] = f"Couldn't {verb} " + ("this: " if len(errors) == 1 else f"{len(errors)} items: ") + "; ".join(errors)
+    return out
+
+
+def copy_paths(root, rels, dest_rel=""):
+    """Copy files and whole folders into dest_rel; clashes get " (copy)" names."""
+    return _transfer(root, rels, dest_rel or "", move=False)
+
+
+def move_paths(root, rels, dest_rel=""):
+    """Move (cut + paste, or drag) into dest_rel; clashes get " (copy)" names rather than overwriting anything."""
+    return _transfer(root, rels, dest_rel or "", move=True)
+
+
+def duplicate_paths(root, rels):
+    """A copy of each item next to itself."""
+    return _transfer(root, rels, None, move=False)
+
+
+def delete_paths(root, rels):
+    """Send items to the Windows Recycle Bin. Never a silent permanent delete: network drives are refused, and if
+    Windows can't recycle something (too big, no bin on that drive) it asks first. Returns {"paths": deleted} and
+    "error" for anything left behind."""
+    import ctypes
+    from ctypes import wintypes
+    fulls, errors = [], []
+    for rel in rels or []:
+        try:
+            full = _item(root, rel, "thing to delete")
+            drive = os.path.splitdrive(full)[0]
+            if full.startswith("\\\\") or ctypes.windll.kernel32.GetDriveTypeW(drive + "\\") == 4:   # DRIVE_REMOTE
+                raise ValueError(f"{rel} is on a network drive, which has no Recycle Bin. Delete it in Explorer.")
+            fulls.append((rel, full))
+        except Exception as e:
+            errors.append(str(e))
+    if fulls:
+        class SHFILEOPSTRUCTW(ctypes.Structure):
+            _fields_ = [("hwnd", wintypes.HWND), ("wFunc", wintypes.UINT), ("pFrom", wintypes.LPCWSTR),
+                        ("pTo", wintypes.LPCWSTR), ("fFlags", ctypes.c_ushort), ("fAnyOperationsAborted", wintypes.BOOL),
+                        ("hNameMappings", ctypes.c_void_p), ("lpszProgressTitle", wintypes.LPCWSTR)]
+        FO_DELETE, FOF_SILENT, FOF_NOCONFIRMATION, FOF_ALLOWUNDO, FOF_NOERRORUI, FOF_WANTNUKEWARNING = \
+            3, 0x4, 0x10, 0x40, 0x400, 0x4000
+        op = SHFILEOPSTRUCTW(wFunc=FO_DELETE, pFrom="\0".join(f for _, f in fulls) + "\0\0",
+                             fFlags=FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_SILENT | FOF_NOERRORUI | FOF_WANTNUKEWARNING)
+        rc = ctypes.windll.shell32.SHFileOperationW(ctypes.byref(op))
+        if rc and not op.fAnyOperationsAborted:
+            errors.append(f"Windows couldn't move them to the Recycle Bin (error {rc:#x}). "
+                          "A file may be open in another program.")
+    gone = [rel for rel, full in fulls if not os.path.lexists(full)]
+    left = [rel for rel, full in fulls if os.path.lexists(full)]
+    if left:
+        errors.append("Not deleted: " + ", ".join(left) + "." +
+                      ("" if errors else " You may have cancelled, or a file is open in another program."))
+    out = {"paths": gone}
+    if errors:
+        out["error"] = " ".join(errors)
+    return out

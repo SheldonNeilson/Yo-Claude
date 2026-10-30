@@ -523,6 +523,10 @@ class Api:
                 "active": r.describe(active) if active else None, "items": active.items if active else [],
                 "display": {"state": a.display, "voice": a.voice_state, "work": a.work_state, "text": a.voice_text}}
 
+    def set_loadout(self, kind, name, on):
+        """Turn an MCP server ("mcp"), skill ("skill") or plugin ("plugin") on or off for Yo Claude's sessions."""
+        return self._app.router.set_loadout(kind, name, bool(on))
+
     def set_setting(self, key, value):
         a = self._app
         a.settings[key] = value
@@ -826,6 +830,28 @@ class Api:
 
     def reveal(self, rel=""):
         return self._ws(workspace.reveal, rel)
+
+    # file explorer (the files tab): each returns {"path"/"paths": ..., "error": plain-English message}
+    def new_file(self, folder, name):
+        return self._ws(workspace.create_file, folder or "", name)
+
+    def new_folder(self, folder, name):
+        return self._ws(workspace.create_folder, folder or "", name)
+
+    def rename_path(self, rel, name):
+        return self._ws(workspace.rename_path, rel, name)
+
+    def delete_paths(self, rels):
+        return self._ws(workspace.delete_paths, list(rels or []))
+
+    def copy_paths(self, rels, dest=""):
+        return self._ws(workspace.copy_paths, list(rels or []), dest or "")
+
+    def move_paths(self, rels, dest=""):
+        return self._ws(workspace.move_paths, list(rels or []), dest or "")
+
+    def duplicate_paths(self, rels):
+        return self._ws(workspace.duplicate_paths, list(rels or []))
 
     # --- voice / windows ---
     def talk(self):
