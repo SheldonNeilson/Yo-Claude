@@ -90,6 +90,8 @@ const avatar = {
       : st === "using_pc" ? have(["think_read", "looking"]) : [];
     return g.length ? g : ["idle"];
   },
+  // a mood from her reaction to a reply (sessions.py MOODS): that clip plays next, once, if she has it
+  react(clip) { if (this.clips[clip]) { this.moodClip = clip; this.moodUntil = Date.now() + 20000; } },
   idleExtras() { return Object.keys(this.clips).filter((n) => n.startsWith("idle_") || ["looking", "hair", "laughing"].includes(n)); },
   any(list, not) { const l = list.length > 1 ? list.filter((n) => n !== not) : list; return l[Math.floor(Math.random() * l.length)]; },
 
@@ -127,9 +129,13 @@ const avatar = {
     if (!this.el || this.el.classList.contains("hidden") || document.hidden || !this.cols) return;
     const st = this.state(), now = Date.now(), group = this.group(st);
     let want = group.includes(this.clip) ? this.clip : this.any(group);   // stay on a suitable clip until it ends
+    if (this.moodClip && now > this.moodUntil) this.moodClip = null;   // too late to react to that now
+    if (st === "idle" && this.moodClip) {   // reacting to what just happened (after she's done speaking)
+      this.idleExtra = this.moodClip; this.moodClip = null; this.nextIdleExtra = now + 9000 + Math.random() * 12000;
+    }
     if (st === "idle") {
       want = "idle";
-      if (this.idleExtra && this.clip === this.idleExtra) want = this.idleExtra;   // let a mannerism finish
+      if (this.idleExtra) want = this.idleExtra;   // a mannerism about to play, or playing: let it finish
       else if (now > this.nextIdleExtra) {   // now and then, something on her own
         const extras = this.idleExtras();
         this.idleExtra = extras.length ? this.any(extras, this.lastExtra) : null;
