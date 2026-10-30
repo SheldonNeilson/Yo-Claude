@@ -1,6 +1,7 @@
 {
  "fps": 12,
  "clips": {
-  "idle": 61
+  "idle": 61,
+  "talking": 61
  }
 }
