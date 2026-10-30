@@ -822,6 +822,7 @@ function buildItem(it) {
     case "user": {
       const n = el("div", "msg user"); n.appendChild(document.createTextNode(it.text || ""));
       if (it.voice) n.appendChild(el("span", "mic", "🎤 voice"));
+      if (it.queued_by === "claude") n.appendChild(el("span", "mic", "↻ queued by claude"));
       const cwd = S.active?.cwd;
       for (const p of it.attachments || []) n.appendChild(fileChip("📎 " + p, p, cwd));
       if (it.image_paths?.length) {

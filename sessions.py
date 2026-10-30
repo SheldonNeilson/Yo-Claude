@@ -86,7 +86,8 @@ UI_PROMPT = (
     " The user is looking at Yo Claude's window. When they ask to see, show or open something (a file, a folder, a "
     "diff), use the yo-claude tools: show_file opens a file in front of them, show_folder opens the files panel at a "
     "folder, show_diff shows what changed in a file, show_panel switches the right-hand panel. Reading a file yourself "
-    "shows them nothing. Also use them when seeing it would help, but not for every file you touch."
+    "shows them nothing. Also use them when seeing it would help, but not for every file you touch. When they ask "
+    "you to do something later or after a restart, queue it with queue_message."
 )
 CHECKLIST_PROMPT = (   # (with the checklist tool: Options > Tick Lists)
     " When the user should pick several things from a list (which to do, keep, include or fix), use the yo-claude "
@@ -742,7 +743,18 @@ class Session:
         async def checklist(a):
             return reply(await sess.checklist(a))
 
-        tools = [show_folder, show_file, show_diff, show_panel]
+        @sdk.tool("queue_message", "Queue a message to yourself in this session: it's sent as the user's next message once "
+                  "your current reply is done, after any they queued, and kept across a Yo Claude restart (sent when the "
+                  "session is next opened). Use it when the user asks you to do something later or after a restart.",
+                  {"text": str})
+        async def queue_message(a):
+            text = " ".join(str(a.get("text") or "").split()) and str(a.get("text")).strip()
+            if not text:
+                return reply("Nothing to queue.")
+            sess.router.send(text, sid=sess.id, queued_by="claude")
+            return reply("Queued: it goes after your current reply (and survives a restart).")
+
+        tools = [show_folder, show_file, show_diff, show_panel, queue_message]
         if sess.router.settings.get("checklist_tool", True):
             tools.append(checklist)
         return sdk.create_sdk_mcp_server(UI_SERVER, tools=tools)
@@ -2070,7 +2082,7 @@ class Router:
         return None
 
     # --- talking ---
-    def send(self, text, voice=False, sid=None, context="", attachments=(), images=(), origin="user"):
+    def send(self, text, voice=False, sid=None, context="", attachments=(), images=(), origin="user", queued_by=None):
         """Send a message to a session (default: the active one). Returns a concurrent Future with the reply.
         `context` is extra prompt text (attached files); `images` are (media_type, base64) pairs. origin="system" is
         Yo Claude itself writing (shown as a note, not as you)."""
@@ -2081,6 +2093,7 @@ class Router:
         if origin == "user":
             self.remember_last(s)
             item = s.add({"kind": "user", "text": text, "voice": voice, "attachments": list(attachments),
+                          **({"queued_by": queued_by} if queued_by else {}),
                           "image_paths": [save_image(s.id, mt, data) for mt, data in images],
                           **({"queued": True} if s.busy or (s.lock and s.lock.locked()) or s.order else {})})
         prompt = (f"[voice] {text}" if voice else text) + (f"\n\n{context}" if context else "")
