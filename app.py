@@ -29,7 +29,7 @@ import openwith
 import taskbar
 import workspace
 import yo_claude
-from sessions import Router
+from sessions import Router, same_folder
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 UI = os.path.join(HERE, "ui")
@@ -859,8 +859,10 @@ class Api:
         r = self._app.router
         return r.active.cwd if r.active else r.folder
 
-    def _ws(self, fn, *args):
-        cwd = self._cwd()
+    def _ws(self, fn, *args, root=None):
+        """fn(folder, *args) in the session's folder, or in `root`: the folder the files tab is browsing (any folder
+        on the PC: the file tree can go anywhere)."""
+        cwd = root or self._cwd()
         if not cwd:
             return {"error": "No folder. Pick one (top left) to work on code."}
         try:
@@ -869,8 +871,19 @@ class Api:
             log.warning("%s failed: %s", fn.__name__, e)
             return {"error": str(e)}
 
-    def tree(self, rel=""):
-        return self._ws(workspace.list_dir, rel)
+    def tree(self, rel="", root=None):
+        if root == "::pc":   # above the drives' top folders
+            return workspace.drives()
+        return self._ws(workspace.list_dir, rel, root=root)
+
+    def add_context_dir(self, path):
+        """Files tab, right-click a folder: the open session may also read and write it (its next message on)."""
+        s = self._app.router.active
+        if not s:
+            return "Open a session first."
+        if any(same_folder(path, d) for d in [s.cwd, *s.extra_dirs] if d):
+            return "That folder is in this session already."
+        return self._app.router.set_extra_dirs(s.id, s.extra_dirs + [path])
 
     def files(self):
         return self._ws(workspace.all_files)
@@ -920,33 +933,33 @@ class Api:
             return "No snapshot for this session."
         return workspace.revert_file(s.cwd, s.baseline, path)
 
-    def open_in_editor(self, rel=""):
-        return self._ws(workspace.open_in_editor, rel)
+    def open_in_editor(self, rel="", root=None):
+        return self._ws(workspace.open_in_editor, rel, root=root)
 
-    def reveal(self, rel=""):
-        return self._ws(workspace.reveal, rel)
+    def reveal(self, rel="", root=None):
+        return self._ws(workspace.reveal, rel, root=root)
 
     # file explorer (the files tab): each returns {"path"/"paths": ..., "error": plain-English message}
-    def new_file(self, folder, name):
-        return self._ws(workspace.create_file, folder or "", name)
+    def new_file(self, folder, name, root=None):
+        return self._ws(workspace.create_file, folder or "", name, root=root)
 
-    def new_folder(self, folder, name):
-        return self._ws(workspace.create_folder, folder or "", name)
+    def new_folder(self, folder, name, root=None):
+        return self._ws(workspace.create_folder, folder or "", name, root=root)
 
-    def rename_path(self, rel, name):
-        return self._ws(workspace.rename_path, rel, name)
+    def rename_path(self, rel, name, root=None):
+        return self._ws(workspace.rename_path, rel, name, root=root)
 
-    def delete_paths(self, rels):
-        return self._ws(workspace.delete_paths, list(rels or []))
+    def delete_paths(self, rels, root=None):
+        return self._ws(workspace.delete_paths, list(rels or []), root=root)
 
-    def copy_paths(self, rels, dest=""):
-        return self._ws(workspace.copy_paths, list(rels or []), dest or "")
+    def copy_paths(self, rels, dest="", root=None):
+        return self._ws(workspace.copy_paths, list(rels or []), dest or "", root=root)
 
-    def move_paths(self, rels, dest=""):
-        return self._ws(workspace.move_paths, list(rels or []), dest or "")
+    def move_paths(self, rels, dest="", root=None):
+        return self._ws(workspace.move_paths, list(rels or []), dest or "", root=root)
 
-    def duplicate_paths(self, rels):
-        return self._ws(workspace.duplicate_paths, list(rels or []))
+    def duplicate_paths(self, rels, root=None):
+        return self._ws(workspace.duplicate_paths, list(rels or []), root=root)
 
     # --- voice / windows ---
     def talk(self):

@@ -5,6 +5,9 @@ window.panel = {
   tab: "files", openDirs: new Set([""]), dirs: {}, changes: null, git: null, timer: null,
   // file explorer state: selected paths, Shift-range anchor, copied/cut items, rows in display order
   sel: new Set(), anchor: null, clip: null, visible: [], rows: new Map(), treeFocus: false, dragging: null,
+  // browsing: root is the folder the files tab shows (null: the session's own), "::pc" the drives; sorted by name or
+  // by modified time
+  root: null, session: null, sortKey: "name", sortDir: 1,
 
   shown() { return $("#app").classList.contains("with-panel"); },
   refresh(soon = false) {
@@ -12,11 +15,14 @@ window.panel = {
     this.timer = setTimeout(() => this.load(), soon ? 400 : 0);
   },
   async load() {
-    const cwd = S.active ? S.active.cwd : S.folder;
+    const session = S.active ? S.active.cwd : S.folder;
+    if (!sameFolder(session, this.session)) { this.root = null; this.openDirs = new Set([""]); }   // another session: its folder
+    this.session = session;
+    const cwd = this.root || session;
     if (!sameFolder(cwd, this.cwd)) { this.sel = new Set(); this.anchor = null; }
     this.cwd = cwd;
     if (!cwd) { this.git = null; this.changes = null; this.dirs = {}; renderBranch(); if (this.shown()) this.render(); return; }
-    const [git, changes] = await Promise.all([api().git_info(), api().changes()]);
+    const [git, changes] = session ? await Promise.all([api().git_info(), api().changes()]) : [null, null];
     this.git = git; this.changes = changes;
     if (this.shown() && this.tab === "files") await this.loadDirs();
     renderBranch();
@@ -25,7 +31,7 @@ window.panel = {
   async loadDirs() {
     const dirs = {};
     for (const rel of [...this.openDirs]) {
-      const r = await api().tree(rel);
+      const r = await api().tree(rel, this.cwd);
       if (r.error && rel) { this.openDirs.delete(rel); continue; }   // renamed, moved or deleted
       dirs[rel] = r.entries || [];
     }
@@ -33,8 +39,27 @@ window.panel = {
     const seen = new Set(Object.values(dirs).flat().map((e) => e.path));
     for (const p of [...this.sel]) if (!seen.has(p)) this.sel.delete(p);
   },
+  away() { return !!this.root; },   // browsing somewhere other than the session's folder
+  async goTo(path) {   // open a folder in the files tab (null: back to the session's folder)
+    this.root = path && !sameFolder(path, this.session) ? path : null;
+    this.openDirs = new Set([""]); this.dirs = {}; this.sel = new Set(); this.anchor = null;
+    await this.load();
+  },
+  parentDir(path) {   // the folder above (above a drive's top: the drives)
+    if (path === "::pc") return null;
+    const p = path.replace(/[\\/]+$/, "");
+    if (/^[A-Za-z]:$/.test(p)) return "::pc";
+    const i = Math.max(p.lastIndexOf("\\"), p.lastIndexOf("/"));
+    return i > 2 ? p.slice(0, i) : p.slice(0, i + 1);
+  },
+  sorted(list) {   // folders first, then by name or modified time
+    const k = this.sortKey, d = this.sortDir;
+    return [...list].sort((a, b) => (b.dir - a.dir) || d * (k === "mtime" ? (a.mtime || 0) - (b.mtime || 0)
+      : a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" })));
+  },
   changedMap() {
     const m = new Map();
+    if (this.away()) return m;
     const rr = this.changes?.rel_root && this.changes.rel_root !== "." ? this.changes.rel_root.replace(/\\/g, "/") + "/" : "";
     for (const f of this.changes?.files || []) m.set(rr && f.path.startsWith(rr) ? f.path.slice(rr.length) : f.path, f.status);
     return m;
@@ -79,10 +104,25 @@ ${elsewhere} running in other sessions` : ""}">` +
   // ---------- files ----------
   renderFiles(body) {
     const changed = this.changedMap();
-    const head = el("div", "phead", `<span title="${esc(this.cwd)}">${esc(base(this.cwd))}</span><span class="spacer"></span>`);
-    const code = el("button", "", "vs code"); code.onclick = () => api().open_in_editor("");
-    const rev = el("button", "", "explorer"); rev.onclick = () => api().reveal("");
-    head.append(code, rev); body.appendChild(head);
+    const pc = this.cwd === "::pc";
+    const head = el("div", "phead pnav");
+    const up = el("button", "", "↑"); up.title = "Up to the folder above (Backspace)"; up.disabled = pc;
+    up.onclick = () => this.goTo(this.parentDir(this.cwd));
+    const home = el("button", "", "⌂"); home.title = "Back to this session's folder"; home.disabled = !this.away() || !this.session;
+    home.onclick = () => this.goTo(null);
+    const where = el("input", "pwhere"); where.value = pc ? "This PC" : this.cwd; where.title = "Type or paste a folder and press Enter";
+    where.spellcheck = false;
+    where.onkeydown = (ev) => {
+      if (ev.key === "Enter") { const v = where.value.trim(); this.goTo(/^this pc$/i.test(v) ? "::pc" : v); }
+      if (ev.key === "Escape") { where.value = pc ? "This PC" : this.cwd; where.blur(); }
+    };
+    head.append(up, home, where);
+    if (!pc) {
+      const code = el("button", "", "vs code"); code.onclick = () => api().open_in_editor("", this.cwd);
+      const rev = el("button", "", "explorer"); rev.onclick = () => api().reveal("", this.cwd);
+      head.append(code, rev);
+    }
+    body.appendChild(head);
     const tools = el("div", "phead ftools");
     const tool = (label, title, fn) => { const b = el("button", "", label); b.title = title; b.onclick = fn; tools.appendChild(b); return b; };
     tool("+ file", "New file (in the selected folder, else the top folder)", () => this.newItem(false, this.targetFolder()));
@@ -90,20 +130,33 @@ ${elsewhere} running in other sessions` : ""}">` +
     this.pasteBtn = tool("paste", "Paste copied or cut items (Ctrl+V)", () => this.paste(this.targetFolder()));
     tools.appendChild(el("span", "spacer"));
     tool("⟳", "Refresh the file tree", () => this.load());
-    body.appendChild(tools);
+    if (!pc) body.appendChild(tools);
+    const cols = el("div", "fcols");   // click to sort; again to reverse
+    for (const [key, label] of [["name", "name"], ["mtime", "modified"]]) {
+      const c = el("button", "fcol " + key + (this.sortKey === key ? " on" : ""), label + (this.sortKey === key ? (this.sortDir > 0 ? " ▲" : " ▼") : ""));
+      c.title = key === "mtime" ? "Sort by when it last changed (a folder: its newest file, at any depth)" : "Sort by name";
+      c.onclick = () => {
+        if (this.sortKey === key) this.sortDir = -this.sortDir; else { this.sortKey = key; this.sortDir = key === "mtime" ? -1 : 1; }
+        this.render();
+      };
+      cols.appendChild(c);
+    }
+    body.appendChild(cols);
     const tree = el("div", "tree ftree");
     tree.tabIndex = 0;
     this.visible = []; this.rows = new Map();
     const walk = (rel, depth) => {
-      for (const e of this.dirs[rel] || []) {
+      for (const e of this.sorted(this.dirs[rel] || [])) {
         const row = el("div", "node" + (e.dir ? " dir" : ""));
         row.style.paddingLeft = 8 + depth * 14 + "px";
         const st = changed.get(e.path);
         const dirChanged = e.dir && [...changed.keys()].some((k) => k.startsWith(e.path + "/"));
         row.innerHTML = `<span class="tw">${e.dir ? (this.openDirs.has(e.path) ? "▾" : "▸") : " "}</span>` +
-          `<span class="nm ${st ? "st-" + st : dirChanged ? "st-M" : ""}">${esc(e.name)}</span>${st ? `<span class="badge-st st-${st}">${st}</span>` : ""}`;
-        row.title = e.path;
+          `<span class="nm ${st ? "st-" + st : dirChanged ? "st-M" : ""}">${esc(e.name)}</span>${st ? `<span class="badge-st st-${st}">${st}</span>` : ""}` +
+          `<span class="mt" title="${e.mtime ? esc(new Date(e.mtime * 1000).toLocaleString()) + (e.approx ? " (or later: too big to look through it all)" : "") : ""}">${shortTime(e.mtime)}${e.approx ? "+" : ""}</span>`;
+        row.title = pc ? e.path : e.path + (e.dir ? "\n(double-click to open it here)" : "");
         row.onclick = (ev) => this.clickRow(ev, e);
+        if (e.dir) row.ondblclick = (ev) => { ev.preventDefault(); this.goTo(pc ? e.path : this.fullPath(e.path)); };
         row.oncontextmenu = (ev) => {
           ev.preventDefault(); ev.stopPropagation(); this.treeFocus = true;
           if (!this.sel.has(e.path)) this.select([e.path], e.path);
@@ -162,7 +215,7 @@ ${elsewhere} running in other sessions` : ""}">` +
     if (this.openDirs.has(e.path)) {
       this.openDirs.delete(e.path);
       for (const p of [...this.sel]) if (p.startsWith(e.path + "/")) this.sel.delete(p);
-    } else { this.openDirs.add(e.path); this.dirs[e.path] = (await api().tree(e.path)).entries || []; }
+    } else { this.openDirs.add(e.path); this.dirs[e.path] = (await api().tree(e.path, this.cwd)).entries || []; }
     this.render();
   },
   clickRow(ev, e) {
@@ -176,7 +229,7 @@ ${elsewhere} running in other sessions` : ""}">` +
       if (i >= 0 && j >= 0) return this.select(this.visible.slice(Math.min(i, j), Math.max(i, j) + 1).map((x) => x.path));
     }
     this.select([e.path], e.path);
-    if (e.dir) this.toggleDir(e); else preview(e.path);
+    if (e.dir) this.cwd === "::pc" ? this.goTo(e.path) : this.toggleDir(e); else preview(e.path);
   },
   async done(r, selectPaths) {   // after any change: report problems, refresh the tree (open folders kept) and changes
     if (r?.error) toast(r.error, "error");
@@ -191,7 +244,7 @@ ${elsewhere} running in other sessions` : ""}">` +
   newItem(isDir, folder) {
     ask(`new ${isDir ? "folder" : "file"} in ${folder || base(this.cwd)}`, "", async (name) => {
       if (this.badName(name)) return;
-      const r = isDir ? await api().new_folder(folder, name) : await api().new_file(folder, name);
+      const r = isDir ? await api().new_folder(folder, name, this.cwd) : await api().new_file(folder, name, this.cwd);
       this.openPath(folder);
       this.done(r, r?.path ? [r.path] : null);
     });
@@ -199,7 +252,7 @@ ${elsewhere} running in other sessions` : ""}">` +
   rename(e) {
     ask(`rename ${e.path}`, e.name, async (name) => {
       if (name === e.name || this.badName(name)) return;
-      const r = await api().rename_path(e.path, name);
+      const r = await api().rename_path(e.path, name, this.cwd);
       if (r?.path && e.dir) {   // keep the folder (and folders inside it) open under the new name
         for (const p of [...this.openDirs]) if (p === e.path || p.startsWith(e.path + "/")) { this.openDirs.delete(p); this.openDirs.add(r.path + p.slice(e.path.length)); }
       }
@@ -214,7 +267,7 @@ ${elsewhere} running in other sessions` : ""}">` +
     const names = items.slice(0, 5).map((e) => e.name).join(", ") + (items.length > 5 ? ` and ${items.length - 5} more` : "");
     const what = items.length === 1 ? `"${items[0].name}"${items[0].dir ? " and everything in it" : ""}` : `these ${items.length} items (${names})`;
     confirmBox(`Move ${what} to the Recycle Bin?`, async () => {
-      const r = await api().delete_paths(items.map((e) => e.path));
+      const r = await api().delete_paths(items.map((e) => e.path), this.cwd);
       if (this.clip) this.clip.paths = this.clip.paths.filter((p) => !(r?.paths || []).includes(p));
       this.done(r, []);
     });
@@ -230,7 +283,7 @@ ${elsewhere} running in other sessions` : ""}">` +
     if (!this.clip?.paths.length) return toast("Nothing to paste: copy or cut something first.", "error");
     if (!this.clipHere()) return toast("Those were copied in another folder. Copy them again here.", "error");
     const { cut, paths } = this.clip;
-    const r = cut ? await api().move_paths(paths, dest) : await api().copy_paths(paths, dest);
+    const r = cut ? await api().move_paths(paths, dest, this.cwd) : await api().copy_paths(paths, dest, this.cwd);
     if (cut) this.clip = null;   // a copy can be pasted again (it gets a "(copy 2)" name)
     this.openPath(dest);
     this.done(r, r?.paths);
@@ -238,7 +291,7 @@ ${elsewhere} running in other sessions` : ""}">` +
   async duplicate(items) {
     items = this.topLevel(items);
     if (!items.length) return;
-    const r = await api().duplicate_paths(items.map((e) => e.path));
+    const r = await api().duplicate_paths(items.map((e) => e.path), this.cwd);
     this.done(r, r?.paths);
   },
   copyPaths(items, relative) {
@@ -279,7 +332,7 @@ ${elsewhere} running in other sessions` : ""}">` +
     this.dragging = null; this.dropMark(null);
     if (!paths.length) return;
     if (!copy && paths.every((p) => this.parentOf(p) === dest)) return;   // dropped where it already is
-    const r = copy ? await api().copy_paths(paths, dest) : await api().move_paths(paths, dest);
+    const r = copy ? await api().copy_paths(paths, dest, this.cwd) : await api().move_paths(paths, dest, this.cwd);
     this.openPath(dest);
     this.done(r, r?.paths);
   },
@@ -295,28 +348,37 @@ ${elsewhere} running in other sessions` : ""}">` +
       ["rename…", () => this.rename(e), { kbd: "F2", disabled: many }],
       ["delete (to Recycle Bin)", () => this.del(items), { kbd: "Del" }],
     ];
-    const attach = ["attach to message", () => items.forEach((x) => composer.attach(x.path))];
+    const attach = ["attach to message", () => items.forEach((x) => composer.attach(this.away() ? this.fullPath(x.path) : x.path))];
+    const ctx = ["add folder to session context", () => this.addContext(this.cwd === "::pc" ? e.path : this.fullPath(e.path)), { disabled: !S.active }];
     const newHere = [["new file…", () => this.newItem(false, dest)], ["new folder…", () => this.newItem(true, dest)]];
     const relPath = ["copy relative path", () => this.copyPaths(items, true)];
     if (many) return showMenu(ev, [["sub:" + items.length + " items"], attach, "-", ...edit, "-",
       ["copy paths", () => this.copyPaths(items, false)], ["copy relative paths", () => this.copyPaths(items, true)]]);
-    if (!e.dir) return showFileMenu(ev, e.path, this.cwd, [attach, ["open in vs code", () => api().open_in_editor(e.path)], "-",
+    if (!e.dir) return showFileMenu(ev, e.path, this.cwd, [attach, ["open in vs code", () => api().open_in_editor(e.path, this.cwd)], "-",
       ...edit, "-", ...newHere, relPath, "-"]);
-    showMenu(ev, [["sub:" + e.name], attach, ["open in vs code", () => api().open_in_editor(e.path)],
-      ["show in explorer", () => api().reveal(e.path)], "-", ...newHere, "-", ...edit, "-",
+    if (this.cwd === "::pc") return showMenu(ev, [["sub:" + e.name], ["open", () => this.goTo(e.path)], ctx]);
+    showMenu(ev, [["sub:" + e.name], ["open here", () => this.goTo(this.fullPath(e.path))], ctx, "-", attach, ["open in vs code", () => api().open_in_editor(e.path, this.cwd)],
+      ["show in explorer", () => api().reveal(e.path, this.cwd)], "-", ...newHere, "-", ...edit, "-",
       ["copy path", () => this.copyPaths(items, false)], relPath]);
   },
+  async addContext(path) {   // the open session may also read and write this folder (from your next message)
+    const err = await api().add_context_dir(path);
+    if (err) alertBox(err); else toast("Added: Claude can use that folder from your next message");
+  },
   rootMenu(ev) {
+    if (this.cwd === "::pc") return;
     showMenu(ev, [["sub:" + base(this.cwd)],
+      ...(this.away() ? [["add this folder to session context", () => this.addContext(this.cwd), { disabled: !S.active }], "-"] : []),
       ["new file…", () => this.newItem(false, "")], ["new folder…", () => this.newItem(true, "")],
       ["paste", () => this.paste(""), { kbd: "Ctrl+V", disabled: !this.clipHere() }], "-",
-      ["open in vs code", () => api().open_in_editor("")], ["show in explorer", () => api().reveal("")],
+      ["open in vs code", () => api().open_in_editor("", this.cwd)], ["show in explorer", () => api().reveal("", this.cwd)],
       ["copy path", () => copyText(this.fullPath(""), "path copied")], ["refresh", () => this.load()]]);
   },
   treeKey(ev) {
     if (ev.target !== ev.currentTarget) return;
     const k = ev.key, ctrl = (ev.ctrlKey || ev.metaKey) && !ev.altKey, items = this.targets(), one = items.length === 1 ? items[0] : null;
     const act = (fn) => { ev.preventDefault(); ev.stopPropagation(); fn(); };
+    if (k === "Backspace" && !ctrl && this.cwd !== "::pc") return act(() => this.goTo(this.parentDir(this.cwd)));
     if (ctrl) {
       const c = k.toLowerCase();
       if (c === "c" && items.length) return act(() => this.setClip(items, false));
@@ -428,4 +490,13 @@ async function showDiff(path) {
     ["revert this file", () => confirmBox(`Put ${path} back the way it was ${panel.changes?.kind === "start" ? "when this session started" : "when you opened this session"}?`,
       async () => { const err = await api().revert_file(path); if (err) alertBox(err); panel.load(); }), "danger"],
     ["open in vs code", () => api().open_in_editor(path)], ["close", closeModal, "primary"]]);
+}
+
+// modified times in the files tab: the time today, the day this year, else the date
+function shortTime(t) {
+  if (!t) return "";
+  const d = new Date(t * 1000), now = new Date();
+  if (d.toDateString() === now.toDateString()) return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  if (d.getFullYear() === now.getFullYear()) return d.toLocaleDateString([], { day: "numeric", month: "short" });
+  return d.toLocaleDateString([], { year: "numeric", month: "short", day: "numeric" });
 }

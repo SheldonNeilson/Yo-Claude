@@ -8,6 +8,7 @@ Folders that aren't git repositories fall back to the files Claude's tools touch
 
 import logging
 import os
+import time
 import re
 import shutil
 import subprocess
@@ -40,8 +41,62 @@ def repo_root(root):
 
 
 # --- files ---------------------------------------------------------------------------------------------------
+_deep = {}   # folder -> (when worked out, newest mtime, complete): kept a minute, so refreshes stay quick
+
+
+def deep_mtime(folder, budget):
+    """When anything in `folder` (any depth, clutter folders skipped) last changed: (mtime, complete). Gives up after
+    `budget` seconds, keeping the newest seen so far (complete=False)."""
+    hit = _deep.get(folder)
+    if hit and time.time() - hit[0] < 60:
+        return hit[1], hit[2]
+    end, newest, stack, complete = time.time() + budget, 0.0, [folder], True
+    try:
+        newest = os.stat(folder).st_mtime
+    except OSError:
+        pass
+    while stack:
+        if time.time() > end:
+            complete = False
+            break
+        try:
+            with os.scandir(stack.pop()) as it:
+                for k, d in enumerate(it):
+                    if k % 256 == 255 and time.time() > end:   # (a folder with a huge number of files)
+                        complete = False
+                        stack.clear()
+                        break
+                    try:
+                        if d.is_dir(follow_symlinks=False):
+                            if d.name not in HIDDEN:
+                                stack.append(d.path)
+                        else:
+                            newest = max(newest, d.stat(follow_symlinks=False).st_mtime)
+                    except OSError:
+                        continue
+        except OSError:
+            continue
+    _deep[folder] = (time.time(), newest, complete)
+    return newest, complete
+
+
+def drives():
+    """This PC: the drives there are, for browsing above a drive's top folder."""
+    out = []
+    for letter in "ABCDEFGHIJKLMNOPQRSTUVWXYZ":
+        top = f"{letter}:\\"
+        if os.path.exists(top):
+            try:
+                mtime = os.stat(top).st_mtime
+            except OSError:
+                mtime = 0
+            out.append({"name": f"{letter}:", "path": top, "dir": True, "mtime": mtime, "drive": True})
+    return {"entries": out}
+
+
 def list_dir(root, rel=""):
-    """One level of the tree: folders first, gitignored and clutter folders left out."""
+    """One level of the tree: folders first, gitignored and clutter folders left out. Each entry has its modified
+    time; a folder's is that of the newest file anywhere in it (approx when there wasn't time to look at it all)."""
     folder = os.path.join(root, rel)
     try:
         names = os.listdir(folder)
@@ -52,10 +107,21 @@ def list_dir(root, rel=""):
         paths = [os.path.join(rel, n).replace("\\", "/") for n in entries]
         ignored = set(git(root, "check-ignore", "--stdin", input="\n".join(paths), check=False).split("\n"))
         entries = [n for n, p in zip(entries, paths) if p not in ignored]
-    out = []
+    out, end = [], time.time() + 1.2   # (all the folders here get 1.2 s between them)
     for n in entries:
         full = os.path.join(folder, n)
-        out.append({"name": n, "path": os.path.join(rel, n).replace("\\", "/"), "dir": os.path.isdir(full)})
+        e = {"name": n, "path": os.path.join(rel, n).replace("\\", "/"), "dir": os.path.isdir(full)}
+        try:
+            if e["dir"]:
+                left = end - time.time()
+                e["mtime"], done = deep_mtime(full, min(0.12, left)) if left > 0 else (os.stat(full).st_mtime, False)
+                if not done:
+                    e["approx"] = True
+            else:
+                e["mtime"] = os.stat(full).st_mtime
+        except OSError:
+            e["mtime"] = 0
+        out.append(e)
     out.sort(key=lambda e: (not e["dir"], e["name"].lower()))
     return {"entries": out}
 
