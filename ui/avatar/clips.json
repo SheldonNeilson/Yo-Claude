@@ -84,6 +84,18 @@
   "idle_micro_smile": {
    "frames": 61,
    "stamp": "117883-1793381409"
+  },
+  "idle_lips_press": {
+   "frames": 61,
+   "stamp": "143318-1793381599"
+  },
+  "idle_eyes_upleft": {
+   "frames": 61,
+   "stamp": "140063-1793381765"
+  },
+  "idle_eyes_right": {
+   "frames": 61,
+   "stamp": "169067-1793381909"
   }
  }
 }
