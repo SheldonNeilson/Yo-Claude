@@ -35,6 +35,12 @@ UI = os.path.join(HERE, "ui")
 DATA_DIR = yo_claude.DATA_DIR
 LOG_PATH = os.path.join(DATA_DIR, "yo_claude.log")
 APP_ID = "YoClaude.App"
+UPDATE_CHECK_S = 6 * 3600
+try:
+    with open(os.path.join(HERE, "VERSION"), encoding="utf-8") as _f:
+        VERSION = _f.read().strip()
+except OSError:
+    VERSION = "dev"
 RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
 log = logging.getLogger("yo_claude")
 
@@ -125,7 +131,15 @@ class App:
         if self.settings.get("launch_at_login", True):
             set_launch_at_login(True)
         self.update_bar_visibility()
-        threading.Thread(target=self.check_updates, args=(True,), daemon=True).start()
+        threading.Thread(target=self.update_loop, daemon=True, name="updates").start()
+
+    def update_loop(self):
+        while True:
+            try:
+                self.check_updates(quiet=True)
+            except Exception as e:
+                log.debug("update check: %s", e)
+            time.sleep(UPDATE_CHECK_S)
 
     def live_view(self):
         """While Claude is using the PC, a small picture of the screen about once a second for the transcript."""
@@ -161,7 +175,8 @@ class App:
                               creationflags=subprocess.CREATE_NO_WINDOW)
 
     def check_updates(self, quiet=False):
-        """Fetch; if there's anything new, say so (quiet) or install it and restart (from the tray)."""
+        """Fetch; if GitHub has a newer version, say so (quiet: tray notice + badge in the window) or install it and
+        restart (from the menus)."""
         if not os.path.isdir(os.path.join(HERE, ".git")):
             if not quiet:
                 self.notify("This copy wasn't installed with git, so it can't update itself.")
@@ -171,13 +186,18 @@ class App:
                 self.notify("Couldn't reach GitHub to check for updates.")
             return
         behind = self.git("rev-list", "--count", "HEAD..@{upstream}").stdout.strip()
+        remote = self.git("show", "@{upstream}:VERSION").stdout.strip() or "?"
+        self.update_info = {"current": VERSION, "latest": remote, "behind": int(behind or 0), "checked": time.time()}
+        self.bus.put(("update", self.update_info))
         if not behind or behind == "0":
             if not quiet:
-                self.notify("Yo Claude is up to date.")
+                self.notify(f"Yo Claude {VERSION} is up to date.")
             return
         if quiet:
-            self.notify(f"An update is available ({behind} change{'s' if behind != '1' else ''}). "
-                        "Tray menu → Check for updates to install it.")
+            if self.update_info.get("announced") != remote:
+                self.notify(f"Yo Claude {remote} is available (you have {VERSION}). "
+                            "Help → Check for updates to install it.")
+            self.update_info["announced"] = remote
             return
         if self.replying():
             self.notify("An update is ready, but Claude is in the middle of a reply. "
@@ -470,7 +490,8 @@ class Api:
         a = self._app
         r = a.router
         active = r.active
-        return {"settings": dict(a.settings), "folder": r.folder, "folders": r.meta.data["recent_folders"],
+        return {"version": VERSION, "update": getattr(a, "update_info", None),
+                "settings": dict(a.settings), "folder": r.folder, "folders": r.meta.data["recent_folders"],
                 "workspaces": r.workspaces(), "groups": r.meta.data["groups"], "sessions": r.list(r.folder),
                 "active": r.describe(active) if active else None, "items": active.items if active else [],
                 "display": {"state": a.display, "voice": a.voice_state, "work": a.work_state, "text": a.voice_text}}
@@ -746,6 +767,55 @@ class Api:
         self._app.settings.save()
         self._app.commands.put(("alternates", phrases))
         self._app.emit_settings()
+
+    # --- about, updates, clipboard, folders by path ---
+    def about(self):
+        a = self._app
+        commit = a.git("log", "-1", "--format=%h %cs").stdout.strip() if os.path.isdir(os.path.join(HERE, ".git")) else ""
+        return {"version": VERSION, "commit": commit, "folder": HERE, "data": DATA_DIR,
+                "python": sys.version.split()[0], "update": getattr(a, "update_info", None)}
+
+    def check_updates(self):
+        threading.Thread(target=self._app.check_updates, daemon=True).start()
+
+    def copy_text(self, text):
+        """Clipboard via Windows itself (works whatever the page is allowed to do)."""
+        import win32clipboard
+        win32clipboard.OpenClipboard()
+        try:
+            win32clipboard.EmptyClipboard()
+            win32clipboard.SetClipboardText(str(text), win32clipboard.CF_UNICODETEXT)
+        finally:
+            win32clipboard.CloseClipboard()
+
+    def open_folder_path(self, path):
+        """A folder typed or pasted into the folder field: start a session there (and add it to the tree)."""
+        path = os.path.normpath(os.path.expandvars(os.path.expanduser((path or "").strip().strip('"'))))
+        if not os.path.isdir(path):
+            return f"No such folder: {path}"
+        self._app.router.set_workspace(path, True)
+        self.new_session(path)
+        return None
+
+    def paste_text(self):
+        import win32clipboard
+        win32clipboard.OpenClipboard()
+        try:
+            return win32clipboard.GetClipboardData(win32clipboard.CF_UNICODETEXT)
+        except Exception:
+            return ""
+        finally:
+            win32clipboard.CloseClipboard()
+
+    def repo_url(self):
+        url = self._app.git("remote", "get-url", "origin").stdout.strip()
+        return url[:-4] if url.endswith(".git") else url
+
+    def open_data_folder(self):
+        os.startfile(DATA_DIR)
+
+    def request_quit(self):
+        threading.Thread(target=self._app.request_quit, daemon=True).start()
 
     def quit(self, force=False):
         a = self._app

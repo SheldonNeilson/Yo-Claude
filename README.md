@@ -55,6 +55,12 @@ The first time, a welcome tour explains everything and checks how well it hears 
 - **Follow-ups**: after it answers it listens for about 6 seconds, so you can carry on without the wake word.
   "Never mind" ends it.
 - **Voice commands**: "new session", "new chat", "switch to *session name*".
+- **Menus** along the top (File, Edit, View, Session, Voice, Tools, Help) have every setting, with keyboard shortcuts
+  (Help → Keyboard shortcuts). Copy anything in the chat: select it and press Ctrl+C, use a message's **⧉ copy** button,
+  or right-click for Copy, Copy message, Copy code and Copy whole conversation. The folder path at the top can be
+  copied, or paste/type a folder there and press Enter to work in it.
+- **Background tasks** Claude starts (long renders, builds) show in the conversation with a timer and a stop button,
+  and as a purple spinner in the tree. They keep running if Yo Claude restarts; Claude reports back when they finish.
 - **Type** instead, in the window. `@` attaches a file, and you can paste screenshots. Click any attachment, picture,
   video or PDF in the conversation to view it; right-click for open, open with…, show in Explorer and copy path.
 - **Folders and sessions**: `+ folder` adds a folder to the tree on the left; hover it and click `+` for a new session
@@ -95,7 +101,9 @@ your mouse and keyboard, as you, with your logins.
 
 ## Updating
 
-Tray menu → **Check for updates**. It also tells you when one is available.
+When a newer version is on GitHub, a green **▲ x.y.z available** badge appears at the top right of the window (and a
+tray notice): click it to update. Or **Help → Check for updates**. Your version is shown next to it and in
+**Help → About**. Updating restarts Yo Claude; background tasks keep running.
 
 ## Uninstalling
 

@@ -8,10 +8,22 @@
 </head>
 <body>
 <div id="app">
+  <nav id="menubar">
+    <button data-menu="file">File</button><button data-menu="edit">Edit</button><button data-menu="view">View</button>
+    <button data-menu="session">Session</button><button data-menu="voice">Voice</button><button data-menu="tools">Tools</button>
+    <button data-menu="help">Help</button>
+    <span class="spacer"></span>
+    <button id="updateBadge" class="hidden" title="A newer version is on GitHub: click to update"></button>
+    <span id="versionTag" title="Yo Claude version (Help → About)"></span>
+  </nav>
   <header id="top">
     <canvas id="logo" width="48" height="30" title="Talk to Claude"></canvas>
     <span class="brand">YO CLAUDE</span>
-    <button id="folderBtn" class="pill" title="Folder: picks chat or code mode">…</button>
+    <div id="folderBox" title="The folder this session works in. Select to copy, or paste/type a folder and press Enter.">
+      <input id="folderPath" spellcheck="false" autocomplete="off" placeholder="chat (no folder) — paste a folder path + Enter">
+      <button id="folderCopy" title="Copy the folder path">⧉</button>
+      <button id="folderBtn" title="Start a session in another folder">▾</button>
+    </div>
     <span id="modeBadge" class="badge chat">CHAT</span>
     <span id="branchPill" class="pill hidden"></span>
     <span class="spacer"></span>
@@ -69,6 +81,7 @@
   <aside id="panel"></aside>
 </div>
 <div id="menu" class="menu hidden"></div>
+<div id="toast" class="hidden"></div>
 <div id="modal" class="hidden"></div>
 <script src="vendor/marked.min.js"></script>
 <script src="vendor/highlight.min.js"></script>
@@ -77,5 +90,6 @@
 <script src="app.js"></script>
 <script src="panel.js"></script>
 <script src="training.js"></script>
+<script src="menus.js"></script>
 </body>
 </html>

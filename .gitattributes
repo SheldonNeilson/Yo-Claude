@@ -2,3 +2,5 @@
 *.cmd text eol=crlf
 *.ps1 text eol=crlf
 *.ico binary
+
+hooks/* text eol=lf

@@ -27,8 +27,31 @@ select:focus, input:focus, textarea:focus { border-color: var(--orange); }
 .dim { color: var(--dim); }
 
 /* layout */
-#app { display: grid; height: 100%; grid-template-columns: 260px 1fr 0; grid-template-rows: 44px 1fr; }
+#app { display: grid; height: 100%; grid-template-columns: 260px 1fr 0; grid-template-rows: 24px 44px 1fr; }
 #app.with-panel { grid-template-columns: 260px 1fr 340px; }
+#menubar { grid-column: 1 / -1; display: flex; align-items: stretch; background: #0b0b0a; border-bottom: 1px solid var(--line); padding: 0 4px; }
+#menubar button { border: 0; padding: 0 10px; color: var(--dim); font-size: 12px; }
+#menubar button:hover, #menubar button.open { color: var(--bg); background: var(--orange); }
+#versionTag { color: var(--faint); font-size: 11px; align-self: center; padding: 0 8px; cursor: default; }
+#updateBadge { color: var(--green) !important; font-weight: bold; }
+#updateBadge:hover { background: var(--green) !important; color: var(--bg) !important; }
+.menu div .kbd { float: right; color: var(--faint); margin-left: 24px; }
+.menu div .chk { display: inline-block; width: 1.3em; color: var(--orange); }
+.menu div.disabled { color: var(--faint); cursor: default; } .menu div.disabled:hover { background: none; color: var(--faint); }
+#folderBox { display: flex; align-items: stretch; border: 1px solid var(--line2); min-width: 220px; max-width: 520px; flex: 0 1 520px; }
+#folderBox:focus-within { border-color: var(--orange); }
+#folderPath { flex: 1; min-width: 0; border: 0; background: var(--bg); color: var(--text); padding: 2px 8px; }
+#folderBox button { border: 0; border-left: 1px solid var(--line2); padding: 0 7px; }
+#toast { position: fixed; bottom: 70px; left: 50%; transform: translateX(-50%); background: var(--orange); color: var(--bg);
+         padding: 3px 12px; font-weight: bold; z-index: 70; box-shadow: 3px 3px 0 #000; }
+.msg { position: relative; }
+.msg .copybtn { position: absolute; top: -2px; right: -4px; padding: 0 5px; font-size: 11px; opacity: 0; background: var(--bg2); }
+.msg:hover .copybtn { opacity: 1; }
+pre { position: relative; }
+pre .codecopy { position: absolute; top: 3px; right: 3px; padding: 0 6px; font-size: 11px; opacity: 0; background: var(--bg2); }
+pre:hover .codecopy { opacity: 1; }
+#transcript, #transcript * { user-select: text; }
+.shortcuts td { padding: 2px 14px 2px 0; } .shortcuts td:first-child { color: var(--orange); white-space: nowrap; }
 #top { grid-column: 1 / -1; display: flex; align-items: center; gap: 8px; padding: 0 10px;
        border-bottom: 2px solid var(--line2); background: var(--bg2); }
 #logo { image-rendering: pixelated; }

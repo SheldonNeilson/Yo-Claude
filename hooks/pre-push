@@ -1,0 +1,14 @@
+#!/bin/sh
+# Refuse a push to main unless VERSION changed: installs compare it with GitHub's to offer updates.
+# Enable in a clone with: git config core.hooksPath hooks
+remote="$1"
+while read local_ref local_sha remote_ref remote_sha; do
+  [ "$remote_ref" = "refs/heads/main" ] || continue
+  remote_version=$(git show "$remote/main:VERSION" 2>/dev/null)
+  local_version=$(git show "$local_sha:VERSION" 2>/dev/null)
+  if [ -n "$remote_version" ] && [ "$local_version" = "$remote_version" ]; then
+    echo "pre-push: VERSION is still $local_version, the same as on $remote. Bump it before pushing." >&2
+    exit 1
+  fi
+done
+exit 0

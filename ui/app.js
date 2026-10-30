@@ -107,6 +107,7 @@ function handle(e) {
         if (e.session_state === "idle") panel.refresh(true);
       }
       break;
+    case "update": renderUpdate(e); break;
     case "train": training.onJudgement(e); break;
     case "open_training": training.open(); break;
     case "tool_done": case "baseline":
@@ -118,8 +119,7 @@ function handle(e) {
 // ---------- header ----------
 function renderFolder() {
   const cwd = S.active ? S.active.cwd : S.folder;
-  $("#folderBtn").textContent = cwd ? `▸ ${cwd}` : "▸ chat (no folder)";
-  $("#folderBtn").title = "The folder this session works in. Click to start a session somewhere else.";
+  if (document.activeElement !== $("#folderPath")) $("#folderPath").value = cwd || "";
   $("#modeBadge").textContent = cwd ? "CODE" : "CHAT";
   $("#modeBadge").className = "badge " + (cwd ? "code" : "chat");
 }
@@ -480,11 +480,29 @@ const transcript = {
       if (old) old.replaceWith(node); else { t.appendChild(node); this.last = { item: it.i }; }
       this.els.set(it.i, node);
       node.querySelectorAll("pre code").forEach((c) => { try { hljs.highlightElement(c); } catch (_) {} });
+      addCopyButtons(node, it);
       if (it.kind === "assistant" && !it.streaming) mediaUnder(node, it);
     }
   },
 };
 
+const rawText = new WeakMap();   // message element -> its text as written (markdown), for "Copy message"
+function addCopyButtons(node, it) {
+  const raw = it.kind === "task" ? [it.description, it.summary, it.output_file].filter(Boolean).join("\n") : it.text;
+  if (!raw) return;
+  rawText.set(node, raw);
+  if (node.classList.contains("msg") && (it.kind === "user" || it.kind === "assistant")) {
+    const b = el("button", "copybtn", "⧉ copy");
+    b.title = "Copy this message";
+    b.onclick = (e) => { e.stopPropagation(); copyText(raw, "message copied"); };
+    node.appendChild(b);
+  }
+  node.querySelectorAll("pre").forEach((pre) => {
+    const b = el("button", "codecopy", "copy");
+    b.onclick = (e) => { e.stopPropagation(); copyText(pre.querySelector("code")?.textContent ?? pre.textContent, "code copied"); };
+    pre.appendChild(b);
+  });
+}
 function renderTranscript() {
   const t = $("#transcript");
   t.innerHTML = ""; transcript.reset();
@@ -777,6 +795,7 @@ window.composer = {
     return false;
   },
   async mentions(text) {
+    if (!text.includes("@")) return [];   // listing a big folder's files takes a moment: only when needed
     const known = new Set(await this.knownFiles());
     return [...text.matchAll(/@([^\s]+)/g)].map((m) => m[1]).filter((p) => known.has(p));
   },
@@ -786,15 +805,23 @@ window.composer = {
     r.readAsDataURL(file);
   },
 };
+let sending = false;
 async function send() {
+  // Take the message and clear the box straight away: a second Enter while @mentions are looked up used to send
+  // the text again (without the image, which the first send had already taken).
+  if (sending) return;
   const box = $("#input");
-  const text = box.value.trim();
-  const files = [...new Set([...composer.files, ...(await composer.mentions(text))])];
-  const images = composer.images.slice();
-  if (!text && !files.length && !images.length) return;
+  const text = box.value.trim(), chips = composer.files.slice(), images = composer.images.slice();
+  if (!text && !chips.length && !images.length) return;
+  sending = true;
   box.value = ""; autosize();
   composer.files = []; composer.images = []; composer.renderChips();
-  await api().send(text, files, images);
+  try {
+    const files = [...new Set([...chips, ...(await composer.mentions(text))])];
+    await api().send(text, files, images);
+  } finally {
+    sending = false;
+  }
 }
 $("#input").addEventListener("paste", (e) => {
   for (const it of e.clipboardData?.items || []) if (it.type.startsWith("image/")) { e.preventDefault(); composer.addImage(it.getAsFile()); }
@@ -826,10 +853,12 @@ function showMenu(anchor, items) {
   m.innerHTML = "";
   for (const it of items) {
     if (it === "-") { m.appendChild(el("hr")); continue; }
-    const [label, fn] = it;
+    const [label, fn, opts = {}] = it;
     if (label.startsWith("sub:")) { m.appendChild(el("div", "sub", esc(label.slice(4)))); continue; }
-    const row = el("div", "", esc(label));
-    row.onclick = () => { hideMenu(); fn(); };
+    const row = el("div", opts.disabled ? "disabled" : "",
+      (opts.checked !== undefined ? `<span class="chk">${opts.checked ? "✓" : ""}</span>` : "") + esc(label) +
+      (opts.kbd ? `<span class="kbd">${esc(opts.kbd)}</span>` : ""));
+    row.onclick = () => { if (opts.disabled) return; hideMenu(); fn(); };
     m.appendChild(row);
   }
   m.classList.remove("hidden");
@@ -878,6 +907,9 @@ window.addEventListener("pywebviewready", async () => {
   Object.assign(S, { settings: s.settings, folder: s.folder, workspaces: s.workspaces || [], groups: s.groups,
                      active: s.active, items: s.items || [], display: s.display });
   S.manual = s.settings.tree_manual || {};
+  $("#versionTag").textContent = "v" + s.version;
+  renderUpdate(s.update);
+  if (s.settings.zoom) document.body.style.zoom = s.settings.zoom;
   await loadLists();
   renderToggles(); renderTree(); renderHead(); renderTranscript(); renderState();
   if (S.settings.panel_open) $("#app").classList.add("with-panel");
