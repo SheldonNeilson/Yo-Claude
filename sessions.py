@@ -849,18 +849,24 @@ class Router:
                 t["ended"], t["exit_code"] = time.time(), exit_code(t.get("output_file"))
             self.finished_tasks[t.get("task_id")] = t
             self.detached_card(sid, t)
-        names = "; ".join(f"\"{t.get('description') or 'background task'}\"" +
-                          (f" (output: {t['output_file']})" if t.get("output_file") else "") for t in tasks)
-        log.info("Background task(s) of %s finished after the restart: %s", sid, names)
+        def how(t):   # name it (its command when it has no description), and say how it ended
+            code = t.get("exit_code")
+            ended = "ran to the end (exit code 0)" if code == 0 else f"failed (exit code {code})" if code is not None \
+                else "stopped (its process ended; how isn't known)"
+            name = t.get("description") or task_command(t) or t.get("task_id") or "a background task"
+            return f"\"{name}\" {ended}" + (f", output: {t['output_file']}" if t.get("output_file") else "")
+        names = "; ".join(how(t) for t in tasks)
+        log.info("Background task(s) of %s ended after the restart: %s", sid, names)
         s = self.live.get(sid)
         if s is None:
             s = Session(self, cwd, sid, resumed=True)
             s.load_history()
             self.live[sid] = s
-        s.add({"kind": "note", "text": f"Background task finished while Yo Claude was restarting: {names}"})
-        self.send("Yo Claude restarted while your background task kept running, so its completion notice didn't "
-                  f"reach you. It has now finished: {names}. Check the result and carry on with what you said you'd "
-                  "do when it was done.", sid=sid, origin="system")
+        s.add({"kind": "note", "text": f"Background task ended while Yo Claude was restarting: {names}"})
+        self.send(f"Yo Claude restarted while {'these background tasks' if len(tasks) > 1 else 'this background task'} "
+                  f"kept running, so Claude Code's notice didn't reach you. Now: {names}. Check the result and carry on "
+                  "with what you said you'd do when it was done (if you already knew, just say so briefly).",
+                  sid=sid, origin="system")
 
     # --- the tasks panel: background commands and subagents, across sessions ---
     def title_of(self, sid):
