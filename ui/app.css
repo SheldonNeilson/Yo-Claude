@@ -311,6 +311,28 @@ code.pathlink:hover { color: var(--orange2); background: var(--bg3); }
 .msg .copybtn { top: -1.5em; right: 1ch; }
 .msg.user .copybtn { right: auto; left: 1ch; }
 
+/* a subagent's log in the tasks tab: the conversation look from before the bubbles, full width */
+.agentlog { padding: 6px 12px 16px; border-top: 1px solid var(--line); }
+.alog-user { color: var(--orange2); white-space: pre-wrap; margin: 8px 0; max-height: 9.5em; overflow-y: auto; }
+.alog-user::before { content: "> "; color: var(--orange); }
+.alog-assistant { color: var(--text); margin: 8px 0; }
+.alog-assistant::before { content: "\25CF "; color: var(--orange); float: left; margin-right: 4px; }
+.alog-assistant p, .alog-report p { margin: 0 0 8px; }
+.alog-assistant code, .alog-report code { color: var(--amber); }
+.alog-assistant pre, .alog-report pre { background: #0b0b0a; border: 1px solid var(--line); padding: 8px; overflow-x: auto; }
+.alog-assistant pre code, .alog-report pre code { color: inherit; }
+.alog-steps { border: 1px solid var(--line); background: var(--bg2); margin: 6px 0; }
+.alog-steps.live { border-color: var(--amber); }
+.alog-head { display: flex; gap: 8px; align-items: baseline; padding: 4px 8px; cursor: pointer; white-space: nowrap; overflow: hidden; }
+.alog-head b { color: var(--text); flex: none; } .alog-head .dim { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.alog-head:hover b { color: var(--orange); }
+.alog-now { color: var(--amber); overflow: hidden; text-overflow: ellipsis; min-width: 0; margin-left: auto; }
+.alog-list { border-top: 1px solid var(--line); padding: 4px 8px 6px 26px; font-size: 12px; color: var(--dim); }
+.alog-list div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.alog-list .tn { color: var(--text); } .alog-list .failed, .alog-list .failed .tn { color: var(--red); }
+.alog-report { border-left: 3px solid var(--green); padding: 4px 0 4px 10px; margin: 10px 0; }
+.alog-rh { color: var(--green); font-weight: bold; margin-bottom: 4px; }
+
 /* @ files and / commands list */
 #atlist { max-height: 46vh; overflow-y: auto; }
 #atlist div[data-i] b { color: var(--orange); font-weight: normal; }
@@ -437,3 +459,13 @@ b.lo { color: var(--green); } b.mid { color: var(--amber); } b.hi { color: var(-
 .chip.small { margin-left: 8px; font-size: 11px; }
 #atlist { position: absolute; bottom: 100%; left: 12px; max-height: 300px; overflow-y: auto; min-width: 360px; }
 #atlist div.on { background: var(--bg3); color: var(--orange); }
+
+/* file explorer */
+.ftools { padding: 3px 10px; gap: 4px; }
+.ftools button { padding: 0 6px; font-size: 11px; }
+.ftools button:disabled { opacity: .4; cursor: default; color: var(--dim); border-color: var(--line2); }
+.ftree { outline: none; min-height: 60px; }
+.ftree .node.sel { background: var(--bg3); }
+.ftree:focus .node.sel { box-shadow: inset 2px 0 0 var(--orange); }
+.ftree .node.cut { opacity: .45; }
+.ftree .node.drop, .ftree.drop { outline: 1px dashed var(--orange); outline-offset: -1px; }

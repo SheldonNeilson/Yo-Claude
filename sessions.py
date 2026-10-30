@@ -665,37 +665,53 @@ class Session:
 
 
 # --- the router -------------------------------------------------------------------------------------------------
-def agent_steps(path, limit=400):
-    """A subagent's transcript as readable lines: its brief, what it said, and each tool it used."""
-    lines = []
+def agent_items(path, limit=400):
+    """A subagent's transcript as items to show: its brief ("user"), what it said ("assistant", Markdown), each
+    tool it used ("tool": name, a one-line brief, whether it failed) and its report back ("report")."""
+    items, tools = [], {}
 
     def brief(inp):
         inp = inp or {}
         for k in ("description", "command", "file_path", "pattern", "url", "query", "prompt"):
             if inp.get(k):
-                return " ".join(str(inp[k]).split())[:160]
+                return " ".join(str(inp[k]).split())[:200]
         return ""
+    with open(path, encoding="utf-8") as f:
+        for raw in f:
+            try:
+                d = json.loads(raw)
+            except ValueError:
+                continue
+            content = (d.get("message") or {}).get("content")
+            if d.get("type") == "user" and isinstance(content, str):
+                items.append({"kind": "user", "text": content.strip()})
+            elif d.get("type") == "user" and isinstance(content, list):
+                for b in content:   # results: mark the tools that failed
+                    if isinstance(b, dict) and b.get("type") == "tool_result" and b.get("is_error"):
+                        if b.get("tool_use_id") in tools:
+                            tools[b["tool_use_id"]]["error"] = True
+            elif d.get("type") == "assistant" and isinstance(content, list):
+                for b in content:
+                    if b.get("type") == "text" and b.get("text", "").strip():
+                        items.append({"kind": "assistant", "text": b["text"].strip()})
+                    elif b.get("type") == "tool_use" and b.get("name") == "SubagentHandback":
+                        items.append({"kind": "report", "text": str((b.get("input") or {}).get("message", ""))})
+                    elif b.get("type") == "tool_use":
+                        item = tools[b.get("id")] = {"kind": "tool", "name": b.get("name"), "brief": brief(b.get("input"))}
+                        items.append(item)
+    return items[-limit:]
+
+
+def agent_steps(path, limit=400):
+    """The same as plain text (for copying)."""
     try:
-        with open(path, encoding="utf-8") as f:
-            for raw in f:
-                try:
-                    d = json.loads(raw)
-                except ValueError:
-                    continue
-                content = (d.get("message") or {}).get("content")
-                if d.get("type") == "user" and isinstance(content, str):
-                    lines.append("> " + content.strip())
-                elif d.get("type") == "assistant" and isinstance(content, list):
-                    for b in content:
-                        if b.get("type") == "text" and b.get("text", "").strip():
-                            lines.append(b["text"].strip())
-                        elif b.get("type") == "tool_use" and b.get("name") == "SubagentHandback":
-                            lines.append("✓ reported back:\n" + str((b.get("input") or {}).get("message", "")))
-                        elif b.get("type") == "tool_use":
-                            lines.append(f"⚙ {b.get('name')}  {brief(b.get('input'))}".rstrip())
+        items = agent_items(path, limit)
     except OSError as e:
         return f"Couldn't read its transcript: {e}"
-    return "\n".join(lines[-limit:])
+    return "\n".join({"user": lambda i: "> " + i["text"], "assistant": lambda i: i["text"],
+                      "report": lambda i: "✓ reported back:\n" + i["text"],
+                      "tool": lambda i: f"⚙ {i['name']}  {i['brief']}".rstrip() + ("  (failed)" if i.get("error") else "")}
+                     [i["kind"]](i) for i in items)
 
 
 class Router:
@@ -959,7 +975,11 @@ class Router:
                 f.seek(max(0, size - TASK_TAIL_BYTES))
                 text = f.read().decode("utf-8", "replace")
             return {"text": text, "cut": size > TASK_TAIL_BYTES, "path": path}
-        return {"text": agent_steps(t["agent_file"]), "path": t["agent_file"]}
+        try:
+            items = agent_items(t["agent_file"])
+        except OSError as e:
+            return {"error": f"Couldn't read its transcript: {e}"}
+        return {"items": items, "text": agent_steps(t["agent_file"]), "path": t["agent_file"]}
 
     def stop_task(self, sid, task_id):
         s = self.live.get(sid)

@@ -22,7 +22,7 @@ window.tasks = {
   },
   show(key) {
     if (!panel.shown()) { $("#app").classList.add("with-panel"); api().set_setting("panel_open", true); }
-    if (key !== undefined) { this.open = key; this.output = null; }
+    if (key !== undefined) { this.open = key; this.output = null; this.runOpen = new Map(); }
     panel.tab = "tasks";
     panel.render();
     if (this.open) this.loadOutput();
@@ -34,6 +34,14 @@ window.tasks = {
     this.output = out;
     const pre = $("#taskOut");
     if (!pre) return this.render();
+    if (out.items) {   // a subagent: redraw its log when it has new steps, staying at the bottom if you were there
+      if (+pre.dataset.n === out.items.length) return;
+      const pb = $("#pbody"), atEnd = pb.scrollHeight - pb.scrollTop - pb.clientHeight < 40;
+      const t = this.list.find((x) => x.key === key);
+      pre.replaceWith(this.agentLog(out.items, t?.status === "running"));
+      if (atEnd) pb.scrollTop = pb.scrollHeight;
+      return;
+    }
     const atEnd = pre.scrollHeight - pre.scrollTop - pre.clientHeight < 30;
     pre.textContent = out.error || out.text || out.note || "(no output yet)";
     if (atEnd) pre.scrollTop = pre.scrollHeight;
@@ -118,7 +126,7 @@ Click to see its output`;
       bar.appendChild(stop);
     }
     const copy = el("button", "", "copy");
-    copy.onclick = () => copyText($("#taskOut")?.textContent || "", "output copied");
+    copy.onclick = () => copyText(this.output?.text ?? $("#taskOut")?.textContent ?? "", "output copied");
     bar.appendChild(copy);
     if (this.output?.path) {
       const file = el("button", "", "open file");
@@ -126,12 +134,60 @@ Click to see its output`;
       bar.appendChild(file);
     }
     body.appendChild(bar);
+    if (this.output?.items) {
+      body.appendChild(this.agentLog(this.output.items, t.status === "running"));
+      body.scrollTop = body.scrollHeight;
+      return;
+    }
     const pre = el("pre", "viewer taskout");
     pre.id = "taskOut";
     pre.textContent = this.output ? (this.output.error || this.output.text || this.output.note || "(no output yet)") : "loading…";
     body.appendChild(pre);
     if (this.output?.cut) pre.before(el("div", "dim small tcut", "showing the end of the output"));
     pre.scrollTop = pre.scrollHeight;
+  },
+  // A subagent's work laid out like the conversation: its brief, what it said, its tool calls folded into
+  // "N steps" (click to see each one; the latest run stays open while it works) and its report back.
+  agentLog(items, running) {
+    const log = el("div", "agentlog");
+    log.id = "taskOut"; log.dataset.n = items.length;
+    for (let i = 0; i < items.length;) {
+      const it = items[i];
+      if (it.kind === "tool") {
+        const start = i, run = [];
+        while (i < items.length && items[i].kind === "tool") run.push(items[i++]);
+        const live = running && i === items.length;   // the run it's on now lists its steps, unless you fold it
+        const open = this.runOpen?.has(start) ? this.runOpen.get(start) : live;
+        const counts = {};
+        for (const r of run) counts[r.name] = (counts[r.name] || 0) + 1;
+        const failed = run.filter((r) => r.error).length;
+        const g = el("div", "alog-steps" + (live ? " live" : "") + (open ? " open" : ""));
+        const head = el("div", "alog-head", `<span class="tw">${open ? "▾" : "▸"}</span>` +
+          `<b>${live ? `<span class="spin">${SPIN[Math.floor(Date.now() / 120) % SPIN.length]}</span> ` : ""}${run.length} step${run.length > 1 ? "s" : ""}</b>` +
+          `<span class="dim">${Object.entries(counts).map(([n, c]) => esc(n.replace(/^mcp__[^_]+__/, "")) + (c > 1 ? ` ×${c}` : "")).join(" · ")}</span>` +
+          (failed ? `<span class="del">${failed} failed</span>` : "") +
+          (live ? `<span class="alog-now">${esc(run.at(-1).name)} ${esc(run.at(-1).brief)}</span>` : ""));
+        head.onclick = () => {
+          this.runOpen = this.runOpen || new Map();
+          this.runOpen.set(start, !open);
+          log.replaceWith(this.agentLog(items, running));
+        };
+        g.appendChild(head);
+        if (open) {
+          const list = el("div", "alog-list");
+          for (const r of run) list.appendChild(el("div", r.error ? "failed" : "", `<span class="tn">${esc(r.name.replace(/^mcp__[^_]+__/, ""))}</span> ${esc(r.brief)}`));
+          g.appendChild(list);
+        }
+        log.appendChild(g);
+        continue;
+      }
+      i++;
+      if (it.kind === "user") log.appendChild(el("div", "alog-user", esc(it.text)));
+      else if (it.kind === "report") log.appendChild(el("div", "alog-report", `<div class="alog-rh">✓ reported back</div>${md(it.text)}`));
+      else log.appendChild(el("div", "alog-assistant", md(it.text)));
+    }
+    if (!items.length) log.appendChild(el("div", "pempty", "Nothing yet."));
+    return log;
   },
 };
 
