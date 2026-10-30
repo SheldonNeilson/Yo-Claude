@@ -63,6 +63,8 @@ The first time, a welcome tour explains everything and checks how well it hears 
   "Never mind" ends it.
 - **Voice commands**: "new session", "new chat", "switch to *session name*".
 - **Approvals**: when Claude asks permission, say "yes, go ahead" or "no", or click.
+- **AutoCorrect**: what you say shows in the message box, Haiku fixes spelling, grammar and misheard words ("Lord"
+  becomes "Claude"), then it's sent.
 - **Stop** anything: `[■]`, Esc (when no list or menu is open), a right-click on the bar, or the tray menu.
 - **Mishearing you?** Turn on **Voice → More accurate speech recognition**. It uses a bigger speech model: slower,
   and a one-off download of about 1.5 GB.
@@ -76,7 +78,18 @@ The first time, a welcome tour explains everything and checks how well it hears 
   - Yo Claude's own commands: `/new`, `/chat`, `/model sonnet`, `/effort high`, `/context`, `/usage`, `/tasks`,
     `/files`, `/changes`, `/git`, `/stop`.
   - Claude Code's commands for the folder (`/compact`, your skills and custom commands) are listed too.
-- **Queue** messages while Claude is working; a queued one shows **✕ cancel**, which puts it back in the box.
+- **AutoCorrect** fixes spelling and grammar as you pause typing (Ctrl+Z undoes it). A grey **suggested next
+  message** fills the empty box (Tab takes it), even while Claude is still working.
+- **Queue** messages while Claude is working:
+  - Drag **⠿** to change their order; **✕ cancel** puts one back in the box.
+  - **➤ send now** gives it to Claude at its next step; it stays pinned, marked sent, until Claude reads it.
+  - AutoCorrect fixes them while they wait, and they survive a restart (sent when you open the session again).
+  - Claude can queue messages itself too: "do this after a restart".
+- **Reply or comment**: select text in a reply and right-click **Reply to this** or **Comment on this…**. Each is a chip
+  above the box (click to edit); they go as quotes ahead of your message.
+- **Tick lists**: when you should pick several things, Claude shows a checklist. Tick yes or no, add **+ why** to any
+  item and a note, then **submit**.
+- **The advisor**: when Claude consults its advisor, the advice shows as a third member of the chat.
 - **Rewind**: hover one of your messages and click **⟲ rewind** to go back to just before it. Rewind the conversation
   and the files Claude changed since, only the conversation, or only the files. Tick "first copy this conversation to
   a new session" to keep the rewound part going in a copy, without redoing it.
@@ -88,13 +101,20 @@ The first time, a welcome tour explains everything and checks how well it hears 
 
 ### The window
 
-- **Menus** along the top (File, Edit, View, Session, Voice, Tools, Help) have every setting, with keyboard shortcuts
-  (Help → Keyboard shortcuts). Hover anything for a short explanation.
+- **Menus** along the top (File, Edit, View, Session, Voice, Tools, Options, Help) have every setting, with keyboard
+  shortcuts (Help → Keyboard shortcuts). **Options** turns each of the extras on or off. Hover anything for a short
+  explanation.
+- **sessions · focus · files** at the top right show or hide the panes beside the chat (focus: just the chat). The
+  window opens maximized (View → Start Maximized).
+- **Her face** (bottom left): ASCII video of a real person that listens, thinks and talks along with the voice (lip
+  sync), with dozens of small mannerisms. New ones join while it runs.
+- **Bug Invaders**: an ASCII space-invaders comes up over the chat while Claude works, leaving a sliver of the chat in
+  view. Click it to play; Esc hides it until the next reply.
 - **Model and effort** are picked per session, at the top of the conversation.
 - **Resize** the sessions list and the right-hand panel by dragging their edges (double-click resets).
-- **Compact mode**: close or minimise the window and a small bar stays at the bottom of the screen. `[⤢]` opens the
-  window again.
-- **Tray icon** (bottom right): the wake word, voice replies, PC control, the floating bar, launch with Windows,
+- **Compact mode**: close or minimise the window and a small bar stays at the bottom of the screen, with her face and a
+  few lines on what's happening (your messages, Claude's thoughts, its replies). `[⤢]` opens the window again.
+- **Tray icon** (bottom right; its colour and movement show what Yo Claude is doing): the wake word, voice replies, PC control, the floating bar, launch with Windows,
   training mode, updates, and Quit.
 
 ### Folders and sessions
@@ -112,7 +132,9 @@ The first time, a welcome tour explains everything and checks how well it hears 
 
 - In a folder session, the right-hand panel has four tabs:
   - **files**: a file explorer. New file and folder, rename (F2), delete to the Recycle Bin (Del), cut, copy and
-    paste (Ctrl+X/C/V), duplicate, multi-select with Ctrl/Shift+click, and drag to move (Ctrl copies).
+    paste (Ctrl+X/C/V), duplicate, multi-select with Ctrl/Shift+click, and drag to move (Ctrl copies). Browse anywhere
+    (double-click a folder, **↑** for the one above, **⌂** back), sort by name or **modified** (a folder's newest file
+    inside), and right-click a folder → **add folder to session context**.
   - **changes**: everything changed in the session, with diffs and per-file revert.
   - **git**: your branch, and switching or creating one.
   - **tasks**: background commands and subagents (see below).
