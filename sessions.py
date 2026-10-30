@@ -473,6 +473,8 @@ class Session:
                                          "description": "", "started": time.time(), "output_file": None}
             t["tool_use_id"] = getattr(m, "tool_use_id", None)
             t["output_file"] = self.task_outputs.get(t["tool_use_id"])
+            tool = self.tool_item(t["tool_use_id"]) if t["tool_use_id"] else None
+            t["command"] = ((tool or {}).get("input") or {}).get("command")
             self.add(t)
         if getattr(m, "description", None):
             t["description"] = m.description
@@ -504,12 +506,16 @@ class Session:
             code = earlier.get("exit_code")
         if code is not None:
             t.update(finished_card(code))
-        elif any(d.get("task_id") == t["task_id"] for d in self.router.detached.get(self.id, [])):
+        elif command_running(t.get("command"), running_shells()) or \
+                any(d.get("task_id") == t["task_id"] for d in self.router.detached.get(self.id, [])):
             t.update(status="running", detached=True, summary=None, ended=None)
+            self.router.follow(self.id, t)
+        else:
+            t["summary"] = "Stopped: its process ended without finishing (Yo Claude or Claude Code restarted)."
 
     def save_tasks(self):
         """Running tasks, with this session's Claude process id: after a restart Yo Claude can follow them."""
-        running = [{k: t.get(k) for k in ("task_id", "description", "output_file", "started", "type")}
+        running = [{k: t.get(k) for k in ("task_id", "description", "output_file", "started", "type", "command")}
                    for t in self.running_tasks()]
         self.router.meta.update(self.id, tasks=running, tasks_pid=self.pid, cwd=self.cwd)
 
@@ -690,6 +696,7 @@ class Router:
         self.work = {}                      # session id -> "thinking" | "using_pc" | "awaiting_approval" | "background"
         self.detached = {}                  # session id -> background tasks still running from before a restart
         self.finished_tasks = {}            # task id -> how a task from before a restart ended
+        self.watcher = None
         self.limits = self.meta.data.get("limits")   # last known plan usage limits
         self.on_voice_approval = None       # set by the voice assistant
         os.makedirs(CHAT_DIR, exist_ok=True)
@@ -770,28 +777,52 @@ class Router:
                 self.work[sid] = "background"
                 log.info("Following %d background task(s) of %s from before the restart", len(m["tasks"]), sid)
         if self.detached:
-            threading.Thread(target=self.watch_detached, daemon=True, name="detached-tasks").start()
+            self.watcher = threading.Thread(target=self.watch_detached, daemon=True, name="detached-tasks")
+            self.watcher.start()
 
     def detached_alive(self, sid):
         """Finished when every task's output ends with Claude Code's "[exited with code N]" marker. Tasks without one
         (agents) count as running while their Claude process lives or their output changed in the last minute."""
         m = self.meta.session(sid)
         unknown = False
+        shells = running_shells()
         for t in self.detached.get(sid, []):
             out = t.get("output_file")
             if t.get("ended"):
                 continue
+            if command_running(t.get("command"), shells):
+                return True
             if out and os.path.exists(out) and time.time() - os.path.getmtime(out) < 60:
                 return True
+            if t.get("command") and shells is not None:   # we know what to look for, and it's gone
+                continue
             unknown = True
         return unknown and pid_alive(m.get("tasks_pid"))
 
+    def follow(self, sid, t):
+        """Keep watching a background command Claude Code lost track of (its process is still running)."""
+        tasks = self.detached.setdefault(sid, [])
+        if not any(d.get("task_id") == t.get("task_id") for d in tasks):
+            tasks.append({k: t.get(k) for k in ("task_id", "description", "output_file", "started", "type", "command")})
+            self.work[sid] = "background"
+            log.info("Following background task %s of %s: its process is still running", t.get("task_id"), sid)
+        if not self.watcher or not self.watcher.is_alive():
+            self.watcher = threading.Thread(target=self.watch_detached, daemon=True, name="detached-tasks")
+            self.watcher.start()
+
     def watch_detached(self):
+        import pythoncom
+        pythoncom.CoInitialize()   # running_shells() asks Windows (WMI) from this thread
         while self.detached:
             for sid in list(self.detached):
+                shells = running_shells()
                 for t in self.detached.get(sid, []):
-                    code = None if t.get("ended") else exit_code(t.get("output_file"))
-                    if code is not None:   # this one's done: its card says so now, not when they all are
+                    if t.get("ended"):
+                        continue
+                    code = exit_code(t.get("output_file"))
+                    gone = code is None and t.get("command") and shells is not None \
+                        and not command_running(t["command"], shells)
+                    if code is not None or gone:   # this one's done: its card says so now, not when they all are
                         t["ended"], t["exit_code"] = time.time(), code
                         self.detached_card(sid, t)
                 if not self.detached_alive(sid):
@@ -1304,6 +1335,29 @@ def exit_code(path):
     except OSError:
         return None
     return int(found[-1]) if found else None
+
+
+def running_shells():
+    """Command lines of the shells running now (Claude Code runs background commands in Git Bash), or None if
+    Windows couldn't say."""
+    try:
+        import win32com.client
+        wmi = win32com.client.GetObject("winmgmts:")
+        return [p.CommandLine or "" for p in wmi.ExecQuery(
+            "SELECT CommandLine FROM Win32_Process WHERE Name='bash.exe' OR Name='sh.exe'")]
+    except Exception as e:
+        log.debug("Couldn't list shells: %s", e)
+        return None
+
+
+def command_running(command, shells):
+    """Whether one of those shells is running this command. Its longest stretch without quotes or backslashes is
+    matched, since the shell's command line has the command quoted inside it."""
+    if not command or not shells:
+        return False
+    parts = sorted(re.split(r"[\\'\"`]", command), key=len, reverse=True)
+    key = parts[0].strip() if parts else ""
+    return len(key) >= 12 and any(key in c for c in shells)
 
 
 def finished_card(code):
