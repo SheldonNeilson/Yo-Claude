@@ -185,10 +185,10 @@ const avatar = {
     const em = probe.getBoundingClientRect().width / 5000 || 0.6;   // a character's width, per px of font size
     probe.remove();
     // the person's part of the frame (frameView); with height to spare at this width, zoom in to fill it: narrow the
-    // view around the middle (to 60% of the width at most, so the shoulders stay)
+    // view around the middle (to 68% of the width at most, so the whole head stays in)
     const base = this.baseView || VIEW, vh = (base[3] - base[1]) * this.AH, cwW = width / cols;
     const fullRows = cols * vh / AW / 2, fillRows = maxH / (2 * cwW);
-    const share = Math.max(0.6, Math.min(1, fullRows / fillRows));
+    const share = Math.max(0.68, Math.min(1, fullRows / fillRows));
     const V = this.view = [0.5 - share / 2, base[1], 0.5 + share / 2, base[3]];
     const rows = Math.round(cols * ((V[3] - V[1]) * this.AH) / ((V[2] - V[0]) * AW) / 2);
     const cw = Math.min(cwW, maxH / (rows * 2));
@@ -430,12 +430,16 @@ function boxBlur(a, W, H, r) {   // two passes of a running-sum box blur
 
 // The part of the clip worth showing: from a little above the person's head down (the dark backdrop above them would
 // only be blank rows), the full width. Found in her (or his) first idle frame: the first rows with enough light in them.
-function frameView(grey, AH) {
+function frameView(grey, AH) {   // (lit = clearly brighter than the backdrop: a dark head on a dark backdrop counts too)
+  const corner = [];
+  for (let y = 0; y < Math.floor(AH * 0.06); y++) for (const x of [0, 1, 2, 3, AW - 4, AW - 3, AW - 2, AW - 1]) corner.push(grey[y * AW + x]);
+  corner.sort((a, b) => a - b);
+  const cut = corner[Math.floor(corner.length / 2)] + 18;
   let top = 0;
   for (let y = 0; y < AH; y++) {
     let n = 0;
-    for (let x = 0; x < AW; x++) if (grey[y * AW + x] > 70) n++;
+    for (let x = 0; x < AW; x++) if (grey[y * AW + x] > cut) n++;
     if (n > AW * 0.04) { top = y; break; }
   }
-  return [0, Math.max(0, top - AH * 0.03) / AH, 1, 1];
+  return [0, Math.max(0, top - AH * 0.04) / AH, 1, 1];
 }
