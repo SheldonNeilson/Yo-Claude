@@ -1,18 +1,21 @@
-// The tasks tab in the right-hand panel: background commands and subagents from every open session, with their
-// output, so you can watch one without leaving the conversation you're in.
+// The tasks tab in the right-hand panel: background commands and subagents of this session (or all open sessions,
+// grouped by session), with their output, so you can watch one without leaving the conversation you're in.
 "use strict";
 window.tasks = {
-  list: [], open: null, output: null, seen: null, timer: null,
+  list: [], open: null, output: null, seen: null, timer: null, scope: "session",
 
   running() { return this.list.filter((t) => t.status === "running"); },
+  here(t) { return t.session === S.active?.id; },
+  runningHere() { return this.running().filter((t) => this.here(t)); },
+  runningElsewhere() { return this.running().filter((t) => !this.here(t)); },
   async poll() {
     const list = await api().tasks() || [];
-    const fresh = list.filter((t) => t.status === "running" && this.seen && !this.seen.has(t.key));
+    const fresh = list.filter((t) => t.status === "running" && this.here(t) && this.seen && !this.seen.has(t.key));
     const first = this.seen === null;
     this.seen = new Set(list.map((t) => t.key));
     this.list = list;
-    // A task starting (or one already running when the window opens) brings the panel up on this tab.
-    if (fresh.length || (first && this.running().length)) this.show();
+    // A task starting in this session (or running when the window opens) brings the panel up on this tab.
+    if (fresh.length || (first && this.runningHere().length)) this.show();
     else if (panel.shown() && panel.tab === "tasks") this.render();
     else panel.renderTabs();
     if (this.open && panel.shown() && panel.tab === "tasks") this.loadOutput();
@@ -45,23 +48,53 @@ window.tasks = {
     const t = this.open && this.list.find((x) => x.key === this.open);
     if (t) return this.renderOne(body, t);
     this.open = null;
-    if (!this.list.length) {
-      body.innerHTML = `<div class="pempty">No background tasks or subagents.<br><br>When Claude runs something in the
-        background (a render, a build, a test run) or hands work to a subagent, it shows here with its output.</div>`;
+    const mine = this.list.filter((x) => this.here(x));
+    const bar = el("div", "phead taskscope");
+    for (const [scope, label, n] of [["session", "this session", mine.length], ["all", "all sessions", this.list.length]]) {
+      const b = el("button", this.scope === scope ? "on" : "", `${label}${n ? ` <i>${n}</i>` : ""}`);
+      b.onclick = () => { this.scope = scope; this.render(); };
+      bar.appendChild(b);
+    }
+    body.appendChild(bar);
+    const shown = this.scope === "session" ? mine : this.list;
+    if (!shown.length) {
+      const others = this.list.length - mine.length;
+      body.appendChild(el("div", "pempty", `No background tasks or subagents ${this.scope === "session" ? "in this session" : "yet"}.` +
+        (this.scope === "session" && others ? `<br><br>${others} in other sessions: see <b>all sessions</b>.` :
+         "<br><br>When Claude runs something in the background (a render, a build, a test run) or hands work to a subagent, it shows here with its output.")));
       return;
     }
-    const list = el("div", "tree tasklist");
-    for (const x of this.list) {
-      const row = el("div", "node task " + x.status);
-      row.innerHTML = `<span class="tstat">${statusMark(x)}</span>` +
-        `<div class="tmain"><div class="tdesc">${esc(x.description)}</div>` +
-        `<div class="tmeta">${x.kind === "agent" ? `agent${x.agent_type && x.agent_type !== "general-purpose" ? " · " + esc(x.agent_type) : ""}` : "command"}` +
-        ` · ${esc(elapsed(x))}${x.session !== S.active?.id ? ` · <span class="tsess">${esc(x.title)}</span>` : ""}</div></div>`;
-      row.title = `${x.description}\n${statusWord(x)} · in “${x.title}”\nClick to see its output`;
-      row.onclick = () => this.show(x.key);
-      list.appendChild(row);
+    // All sessions: one group per session, this one first, then the one with the latest task.
+    const groups = new Map();
+    for (const x of [...shown].sort((a, b) => (this.here(b) - this.here(a)))) {
+      if (!groups.has(x.session)) groups.set(x.session, []);
+      groups.get(x.session).push(x);
     }
-    body.appendChild(list);
+    for (const [sid, items] of groups) {
+      if (this.scope === "all") {
+        const h = el("div", "taskgroup" + (sid === S.active?.id ? " here" : ""),
+          `<span>${esc(items[0].title)}</span>${sid === S.active?.id ? '<span class="dim">this session</span>' : ""}`);
+        if (sid !== S.active?.id) {
+          h.dataset.tip = "Open this conversation";
+          h.onclick = () => api().open_session(sid, items[0].cwd);
+        }
+        body.appendChild(h);
+      }
+      const list = el("div", "tree tasklist");
+      for (const x of items) {
+        const row = el("div", "node task " + x.status);
+        row.innerHTML = `<span class="tstat">${statusMark(x)}</span>` +
+          `<div class="tmain"><div class="tdesc">${esc(x.description)}</div>` +
+          `<div class="tmeta">${x.kind === "agent" ? `agent${x.agent_type && x.agent_type !== "general-purpose" ? " · " + esc(x.agent_type) : ""}` : "command"}` +
+          ` · ${esc(elapsed(x))}</div></div>`;
+        row.title = `${x.description}
+${statusWord(x)} · in “${x.title}”
+Click to see its output`;
+        row.onclick = () => this.show(x.key);
+        list.appendChild(row);
+      }
+      body.appendChild(list);
+    }
     body.scrollTop = keep;
   },
   renderOne(body, t) {

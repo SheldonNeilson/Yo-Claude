@@ -33,13 +33,17 @@ window.panel = {
   renderTabs() {
     const p = $("#panel");
     if (!p.querySelector(".ptabs")) return;
-    const n = this.changes?.files?.length || 0, running = tasks.running().length;
+    const n = this.changes?.files?.length || 0, running = tasks.runningHere().length, elsewhere = tasks.runningElsewhere().length;
+    const mine = tasks.list.filter((t) => tasks.here(t)).length;
     p.querySelector(".ptabs .tabs").innerHTML =
       `<button data-t="files" class="${this.tab === "files" ? "on" : ""}">files</button>` +
       `<button data-t="changes" class="${this.tab === "changes" ? "on" : ""}">changes${n ? ` <b>${n}</b>` : ""}</button>` +
       `<button data-t="git" class="${this.tab === "git" ? "on" : ""}">git</button>` +
-      `<button data-t="tasks" class="${this.tab === "tasks" ? "on" : ""}${running ? " busy" : ""}" title="Background commands and subagents">` +
-      `tasks${running ? ` <b>${running}</b>` : tasks.list.length ? ` <i>${tasks.list.length}</i>` : ""}</button>`;
+      `<button data-t="tasks" class="${this.tab === "tasks" ? "on" : ""}${running ? " busy" : ""}" title="Background commands and subagents` +
+      `${running ? `
+${running} running in this session` : ""}${elsewhere ? `
+${elsewhere} running in other sessions` : ""}">` +
+      `tasks${running ? ` <b>${running}</b>` : mine ? ` <i>${mine}</i>` : ""}${elsewhere ? ` <i class="else">+${elsewhere}</i>` : ""}</button>`;
     p.querySelectorAll("[data-t]").forEach((b) => b.onclick = async () => {
       this.tab = b.dataset.t;
       if (this.tab === "files") await this.loadDirs();
