@@ -308,6 +308,10 @@ const avatar = {
     else if (st === "speaking") this.turnAt = 0;   // talking plays all the way (lip sync)
     const frames = this.clips[this.clip];
     const lipSync = st === "speaking" && this.clip === "talking" && this.mouth && !this.rewinding;
+    if (want !== this.clip && this.clip === "talking") {   // her voice stopped: her mouth stops at once (no rewinding
+      this.frame = 0; this.rewinding = false; this.dir = 1;     // through the talking frames: that looked like more talk)
+      if (st === "idle") this.nextIdle(now); else { this.clip = want; this.pickTurn(st); }
+    }
     if (want !== this.clip && !this.rewinding) this.rewinding = true;   // back to the shared start frame first
     if (this.rewinding) {
       this.frame = this.stepPast(Math.max(0, this.frame - 3), -1, frames);   // (no blink on the way back either)
@@ -359,7 +363,7 @@ const avatar = {
 avatar.lipFrame = function (now) {
   let loud = now - (this.levelAt || 0) < 300 ? this.level : 0;
   const i = Math.floor(((now - this.envStart) / 1000 - SPEECH_DELAY) / this.envStep);
-  if (this.env?.length && i >= -10 && i < this.env.length + 10) loud = Math.min(1, (this.env[i] || 0) / 3000);
+  if (this.env?.length && i >= -10) loud = i < this.env.length ? Math.min(1, (this.env[i] || 0) / 3000) : 0;   // (past its end: silent)
   const goal = Math.min(1, loud * 1.7), was = this.mouthGoal || 0;
   this.mouthGoal = Math.min(0.78, goal > was ? goal : was * 0.4 + goal * 0.6);   // opens at once, closes slower; never her widest
   const m = this.mouth, target = this.mouthGoal;
