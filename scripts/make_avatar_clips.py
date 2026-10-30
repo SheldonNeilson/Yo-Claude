@@ -29,10 +29,12 @@ FPS = 12
 OUT = Path(__file__).resolve().parent.parent / "ui" / "avatar"
 FACEMESH = os.environ.get("YOCLAUDE_FACEMESH", r"D:/Temp/yoclaude-scratch/facemesh/.venv/Scripts/python.exe")
 BLINK = 0.4                       # eyeBlink above this: her eyes are (nearly) shut
+GRIN = 0.75                       # mouthSmile above this: a big toothy grin (a "shark" in ASCII: lip sync avoids it)
 
 
 def blinks(names):
-    """{name: [[first, last], ...]} frames with her eyes shut, for these prepared clips (empty without FACEMESH)."""
+    """{name: {"blinks": [[first, last], ...] eyes shut, "grin": [frames grinning]}} for these prepared clips
+    (empty without FACEMESH)."""
     if not names or not os.path.exists(FACEMESH):
         return {}
     r = subprocess.run([FACEMESH, "-I", str(Path(__file__).with_name("face_measure.py")),
@@ -44,16 +46,21 @@ def blinks(names):
         return {}
     out = {}
     for name, m in data.items():
-        runs, a = [], -1
-        shut = [(b or 0) > BLINK for b in m["blink"]] + [False]
-        for i, s in enumerate(shut):
-            if s and a < 0:
-                a = i
-            elif not s and a >= 0:
-                runs.append([a, i - 1])
-                a = -1
-        out[name] = runs
+        out[name] = {"blinks": runs_of(m["blink"], BLINK),
+                     "grin": [i for i, v in enumerate(m.get("smile") or []) if (v or 0) > GRIN]}
     return out
+
+
+def runs_of(values, cut):
+    """[[first, last], ...] stretches where the value is above `cut`."""
+    runs, a = [], -1
+    for i, high in enumerate([(v or 0) > cut for v in values] + [False]):
+        if high and a < 0:
+            a = i
+        elif not high and a >= 0:
+            runs.append([a, i - 1])
+            a = -1
+    return runs
 
 
 def main(folder: Path, only=()):
@@ -82,8 +89,8 @@ def main(folder: Path, only=()):
 
 
 def write(manifest, made, measure):
-    for name, runs in blinks(measure).items():
-        made[name]["blinks"] = runs
+    for name, got in blinks(measure).items():
+        made[name].update(got)
     tmp = manifest.with_suffix(".tmp")   # written whole, then swapped in: the window never reads half of it
     tmp.write_text(json.dumps({"fps": FPS, "clips": made}, indent=1), encoding="utf-8")
     tmp.replace(manifest)

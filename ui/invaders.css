@@ -24,3 +24,10 @@
 #invaders .inv-status { bottom: -1.5em; left: 2ch; color: var(--amber, #e8b04b); }
 #invaders .inv-keys { bottom: -1.5em; right: 2ch; color: var(--faint, #5c5a56); }
 #invaders.narrow .inv-keys { display: none; }
+/* "while you wait..." on the frame only when it popped up by itself (class "auto"); not when opened with the button or menu */
+#invaders .inv-wait { display: none; color: var(--faint, #5c5a56); }
+#invaders.auto .inv-wait { display: inline; }
+#invaders.auto.narrow .inv-wait { display: none; }
+/* the [👾] button in the composer's row */
+#invadersBtn { filter: grayscale(.35); }
+#invadersBtn:hover { filter: none; }

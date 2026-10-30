@@ -81,7 +81,7 @@ function readPalette() {
 const root = document.createElement("div");
 root.id = "invaders"; root.tabIndex = 0;
 root.setAttribute("aria-label", "Bug Invaders: a game to play while Claude works. Click to play, Esc hides it.");
-root.innerHTML = '<span class="inv-tag inv-title">[ bug invaders ]</span>' +
+root.innerHTML = '<span class="inv-tag inv-title">[ bug invaders<span class="inv-wait"> · while you wait...</span> ]</span>' +
   '<span class="inv-tag inv-ctl"><button data-act="peek"></button><button data-act="sound"></button><button data-act="auto"></button>' +
   '<button data-act="close" title="Hide until Claude\'s next reply (Esc)">[✕]</button></span>' +
   '<span class="inv-tag inv-status"></span>' +
@@ -700,7 +700,15 @@ function drawIntro() {
 }
 function drawTitle() {
   const W = view.W, H = view.H, cx = W / 2;
-  let y = Math.max(10, H * 0.5 - 196);
+  const wait = !V.manual;   // it popped up by itself while Claude works (not opened with the button or the menu)
+  let y = Math.max(10, H * 0.5 - 196 - (wait ? 11 : 0));
+  if (wait) {   // typed out like a prompt, then a blinking cursor
+    const s = "While you wait...", n = Math.min(s.length, Math.floor((G.rt - V.shownAt) * 16)), cw = charW(12);
+    const x0 = cx - ((s.length + 3) * cw) / 2;
+    txt(">", x0, y, C.orange, 12, "left", 3);
+    txt(s.slice(0, n) + (n < s.length || Math.floor(G.rt * 2.5) % 2 ? "▍" : ""), x0 + cw * 2, y, C.dim, 12);
+    y += 22;
+  }
   y += drawPixelText("BUG INVADERS", cx, y, W * 0.75, 5, C.amber, C.orange) + 8;
   txt("something to shoot at while Claude thinks", cx, y, C.dim, 12, "center"); y += 26;
   const legend = [["conflict", "merge conflict", "30  · takes two hits"], ["fail", "failing test", "20"], ["nan", "NaN", "20  · wobbly shots"],
@@ -838,7 +846,7 @@ ctl.addEventListener("click", (e) => {
 
 // ---------- when it shows: Claude busy a few seconds, no card waiting on you ----------
 const V = { visible: false, manual: false, dismissed: false, sid: undefined, wasBusy: false, busySince: 0, bannerUntil: 0,
-  bannerTimer: 0, resume: false, pendingAt: 0, forceFocus: false };
+  bannerTimer: 0, resume: false, pendingAt: 0, forceFocus: false, shownAt: 0 };
 function pendingCard() {
   const s = app();
   if (!s) return false;
@@ -883,7 +891,8 @@ function showNow(manual, focus) {
   if (pendingCard()) return false;
   readPalette();
   root.style.display = "block";
-  V.visible = true; V.manual = !!manual; V.dismissed = false;
+  V.visible = true; V.manual = !!manual; V.dismissed = false; V.shownAt = G.rt;
+  root.classList.toggle("auto", !V.manual);
   view.cssW = 0;   // measure afresh
   if (!layout()) { root.style.display = "none"; V.visible = false; return false; }
   paintCtl(); paintStatus(); render(); startLoop();
@@ -904,6 +913,13 @@ setInterval(poll, POLL_MS);
 const tr = q("#transcript");
 if (tr && window.ResizeObserver) new ResizeObserver(() => { if (V.visible) layout(); }).observe(tr);
 window.addEventListener("resize", () => { if (V.visible) layout(); });
+
+// The [👾] button in the composer's row (index.html) opens and closes it.
+const openBtn = q("#invadersBtn");
+if (openBtn) {
+  openBtn.addEventListener("mousedown", (e) => e.preventDefault());   // so hiding still hands the keyboard back to the message box
+  openBtn.addEventListener("click", () => window.invaders.toggle());
+}
 
 window.invaders = {
   // A menu item, say: open it now (and take the keyboard, since you asked for it). Not over a card waiting on you.

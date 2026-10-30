@@ -47,6 +47,8 @@ END_SILENCE_S = 1.5          # pause that ends your request
 MAX_UTTERANCE_S = 30
 VAD_ON, VAD_OFF = 0.5, 0.35  # Silero speech probability thresholds
 NEURAL_VOICE = "en-US-AvaNeural"   # `edge-tts --list-voices` for others
+# each character's voice: (voice, pitch). Claudia (female) is Ava; Claude (male, the default) a deep, steady voice
+VOICES = {"female": (NEURAL_VOICE, "+0Hz"), "male": ("en-US-ChristopherNeural", "-6Hz")}
 NEURAL_RATE = "+5%"
 TEXT_HOLD_S = 12             # how long a reply stays on the bar when voice replies are off
 
@@ -258,14 +260,14 @@ def strip_wake_words(text, alternates=()):
 
 
 # --- audio out ----------------------------------------------------------------
-def neural_tts(text, voice=NEURAL_VOICE, rate=TTS_RATE):
+def neural_tts(text, voice=NEURAL_VOICE, rate=TTS_RATE, pitch="+0Hz"):
     """Microsoft neural voice (online) -> mono int16 PCM at `rate`."""
     import av
     import edge_tts
 
     async def fetch():
         mp3 = bytearray()
-        async for chunk in edge_tts.Communicate(text, voice, rate=NEURAL_RATE).stream():
+        async for chunk in edge_tts.Communicate(text, voice, rate=NEURAL_RATE, pitch=pitch).stream():
             if chunk["type"] == "audio":
                 mp3 += chunk["data"]
         return bytes(mp3)
@@ -288,18 +290,24 @@ def write_wav(path, pcm, rate):
 class Speaker:
     """Always the same neural voice; if the voice service can't be reached the reply is shown as text instead."""
 
-    def __init__(self):
+    def __init__(self, settings=None):
+        self.settings = settings if settings is not None else {}
         self.cache = {}
         self.pcm = None
         self.started = self.until = 0.0
         self.n = 0
 
+    def voice(self):
+        """The voice of the character picked in Options (Claude: male, the default; Claudia: female)."""
+        return VOICES.get(self.settings.get("character") or "male", VOICES["male"])
+
     def synth(self, text):
-        if text in self.cache:
-            return self.cache[text]
+        voice, pitch = self.voice()
+        if (voice, text) in self.cache:
+            return self.cache[(voice, text)]
         for attempt in range(3):
             try:
-                return neural_tts(text)
+                return neural_tts(text, voice, pitch=pitch)
             except Exception as e:
                 log.warning("Voice attempt %d failed: %s", attempt + 1, e)
                 time.sleep(0.3)
@@ -309,7 +317,7 @@ class Speaker:
         for p in phrases:
             pcm = self.synth(p)
             if pcm is not None:
-                self.cache[p] = pcm
+                self.cache[(self.voice()[0], p)] = pcm
 
     def play(self, pcm):
         self.n += 1
@@ -419,7 +427,7 @@ class Assistant:
             except Exception:   # not downloaded yet: start with the standard one, fetch it in the background
                 threading.Thread(target=self.switch_speech, args=(True,), daemon=True).start()
         self.stt = self.stt or Transcriber()
-        self.speaker = Speaker()
+        self.speaker = Speaker(settings)
         self.worker = ThreadPoolExecutor(6)   # Claude turns (one per queued voice request) and approvals meanwhile
         self.job = self.utterance = None
         self.backlog = []            # voice requests queued while Claude was answering one: (generation, future), in order

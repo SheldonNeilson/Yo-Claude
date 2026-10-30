@@ -59,7 +59,7 @@ const avatar = {
   // skips: the short blinks, padded a frame each side, which she steps over; shutAt: where a long eyes-shut stretch
   // starts (looking down, a squinting smile), which she turns back before.
   analyse() {
-    this.skips = {}; this.shutAt = {};
+    this.skips = {}; this.shutAt = {}; this.closedFrames = null;   // (lip sync's resting frames: grins may have changed)
     for (const [name, frames] of Object.entries(this.clips)) {
       const runs = this.meta?.[name]?.blinks || [];
       this.skips[name] = runs.filter(([a, z]) => z - a < 8).map(([a, z]) => [Math.max(1, a - 1), Math.min(frames.length - 1, z + 1)]);
@@ -354,12 +354,15 @@ avatar.lipFrame = function (now) {
   const goal = Math.min(1, loud * 1.7), was = this.mouthGoal || 0;
   this.mouthGoal = Math.min(0.78, goal > was ? goal : was * 0.4 + goal * 0.6);   // opens at once, closes slower; never her widest
   const m = this.mouth, target = this.mouthGoal;
+  // not her big toothy grins (measured, clips.json "grin"): in ASCII a row of teeth reads like a shark's
+  const grin = new Set(this.meta?.talking?.grin || []), ok = (i) => !grin.has(i) || grin.size > m.length - 6;
   if (target < 0.08) {   // a pause between words: never frozen, drift slowly among the closed-mouth frames
-    const closed = this.closedFrames || (this.closedFrames = [...m.keys()].sort((a, b) => m[a] - m[b]).slice(0, 8).sort((a, b) => a - b));
+    const closed = this.closedFrames || (this.closedFrames = [...m.keys()].filter(ok).sort((a, b) => m[a] - m[b]).slice(0, 8).sort((a, b) => a - b));
     return closed[Math.floor(now / 650) % closed.length];
   }
   let best = this.frame, bestScore = Infinity;
   for (let i = 0; i < m.length; i++) {
+    if (!ok(i)) continue;
     const score = Math.abs(m[i] - target) * 4 + Math.abs(i - this.frame) / m.length;
     if (score < bestScore) { bestScore = score; best = i; }
   }
