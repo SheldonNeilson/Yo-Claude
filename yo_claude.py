@@ -31,7 +31,8 @@ DATA_DIR = os.path.join(os.path.expanduser("~"), ".yoclaude")
 
 # --- settings -----------------------------------------------------------------
 WAKE_PHRASE = "yo claude"
-WAKE_PHRASES = {"male": "yo claude", "professor": "yo claude", "female": "yo claudia", "female2": "yo claudia"}   # (its name)
+WAKE_PHRASES = {"male": "yo claude", "professor": "yo claude", "male3": "yo claude",
+                "female": "yo claudia", "female2": "yo claudia", "female3": "yo claudia"}   # (its name)
 
 
 def wake_phrase(settings):
@@ -53,8 +54,10 @@ VAD_ON, VAD_OFF = 0.5, 0.35  # Silero speech probability thresholds
 NEURAL_VOICE = "en-US-AvaNeural"   # `edge-tts --list-voices` for others
 # each character's voice: (voice, pitch). Claudia (female) is Ava; Claude (male, the default) a deep, steady voice
 VOICES = {"female": (NEURAL_VOICE, "+0Hz"), "male": ("en-US-ChristopherNeural", "-6Hz"),
-          "professor": ("en-GB-RyanNeural", "-3Hz"),   # a British voice for the European professor
-          "female2": ("en-US-AvaNeural", "+0Hz")}       # (set to match her once her photo is picked)
+          "professor": ("en-GB-RyanNeural", "-3Hz"),    # Male 2: a British voice for the European professor
+          "male3": ("en-SG-WayneNeural", "-2Hz"),       # Male 3 (Asian): Singapore English
+          "female2": ("en-ZA-LeahNeural", "+0Hz"),      # Female 2 (African): South African English
+          "female3": ("en-SG-LunaNeural", "+0Hz")}      # Female 3 (Asian): Singapore English
 NEURAL_RATE = "+5%"
 TEXT_HOLD_S = 12             # how long a reply stays on the bar when voice replies are off
 
