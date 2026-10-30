@@ -11,6 +11,8 @@ https://github.com/SheldonNeilson/Yo-Claude (private); their installs update fro
 - **Before restarting Yo Claude**, read `~/.yoclaude/status.json`: it lists sessions mid-reply and background tasks.
   Restarting cuts off replies in progress (background tasks survive and are picked up again).
 - Screenshots in `docs/screenshots/` use made-up demo content only: never real sessions, folders or chats.
+- Test scripts that drive the Agent SDK create real sessions, which then show up in the user's session list. Move the
+  ones a test made into `~/.yoclaude/trash/<project folder>/` when it's done.
 
 ## Layout
 
