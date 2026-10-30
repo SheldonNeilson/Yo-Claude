@@ -1148,8 +1148,8 @@ class Session:
                 self.order.remove(item["i"])
                 self.save_pending()
         async with self.lock:
-            if item is not None:
-                self.waiting.pop(item["i"], None)
+            if item is not None:   # (what it says now: Haiku may have fixed it while it waited, see Router.tidy_queued)
+                prompt = self.waiting.pop(item["i"], (prompt,))[0]
             if item is not None and item.get("cancelled"):
                 return None
             if item is not None and item.get("sent_now"):   # already answered in the reply it joined
@@ -2095,7 +2095,32 @@ class Router:
                 yield {"type": "user", "message": {"role": "user", "content": content}, "parent_tool_use_id": None,
                        "session_id": s.id}
             prompt = message()
+        if item is not None and item.get("queued") and isinstance(prompt, str) and origin == "user" and not voice:
+            self.run(self.tidy_queued(s, item, text))
         return self.run(s.turn(prompt, voice, item, said))
+
+    async def tidy_queued(self, s, item, text):
+        """A typed message that's waiting its turn: Haiku fixes its spelling and grammar meanwhile (AutoCorrect), and
+        the fixed text is what goes (the bubble shows it). Left alone if it's sent, sent now or cancelled first."""
+        if not self.settings.get("fix_text", True) or text.lstrip().startswith("/"):
+            return
+        await asyncio.sleep(0)   # (after turn() has put it in the queue)
+        try:
+            context = next((x.get("text", "") for x in reversed(s.items) if x.get("kind") == "assistant"), "")
+            fixed = await tidy_text(text, context)
+        except Exception as e:
+            log.info("Couldn't fix a queued message: %s", e)
+            return
+        w = s.waiting.get(item["i"])
+        if not fixed or fixed == text or not w or not item.get("queued") or item.get("sent_now") or item.get("cancelled"):
+            return
+        prompt, said = w
+        if not isinstance(prompt, str) or text not in prompt:
+            return
+        s.waiting[item["i"]] = (prompt.replace(text, fixed, 1), said.replace(text, fixed, 1) if isinstance(said, str) else said)
+        item["text"] = fixed
+        s.changed(item)
+        s.save_pending()
 
     def ui_action(self, s, action, **args):
         """Claude showing the user something in the window (see Session.ui_tools). Returns what happened."""
