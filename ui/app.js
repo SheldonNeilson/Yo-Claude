@@ -124,7 +124,6 @@ function handle(e) {
       if (e.session_state === "background") S.bg.add(e.session); else S.bg.delete(e.session);
       renderTree();
       if (S.active && e.session === S.active.id) {
-        if (e.session_state === "thinking") S.suggest = "";   // a new turn: the suggestion is out of date
         S.active.busy = e.session_state !== "idle"; renderBusy(); transcript.refreshGroups();
         if (e.session_state === "idle") { panel.refresh(true); composer.preload(true); }
       }

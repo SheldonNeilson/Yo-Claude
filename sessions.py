@@ -281,6 +281,30 @@ async def suggest_next(title, asked, reply):
     return line
 
 
+async def suggest_followup(title, asked):
+    """While Claude works on your message: a follow-up you might queue, guessed from that message alone (quick and
+    cheap, the same kind of separate call as suggest_next). \"\" when nothing sensible comes to mind."""
+    prompt = ("The user just sent the message below to Claude (an AI assistant), which is now working on it. Guess one "
+              "short follow-up the user might want to queue up, to send once Claude has answered: a natural next step "
+              "(for example \"Then commit it\", \"Also add a test for it\", \"Show me the diff when you're done\"). "
+              "Write it as the user would type it: at most 12 words, plain text, first person. Never make up facts, "
+              "names, numbers or details the user hasn't given. If nothing sensible fits, reply NONE.\n\n"
+              f"Session: {title}\n\nThe user's message:\n{(asked or '')[:1200]}\n\n"
+              "Reply with the follow-up only, or NONE.")
+    opts = sdk.ClaudeAgentOptions(model=VOICE_NOTE_MODEL, tools=[], cwd=CHAT_DIR, setting_sources=["project"],
+                                  max_turns=1, thinking={"type": "disabled"},
+                                  system_prompt="You predict what a user will type next to their AI assistant.",
+                                  extra_args={"no-session-persistence": None})
+    text = ""
+    async for m in sdk.query(prompt=prompt, options=opts):
+        if isinstance(m, sdk.AssistantMessage):
+            text += "".join(b.text for b in m.content if isinstance(b, sdk.TextBlock))
+    line = " ".join((text.strip().splitlines() or [""])[0].split()).strip(' "“”\'`')
+    if not line or line.rstrip(".").upper() == "NONE" or len(line.split()) > 16:
+        return ""
+    return line
+
+
 ADVISOR_PROMPT = (
     " When you consult the advisor (the advisor tool), Yo Claude shows it to the user as a third member of the chat, "
     "but the advisor's reply itself never reaches their screen. So straight after each advisor reply, before "
@@ -818,16 +842,33 @@ class Session:
         last_user = max((x["i"] for x in self.items if x.get("kind") == "user"), default=-1)
         if any(x.get("kind") == "error" or (x.get("kind") == "result" and x.get("error"))
                for x in self.items[last_user + 1:]):
-            return
+            return self.unsuggest(n)
         i, reply, asked = self.last_exchange()
         if i is None or i < last_user:   # no reply to your last message
-            return
+            return self.unsuggest(n)
         try:
             text = await suggest_next(self.router.title_of(self.id), asked, reply)
         except Exception as e:
             log.warning("Couldn't suggest a next message for %s: %s", self.id, e)
+            text = ""
+        if self.turn_count == n:   # (none: the guess made while Claude worked goes too, it's out of date)
+            self.router.emit("suggest", session=self.id, text=text)
+
+    def unsuggest(self, n):
+        if self.turn_count == n:
+            self.router.emit("suggest", session=self.id, text="")
+
+    async def suggest_early(self, n, asked):
+        """While Claude works on your message: a follow-up you might queue (grey in the empty box, Tab takes it,
+        Enter queues it), from your message alone. suggest() replaces it once the reply is in."""
+        if not self.router.settings.get("suggest_next", True) or not (asked or "").strip():
             return
-        if text and self.turn_count == n:
+        try:
+            text = await suggest_followup(self.router.title_of(self.id), asked)
+        except Exception as e:
+            log.info("Couldn't suggest a follow-up for %s: %s", self.id, e)
+            return
+        if text and self.turn_count == n and self.busy:   # (the reply's in already: suggest() has it)
             self.router.emit("suggest", session=self.id, text=text)
 
     def add_spoken(self, i, line, say):
@@ -1050,6 +1091,8 @@ class Session:
             self.busy = True
             self.turn_started()
             self.router.set_work(self, "thinking")
+            if item is not None:   # something to queue after it, guessed while Claude works
+                asyncio.ensure_future(self.suggest_early(self.turn_count, item.get("text")))
             try:
                 if self.cwd and not self.baseline:   # the changes panel needs "before" captured before any edit
                     await asyncio.to_thread(self.router.take_baseline, self, "opened" if self.resumed else "start")
