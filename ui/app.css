@@ -282,6 +282,23 @@ code.pathlink:hover { color: var(--orange2); background: var(--bg3); }
 #extraDirs .xdir b { color: var(--dim); margin-left: 4px; } #extraDirs .xdir b:hover { color: var(--red); }
 #extraDirs button { padding: 0 6px; font-size: 11px; }
 
+/* Claude's plan, above the message box */
+#planBox { border-top: 2px solid var(--line2); background: var(--bg2); font-size: 12px; max-height: 32vh; display: flex; flex-direction: column; }
+.planhead { display: flex; align-items: center; gap: 8px; padding: 5px 12px; cursor: pointer; white-space: nowrap; }
+.planhead b { color: var(--orange); letter-spacing: 2px; }
+.planhead:hover b { color: var(--orange2); }
+.planbar { display: inline-flex; gap: 2px; }
+.planbar i { width: 7px; height: 9px; border: 1px solid var(--line2); }
+.planbar i.completed { background: var(--green); border-color: var(--green); }
+.planbar i.in_progress { background: var(--amber); border-color: var(--amber); }
+.plannow { color: var(--amber); overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.planlist { overflow-y: auto; padding: 0 12px 6px 30px; }
+.planstep { display: flex; gap: 8px; padding: 1px 0; color: var(--dim); }
+.planstep .pm { flex: none; color: var(--faint); }
+.planstep.completed { color: var(--faint); } .planstep.completed .pm { color: var(--green); }
+.planstep.completed span:last-child { text-decoration: line-through; text-decoration-color: var(--line2); }
+.planstep.in_progress { color: var(--amber); } .planstep.in_progress .pm { color: var(--amber); }
+
 /* text viewer: formatted / source / edit */
 .tvbar { display: flex; align-items: center; gap: 4px; margin: 6px 0; }
 .tvbar button { padding: 2px 10px; }

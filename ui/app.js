@@ -75,7 +75,10 @@ window.app = {
 function handle(e) {
   switch (e.kind) {
     case "item":
-      if (S.active && e.session === S.active.id) { S.items[e.item.i] = e.item; renderItem(e.item); }
+      if (S.active && e.session === S.active.id) {
+        S.items[e.item.i] = e.item; renderItem(e.item);
+        if (planBox.isPlanItem(e.item)) planBox.update();
+      }
       break;
     case "delta":
       if (S.active && e.session === S.active.id && S.items[e.i]) { S.items[e.i].text += e.text; scheduleRender(e.i); }
@@ -93,6 +96,7 @@ function handle(e) {
       S.active = e.session; S.items = e.items || []; S.folder = e.session.cwd;
       const s = findSession(S.active.id); if (s) s.unseen = false;
       renderTranscript(); renderHead(); renderTree();   // its folder opens by itself (it holds the active session)
+      planBox.collapsed = null; planBox.update();
       panel.refresh(true);
       break;
     }
@@ -982,7 +986,7 @@ window.addEventListener("pywebviewready", async () => {
   renderLimits(s.limits || null);
   if (s.settings.zoom) document.body.style.zoom = s.settings.zoom;
   await loadLists();
-  renderToggles(); renderTree(); renderHead(); renderTranscript(); renderState();
+  renderToggles(); renderTree(); renderHead(); renderTranscript(); renderState(); planBox.update();
   if (S.settings.panel_open) $("#app").classList.add("with-panel");
   panel.load();
   MASCOT.draw($("#logo"), "idle", 0, 1);
