@@ -96,6 +96,14 @@
   "idle_eyes_right": {
    "frames": 61,
    "stamp": "169067-1793381909"
+  },
+  "idle_small_nod": {
+   "frames": 61,
+   "stamp": "128649-1793382096"
+  },
+  "idle_turn_left": {
+   "frames": 61,
+   "stamp": "249370-1793382236"
   }
  }
 }
