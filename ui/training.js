@@ -36,8 +36,9 @@ window.training = {
       <i>“never mind”</i> to stop. It keeps talking to the session open in this window.</p>
       <p><b>Voice commands:</b> <i>“new session”</i> (in the current folder), <i>“new chat”</i> (no folder),
       <i>“switch to &lt;session name&gt;”</i>.</p>
-      <p><b>Coding:</b> pick a folder at the top left. Claude can read and edit files there; the right-hand panel shows the
-      files, everything that changed in the session, and your git branch. When Claude asks permission it says what it wants
+      <p><b>Coding:</b> add a folder on the left (<b>+ folder</b>) and start a session in it. Claude can read and edit files
+      there; the right-hand panel shows the files, everything that changed in the session, and your git branch. Sessions in
+      different folders can work at the same time. When Claude asks permission it says what it wants
       to do: answer <i>“yes, go ahead”</i> or <i>“no”</i>, or click.</p>
       <p><b>PC control is on:</b> when you ask, Claude can see your screen and use your mouse and keyboard (as you,
       with your logins). <b>Ctrl+Alt+X</b> stops it instantly; switch it off with [pc control] at the top or in the tray

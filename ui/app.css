@@ -216,7 +216,7 @@ select:focus, input:focus, textarea:focus { border-color: var(--orange); }
 .cleanrow input { width: auto; flex: none; }
 .cleanrow .t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .cleanrow .why { color: var(--amber); font-size: 11px; flex: none; }
-.cleanrow .dim { font-size: 11px; flex: none; width: 90px; text-align: right; }
+.cleanrow .dim { font-size: 11px; flex: none; width: 130px; text-align: right; }
 .btns button:disabled { opacity: .4; cursor: default; }
 
 /* training */

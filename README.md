@@ -6,6 +6,24 @@ work, every file it changed and your git branch. With PC control on, it can also
 
 Unofficial fan project, not made or supported by Anthropic. Uses your own Claude account through Claude Code.
 
+![Yo Claude coding: folders and sessions on the left, the conversation with folded tool steps, and the files changed in the session on the right](docs/screenshots/coding.png)
+
+**Coding by voice or text.** Folders and their sessions on the left (spinning while Claude works, a dot for replies you
+haven't read), Claude's steps folded into one-line summaries, and everything the session changed on the right.
+
+![Yo Claude using the PC: the steps it took in Paint, the picture it made, and a live view of the screen while it works](docs/screenshots/pc-control.png)
+
+**PC control.** "Open Paint and draw me a rocket ship": every click is grouped into one summary you can expand, with
+what Claude saw, and a live view of the screen while it works.
+
+| The compact bar | Cleaning up old conversations |
+|---|---|
+| ![The compact bar while Yo Claude speaks a reply](docs/screenshots/compact-bar.png) | ![A checklist of stale conversations to move to the trash](docs/screenshots/clean-up.png) |
+
+![The welcome tour](docs/screenshots/welcome.png)
+
+*(Screenshots use made-up content.)*
+
 ## What you need
 
 - Windows 10 or 11, a microphone and speakers.
@@ -37,8 +55,13 @@ The first time, a welcome tour explains everything and checks how well it hears 
 - **Follow-ups**: after it answers it listens for about 6 seconds, so you can carry on without the wake word.
   "Never mind" ends it.
 - **Voice commands**: "new session", "new chat", "switch to *session name*".
-- **Type** instead, in the window. `@` attaches a file, and you can paste screenshots.
-- **Coding**: pick a folder (top left). The right-hand panel shows the files, everything changed in the session (with
+- **Type** instead, in the window. `@` attaches a file, and you can paste screenshots. Click any attachment, picture,
+  video or PDF in the conversation to view it; right-click for open, open with…, show in Explorer and copy path.
+- **Folders and sessions**: `+ folder` adds a folder to the tree on the left; hover it and click `+` for a new session
+  there. Sessions in different folders can work at the same time. **Recent** at the top lists the latest from every
+  folder, and folders with recent activity open by themselves. Right-click a session to rename, pin, group, fork or
+  delete it; **clean up** suggests old and empty conversations to move to the (restorable) trash.
+- **Coding**: in a folder session, the right-hand panel shows the files, everything changed in the session (with
   diffs and per-file revert) and your git branch. When Claude asks permission, say "yes, go ahead" or "no", or click.
   The mode dropdown sets how much it asks: **auto** (Claude Code's safety check decides; the default), *ask before
   changes*, *auto-accept edits* or *plan*.

@@ -445,6 +445,13 @@ const transcript = {
     const t = $("#transcript");
     const nearBottom = t.scrollHeight - t.scrollTop - t.clientHeight < 80;
     t.querySelector(".empty")?.remove();
+    const prev = this.last;
+    this.renderInner(it);
+    if (prev && prev.items && prev !== this.last) this.renderHead(prev);   // something came after it: no longer "now"
+    if (!bulk && nearBottom) t.scrollTop = t.scrollHeight;
+  },
+  renderInner(it) {
+    const t = $("#transcript");
     if (it.kind === "tool" || it.kind === "thinking") {
       let g = this.groupOf.get(it.i);
       if (!g) {
@@ -461,7 +468,6 @@ const transcript = {
       node.querySelectorAll("pre code").forEach((c) => { try { hljs.highlightElement(c); } catch (_) {} });
       if (it.kind === "assistant" && !it.streaming) mediaUnder(node, it);
     }
-    if (!bulk && nearBottom) t.scrollTop = t.scrollHeight;
   },
 };
 
