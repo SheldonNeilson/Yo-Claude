@@ -30,7 +30,10 @@ const avatar = {
     this.fxEl = el("div", "afx");
     this.el.append(this.pre, this.fxEl);
     if (mount) mount.appendChild(this.el);
-    else this.host.querySelector(".sidefoot").after(this.el);   // at the very bottom, under clean up and trash
+    else {   // at the very bottom, under clean up and trash; drag its top edge to resize it, × hides it
+      this.host.querySelector(".sidefoot").after(this.el);
+      this.sizer();
+    }
     this.apply();
     this.stamps = {};
     this.loadedBase = this.base();
@@ -116,6 +119,31 @@ const avatar = {
       }
     } finally { this.refreshing = false; }
   },
+  // the sidebar face's top edge (drag: taller or shorter, so the sessions list gets more or less room; double-click: as
+  // it was) and its × (hide it; the face button under the sessions brings it back)
+  sizer() {
+    const grip = el("div", "agrip"), close = el("button", "aclose", "×");
+    grip.dataset.tip = "Drag to make the face smaller or bigger · double-click to reset";
+    close.dataset.tip = "Hide the face (the face button under the sessions brings it back)";
+    close.onclick = (e) => { e.stopPropagation(); api().set_setting("avatar", false); };
+    grip.onclick = (e) => e.stopPropagation();
+    grip.ondblclick = (e) => { e.stopPropagation(); api().set_setting("face_height", 0.62); };
+    grip.onpointerdown = (e) => {
+      e.preventDefault(); e.stopPropagation();
+      grip.setPointerCapture(e.pointerId);
+      const side = this.host, box = side.getBoundingClientRect();
+      grip.onpointermove = (ev) => {
+        this.dragShare = Math.max(0.12, Math.min(0.85, (box.bottom - ev.clientY) / box.height));
+        this.cols = 0; this.fit();
+      };
+      grip.onpointerup = () => {
+        grip.onpointermove = grip.onpointerup = null;
+        if (this.dragShare) api().set_setting("face_height", Math.round(this.dragShare * 100) / 100);
+        setTimeout(() => { this.dragShare = null; }, 400);   // (the setting is back by then)
+      };
+    };
+    this.el.prepend(grip, close);
+  },
   apply() {   // (off unless turned on; in the window, nothing's loaded until it is)
     const on = S.settings?.[this.mount ? "bar_avatar" : "avatar"] === true;
     if (on && this.wanted && !this.el) this.init();
@@ -178,7 +206,8 @@ const avatar = {
   fit() {
     if (!this.ready) return;
     const width = this.el.clientWidth - (this.mount ? 0 : 8), cols = this.colsWanted || COLS;
-    const maxH = this.mount ? this.host.clientHeight : this.host.clientHeight * 0.62;   // (the sessions list keeps the rest)
+    const tall = this.dragShare || S.settings?.face_height || 0.62;   // (of the sidebar's height: dragging its top edge sets it)
+    const maxH = this.mount ? this.host.clientHeight : this.host.clientHeight * tall;
     const probe = this.fit.probe || (this.fit.probe = Object.assign(document.createElement("span"), { textContent: "@".repeat(50) }));
     probe.style.fontSize = "100px";
     if (!probe.isConnected) this.pre.appendChild(probe);

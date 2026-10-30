@@ -167,7 +167,8 @@ function renderName() {
   renderBusy?.();
   if (avatar.el) avatar.el.dataset.tip = `${appName()} · click to talk`;
 }
-function renderAwake() {   // ☕ in the menu bar: lit while the PC is kept awake always
+function renderAwake() {
+  $("#faceBtn")?.classList.toggle("on", S.settings?.avatar === true);   // (the face button under the sessions)   // ☕ in the menu bar: lit while the PC is kept awake always
   const b = $("#awakeBtn"), on = S.settings?.keep_awake === true;
   b.classList.toggle("on", on);
   b.title = on ? "The PC is kept awake (it won't go to sleep while Yo Claude runs). Click to let it sleep when idle."
@@ -1786,6 +1787,7 @@ window.addEventListener("pywebviewready", async () => {
   renderToggles(); renderTree(); renderHead(); renderTranscript(); renderState(); planBox.update();
   setTimeout(() => composer.preload(), 1500);
   avatar.wanted = true; avatar.apply(); renderName(); renderAwake();
+  $("#faceBtn").onclick = () => api().set_setting("avatar", S.settings?.avatar !== true);
   $("#awakeBtn").onclick = () => api().set_setting("keep_awake", S.settings?.keep_awake !== true);   // (her face loads when it's turned on: Options > Face in Sidebar)
   if (S.settings.panel_open) $("#app").classList.add("with-panel");
   if (S.settings.side_open === false) $("#app").classList.add("no-side");

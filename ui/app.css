@@ -421,6 +421,11 @@ code.pathlink:hover { color: var(--orange2); background: var(--bg3); }
 @keyframes blink { 50% { opacity: 0; } }
 
 /* Yo Claude's face, at the bottom of the sessions list: ASCII video of a real person, white on the dark background */
+.avatar .agrip { position: absolute; top: -4px; left: 0; right: 0; height: 9px; cursor: row-resize; z-index: 3; }
+.avatar .agrip:hover { background: linear-gradient(0deg, transparent 3px, var(--orange) 3px 6px, transparent 6px); }
+.avatar .aclose { position: absolute; top: 8px; left: 8px; z-index: 3; display: none; padding: 0 6px; font-size: 13px; }
+.avatar:hover .aclose { display: block; }
+.sidefoot #faceBtn { margin-left: auto; margin-right: 6px; }
 .avatar { position: relative; border-top: 1px solid var(--line); padding: 4px 0 0; display: flex; justify-content: center;
   cursor: pointer; overflow: hidden; flex: none; }
 .avatar pre { margin: 0; font-size: 4.6px; line-height: 5.5px; letter-spacing: 0; white-space: pre; font-weight: bold;
