@@ -829,7 +829,10 @@ function buildItem(it) {
         for (const p of it.image_paths) strip.appendChild(mediaThumb(p, cwd));
         n.appendChild(strip);
       } else if (it.images) n.appendChild(el("span", "chip small", `🖼 ${it.images} image${it.images > 1 ? "s" : ""}`));
-      if (it.queued) {   // waiting for the reply before it: it can still be taken back
+      if (it.queued && it.sent_now) {   // sent now: Claude Code has it, and reads it at its next step
+        n.classList.add("queued");
+        n.appendChild(el("span", "queuedtag", "➤ sent: Claude reads it at its next step"));
+      } else if (it.queued) {   // waiting for the reply before it: it can still be taken back
         n.classList.add("queued");
         const q = el("span", "queuedtag", "⧗ queued ");
         const x = el("button", "", "✕ cancel");

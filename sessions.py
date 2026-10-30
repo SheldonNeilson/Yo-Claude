@@ -50,6 +50,7 @@ FILE_TOOLS = ["Read", "Glob", "Grep", "Edit", "Write"]
 READ_TOOLS = ["Read", "Glob", "Grep"]   # all a /btw side chat gets (plus the web tools): it can't change anything
 CHAT_MODEL = "sonnet"
 MAX_LIVE = 6              # connected sessions kept warm (several folders can be working at once)
+HOLD_QUIET_S = 30         # a reply held open for a sent-now message lets go if Claude Code says nothing this long
 ATTACH_DIR = os.path.join(os.path.expanduser("~"), ".yoclaude", "attachments")   # pasted images, kept viewable
 RESULT_PREVIEW = 4000     # characters of a tool result kept for the transcript
 QUIET_DAYS = 7            # clean-up never suggests anything touched more recently
@@ -513,6 +514,7 @@ class Session:
         self.injected = []                  # [(item, text)] sent now into the reply in progress, not yet taken up
         self.joined = {}                    # sent-now message index -> the turn future of the reply it joined
         self.holding = False                # that reply ended, but Claude still has a sent-now message to answer
+        self.heard = 0                      # messages from Claude Code so far (a held reply lets go if this stops)
         self.unsolicited = False            # Claude is replying by itself (a background task finished)
         self.turn_count = 0                 # turns started (a suggested next message is dropped if another began)
         self.tasks = {}                     # background task id -> its transcript item
@@ -1020,11 +1022,16 @@ class Session:
             self.busy = True
             self.turn_started()
             self.router.set_work(self, "thinking")
+        self.heard += 1
         result = self.handle(m)
         if isinstance(m, sdk.ResultMessage):
-            if in_turn and self.injected:   # a message sent now came too late to join: Claude answers it next
+            # a message sent now came too late to join: Claude answers it next. Held for one more reply at most (an
+            # echo that didn't match mustn't keep the turn open), and let go if Claude Code goes quiet instead.
+            if in_turn and self.injected and not self.holding:
                 self.holding = True
                 self.stream_item = None
+                heard = self.heard
+                asyncio.get_running_loop().call_later(HOLD_QUIET_S, lambda: self.heard == heard and self.let_go())
             elif in_turn:
                 self.turn_future.set_result(result)
             elif self.unsolicited:
@@ -1137,8 +1144,13 @@ class Session:
                 return None
             if item is not None and item.get("sent_now"):   # already answered in the reply it joined
                 joined = self.joined.pop(item["i"], None)
-                return joined.result() if joined and joined.done() and not joined.cancelled() \
-                    and not joined.exception() else None
+                ok = joined and joined.done() and not joined.cancelled() and not joined.exception()
+                if ok or item.get("taken") or not isinstance(prompt, str):
+                    if item.pop("queued", None):   # never seen taken up (let go of): into the flow anyway
+                        item["at"] = len(self.items)
+                        self.changed(item)
+                    return joined.result() if ok else None
+                item["sent_now"] = False   # that reply failed before Claude took it up: send it as its own turn
             if item is not None and item.pop("queued", None):
                 item["at"] = len(self.items)   # shown from here on, below what came while it waited
                 self.changed(item)
@@ -1170,6 +1182,12 @@ class Session:
                 self.voice_turn = False
                 self.after_turn()
 
+    def let_go(self):
+        """A reply held open for a sent-now message Claude hasn't taken up: stop waiting for it."""
+        if self.holding and self.turn_future and not self.turn_future.done():
+            self.injected, self.holding = [], False
+            self.turn_future.set_result("")
+
     async def send_now(self, item):
         """Give Claude a queued message now, during the reply in progress, instead of after it. Claude Code takes it
         up at its next tool call (or answers it straight after, if the reply has no tool calls left); its turn() then
@@ -1177,12 +1195,16 @@ class Session:
         if item.get("kind") != "user" or not item.get("queued") or item["i"] not in self.waiting:
             return "That message has already been sent."
         if not self.client or not self.turn_future or self.turn_future.done():
+            if self.lock and self.lock.locked():   # the reply before it is still starting (connecting)
+                return "Claude hasn't started that reply yet: try again in a moment, or it goes when it's done."
             return None   # between replies: it's about to go anyway
         prompt, text = self.waiting[item["i"]]
         if isinstance(text, str) and text.lstrip().startswith("/"):
             return "Commands can't join a reply in progress: they run when Claude is done."
         del self.waiting[item["i"]]
-        item.update(queued=False, sent_now=True, at=len(self.items))   # before the await: turn() mustn't send it too
+        # before the await: turn() mustn't send it too. It stays pinned at the bottom (marked sent) until Claude takes
+        # it up: at its next tool call, or after this reply if it has none left
+        item["sent_now"] = True
         self.injected.append((item, " ".join(str(text).split())))
         self.joined[item["i"]] = self.turn_future
         self.changed(item)
@@ -1193,8 +1215,7 @@ class Session:
             self.injected = [x for x in self.injected if x[0] is not item]
             self.joined.pop(item["i"], None)
             self.waiting[item["i"]] = (prompt, text)
-            item.update(queued=True, sent_now=False)
-            item.pop("at", None)
+            item["sent_now"] = False
             self.changed(item)
             return f"Couldn't send it now: {e}"
         return None
@@ -1307,12 +1328,13 @@ class Session:
                 sent = next((x for x in self.injected if x[1][:200] == said), None)
                 if sent:   # a message sent now: Claude has taken it up
                     self.injected.remove(sent)
+                    sent[0].update(taken=True, queued=False, at=len(self.items))   # into the flow, here
                     # its own turn (after the reply it was sent into) is a real message you can rewind to; folded
                     # into that reply it's only a note on a tool result in the session file, with no id to go back to
                     own_turn, self.holding = self.holding, False
                     if own_turn and not sent[0].get("uuid"):
                         sent[0]["uuid"] = m.uuid
-                        self.changed(sent[0])
+                    self.changed(sent[0])
                     return None
                 for item in reversed(self.items):   # your prompt, echoed back with its message id
                     if item["kind"] == "user" and not item.get("queued") and \
@@ -2226,7 +2248,7 @@ class Router:
         """Take back a message that's still waiting its turn. Returns its text and attachments for the box."""
         s = self.live.get(sid)
         item = s.items[i] if s and 0 <= i < len(s.items) else None
-        if not item or item.get("kind") != "user" or not item.get("queued"):
+        if not item or item.get("kind") != "user" or not item.get("queued") or item.get("sent_now"):
             return {"error": "That message has already been sent."}
         item.update(cancelled=True, queued=False, kind="cancelled")
         s.changed(item)
@@ -2251,12 +2273,7 @@ class Router:
             return
         for future in list(s.approvals.values()):
             self.loop.call_soon_threadsafe(lambda f=future: f.done() or f.set_result((False, False)))
-
-        def let_go():   # a reply held open for a sent-now message Claude hasn't taken up: stop waiting for it
-            if s.holding and s.turn_future and not s.turn_future.done():
-                s.injected, s.holding = [], False
-                s.turn_future.set_result("")
-        self.loop.call_soon_threadsafe(let_go)
+        self.loop.call_soon_threadsafe(s.let_go)
         if s.client and s.busy:
             self.run(s.client.interrupt())
 
