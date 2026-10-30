@@ -9,10 +9,10 @@ function copyText(text, what = "copied") {
   if (!text) return;
   api().copy_text(text).then(() => toast(what));
 }
-function toast(text) {
+function toast(text, kind = "") {
   const t = $("#toast");
-  t.textContent = text; t.classList.remove("hidden");
-  clearTimeout(toast.timer); toast.timer = setTimeout(() => t.classList.add("hidden"), 1200 + 45 * text.length);
+  t.textContent = text; t.className = kind;
+  clearTimeout(toast.timer); toast.timer = setTimeout(() => t.classList.add("hidden"), (kind === "error" ? 2500 : 1200) + 45 * text.length);
 }
 function conversationText() {
   return S.items.filter((it) => it && ["user", "assistant", "note"].includes(it.kind))

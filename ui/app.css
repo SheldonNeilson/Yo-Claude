@@ -44,6 +44,10 @@ select:focus, input:focus, textarea:focus { border-color: var(--orange); }
 #folderBox button { border: 0; border-left: 1px solid var(--line2); padding: 0 7px; }
 #toast { position: fixed; bottom: 70px; left: 50%; transform: translateX(-50%); background: var(--orange); color: var(--bg);
          padding: 3px 12px; font-weight: bold; z-index: 70; box-shadow: 3px 3px 0 #000; }
+#toast.error { background: #2a1210; color: var(--red); border: 1px solid var(--red); font-weight: normal; max-width: 80vw; }
+#toast.error::before { content: "✗ "; font-weight: bold; }
+.rp-error { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; text-align: center;
+            padding: 12px; line-height: 1.4; color: var(--red); background: rgba(11, 11, 10, .9); font-size: 12px; }
 .msg { position: relative; }
 .msg .copybtn { position: absolute; top: -2px; right: -4px; padding: 0 5px; font-size: 11px; opacity: 0; background: var(--bg2); }
 .msg:hover .copybtn { opacity: 1; }

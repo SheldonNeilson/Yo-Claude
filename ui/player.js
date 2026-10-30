@@ -22,6 +22,12 @@ function retroPlayer(m, { autoplay = false, big = false, cwd } = {}) {
     q(".rp-seek span").style.width = (v.duration ? 100 * v.currentTime / v.duration : 0) + "%";
     q(".rp-time").textContent = `${clock(v.currentTime)} / ${clock(v.duration)}`;
   };
+  v.addEventListener("error", () => {   // file deleted or moved since, or a format WebView2 can't play
+    const gone = v.error?.code === MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED || v.error?.code === MediaError.MEDIA_ERR_NETWORK;
+    box.querySelectorAll(".rp-big, .rp-pip").forEach((n) => n.remove()); box.style.minHeight = "120px";
+    box.appendChild(el("div", "rp-error", gone ? "✗ can't play this: the file may have been moved or deleted, or it's a format this window can't play.<br>right-click: show in explorer, open with…"
+                                              : "✗ this video couldn't be played"));
+  });
   ["play", "pause", "timeupdate", "loadedmetadata", "volumechange", "ended"].forEach((ev) => v.addEventListener(ev, sync));
   const toggle = () => {
     if (v.paused) { document.querySelectorAll(".rplayer video").forEach((o) => o !== v && o.pause()); v.play(); } else v.pause();

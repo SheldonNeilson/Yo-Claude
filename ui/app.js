@@ -1,7 +1,15 @@
 // Yo Claude main window. Python pushes events through app.events([...]); we call window.pywebview.api.*.
 "use strict";
 const $ = (s) => document.querySelector(s);
-const api = () => window.pywebview.api;
+// Calls that open things answer with a message when they can't (file gone, no app for it...): show it.
+const REPORTS_ERRORS = new Set(["open_path", "open_with", "pop_out", "reveal", "open_in_editor"]);
+const api = () => new Proxy(window.pywebview.api, {
+  get: (t, k) => !REPORTS_ERRORS.has(k) ? t[k] : (...a) => t[k](...a).then((r) => {
+    const err = typeof r === "string" ? r : r?.error;
+    if (err) toast(err, "error");
+    return r;
+  }),
+});
 const S = { settings: {}, folder: null, workspaces: [], groups: [], lists: {}, busy: new Set(), bg: new Set(), active: null,
             items: [], display: { state: "starting" }, filter: "", manual: {}, more: new Set() };
 

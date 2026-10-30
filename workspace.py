@@ -237,6 +237,8 @@ def revert_file(root, base, path):
 # --- shell helpers ---------------------------------------------------------------------------------------------
 def open_in_editor(root, rel):
     full = safe_path(root, rel) if rel else root
+    if not os.path.exists(full):
+        raise FileNotFoundError(f"Not found: {full}. It may have been moved, renamed or deleted.")
     code = shutil.which("code")
     if code:
         subprocess.Popen([code, full], creationflags=subprocess.CREATE_NO_WINDOW)
@@ -246,4 +248,6 @@ def open_in_editor(root, rel):
 
 def reveal(root, rel):
     full = safe_path(root, rel) if rel else root
+    if not os.path.exists(full):
+        raise FileNotFoundError(f"Not found: {full}. It may have been moved, renamed or deleted.")
     subprocess.Popen(["explorer", "/select,", full] if rel else ["explorer", full])

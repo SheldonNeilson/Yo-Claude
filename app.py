@@ -485,6 +485,27 @@ class App:
                 pass
 
 
+def missing(path, cwd=None):
+    """Why a path can't be opened: gone, or never existed where we looked."""
+    shown = path if not cwd or os.path.isabs(path or "") else os.path.join(cwd, path)
+    parent = os.path.dirname(os.path.normpath(shown or ""))
+    if parent and not os.path.isdir(parent):
+        return f"Folder not found: {parent}"
+    return f"File not found: {shown}. It may have been moved, renamed or deleted."
+
+
+def open_error(full, e):
+    win = getattr(e, "winerror", None)
+    ext = os.path.splitext(full)[1].lower()
+    if win == 1155 or win == 1156:
+        return f"No app is set up to open {ext or 'this kind of'} files. Try “open with…” and choose one."
+    if win == 5 or isinstance(e, PermissionError):
+        return f"Windows refused access to {os.path.basename(full)}."
+    if win == 2 or isinstance(e, FileNotFoundError):
+        return missing(full)
+    return f"Couldn't open {os.path.basename(full)}: {e.strerror or e}"
+
+
 class Api:
     """Called from the pages' JavaScript (window.pywebview.api.*)."""
 
@@ -575,7 +596,7 @@ class Api:
         """How to show a file: {kind, url, path, name, size} (kind: image/video/audio/pdf/file)."""
         full = self._resolve(path, cwd)
         if not full or not os.path.isfile(full):
-            return {"error": f"Not found: {path}"}
+            return {"error": missing(path, cwd)}
         return {"kind": media.kind_of(full), "url": self._app.media.url(full), "path": full,
                 "name": os.path.basename(full), "size": os.path.getsize(full)}
 
@@ -609,17 +630,13 @@ class Api:
         return openwith.handlers(full) if full and os.path.isfile(full) else []
 
     def open_with(self, path, handler_id, cwd=None):
-        full = self._resolve(path, cwd)
-        if not full:
-            return f"Not found: {path}"
-        openwith.launch(full, handler_id)
-        return None
+        return self._open(path, cwd, "with", handler_id)
 
     def pop_out(self, path, cwd=None):
         """A file in its own resizable window (video, pictures, PDFs, text)."""
         full = self._resolve(path, cwd)
         if not full or not os.path.isfile(full):
-            return f"Not found: {path}"
+            return missing(path, cwd)
         webview.create_window(os.path.basename(full), self._app.media.url(full), width=1100, height=720,
                               background_color="#000000")
         return None
@@ -628,22 +645,32 @@ class Api:
         """Text preview of any file you click on (attachments may live outside the session's folder)."""
         full = self._resolve(path, cwd)
         if not full or not os.path.isfile(full):
-            return {"error": f"Not found: {path}"}
+            return {"error": missing(path, cwd)}
         return workspace.read_file(os.path.dirname(full), os.path.basename(full))
 
     def open_path(self, path, how="open", cwd=None):
+        return self._open(path, cwd, how)
+
+    def _open(self, path, cwd, how, handler_id=None):
+        """Open, open with, show in Explorer or VS Code. Returns a plain-English message when it can't."""
         full = self._resolve(path, cwd)
         if not full:
-            return f"Not found: {path}"
-        if how == "open":
-            os.startfile(full)
-        elif how == "openwith":   # Windows' own "Open with" chooser
-            subprocess.Popen(["rundll32.exe", "shell32.dll,OpenAs_RunDLL", full])
-        elif how == "reveal":
-            subprocess.Popen(["explorer", "/select,", full])
-        elif how == "code":
-            workspace.open_in_editor(os.path.dirname(full), os.path.basename(full))
-        return None
+            return missing(path, cwd)
+        try:
+            if how == "open":
+                os.startfile(full)
+            elif how == "with":
+                openwith.launch(full, handler_id)
+            elif how == "openwith":   # Windows' own "Open with" chooser
+                subprocess.Popen(["rundll32.exe", "shell32.dll,OpenAs_RunDLL", full])
+            elif how == "reveal":
+                subprocess.Popen(["explorer", "/select,", full])
+            elif how == "code":
+                workspace.open_in_editor(os.path.dirname(full), os.path.basename(full))
+            return None
+        except OSError as e:
+            log.warning("open %s (%s) failed: %s", full, how, e)
+            return open_error(full, e)
 
     def open_url(self, url):
         if isinstance(url, str) and url.lower().startswith(("http://", "https://")):
