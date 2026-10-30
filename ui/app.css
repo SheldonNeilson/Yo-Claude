@@ -375,11 +375,11 @@ code.pathlink:hover { color: var(--orange2); background: var(--bg3); }
 .msg.assistant::after { content: "|\\"; left: 2ch; color: #7a6a5c; }   /* the two strokes meet at the top: a point */
 .msg.user::after { content: "/|"; right: 2ch; color: var(--orange); text-align: right; }
 .msg.assistant > :last-child { margin-bottom: 0; }
-/* the advisor (Claude's advisor tool): a third member of the chat, indented under Claude, in its own frame */
+/* the advisor (Claude's advisor tool): a third member of the chat, on the left like Claude, in its own frame */
 #transcript { --frame-advisor: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='33'%20height='90'%3E%3Cg%20fill='%235d8a99'%20text-anchor='middle'%20font-family='Cascadia%20Mono%2C%20Consolas%2C%20Courier%20New%2C%20monospace'%20font-size='20'%3E%3Ctext%20x='5.5'%20y='22'%3E%2B%3C/text%3E%3Ctext%20x='16.5'%20y='22'%3E=%3C/text%3E%3Ctext%20x='27.5'%20y='22'%3E%2B%3C/text%3E%3Ctext%20x='5.5'%20y='52'%3E:%3C/text%3E%3Ctext%20x='27.5'%20y='52'%3E:%3C/text%3E%3Ctext%20x='5.5'%20y='82'%3E%2B%3C/text%3E%3Ctext%20x='16.5'%20y='82'%3E=%3C/text%3E%3Ctext%20x='27.5'%20y='82'%3E%2B%3C/text%3E%3C/g%3E%3C/svg%3E"); }
 .msg.advisor { width: fit-content; min-width: 18ch; max-width: min(85%, 110ch); border-style: solid; border-width: 1.5em 1ch;
   border-image-source: var(--frame-advisor); border-image-slice: 30 11; border-image-width: 1.5em 1ch; border-image-repeat: round;
-  padding: 0 1ch; margin: calc(1.5em + 14px) 0 10px 6ch; position: relative; color: #c5d3d8; }
+  padding: 0 1ch; margin: calc(1.5em + 14px) 0 10px; position: relative; color: #c5d3d8; }
 .msg.advisor::before { content: "[ advisor ]"; position: absolute; top: -1.5em; left: 2ch; background: var(--bg); padding: 0 1ch;
   white-space: pre; color: #7fb0c0; }
 .msg.advisor.pending::before { content: "[ advisor… ]"; }
