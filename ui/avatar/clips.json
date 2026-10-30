@@ -1,11 +1,25 @@
 {
  "fps": 12,
  "clips": {
+  "hair": 61,
   "idle": 61,
+  "idle_blink": 61,
+  "idle_blinks": 61,
+  "idle_brows": 61,
+  "idle_glance": 61,
+  "idle_scrunch": 61,
+  "idle_smirk": 61,
+  "idle_tilt": 61,
+  "idle_tuck": 61,
   "laughing": 61,
   "listening": 61,
   "looking": 61,
   "talking": 61,
+  "think_nod": 61,
+  "think_purse": 61,
+  "think_read": 61,
+  "think_side": 61,
+  "think_up": 61,
   "thinking": 61
  }
 }

@@ -1,12 +1,16 @@
 // Yo Claude's face: short clips of a real person (ui/avatar/*.mp4, made by scripts/make_avatar_clips.py), turned into
-// ASCII live, frame by frame. The characters stay a fixed small size, so a wider panel gets more of them (more
-// detail); the height follows, within part of the panel. Every clip starts from the same frame, so she switches
+// ASCII live, frame by frame. Always COLS characters across, sized to fill the panel: chunky enough to read as ASCII,
+// enough of them to still look like her. Every clip starts from the same frame, so she switches
 // clips seamlessly: a clip plays forward and back, and to change clips she rewinds quickly to that shared frame.
-// She follows the voice (talking, listening, thinking). When idle, her expression shifts every couple of seconds (the
-// start of another clip, played part way and back), and 7 to 16 s after one mannerism ends she does another.
+// She follows the voice (talking, listening, thinking). Idle, she mostly rests in the calm end of her idle clip (the
+// shared start frame is a big smile), now and then shows the start of another expression, and 7 to 16 s after one
+// mannerism ends she does another.
 "use strict";
 const RAMP = " .:-=+o/*#0@";   // sparse to dense: white on the dark window, so bright = dense
 const AW = 200;                // the analysis grid frames are decoded to (columns); more than any panel needs
+const COLS = 64;               // characters across, whatever the panel's width
+const VIEW = [0, 0, 1, 1];     // the part of the clip shown: left, top, right, bottom (fractions)
+const REST = [44, 60];         // idle frames with a soft, closed-mouth smile: where she rests
 
 const avatar = {
   el: null, pre: null, fxEl: null, fps: 12, clips: {}, ready: false,
@@ -59,18 +63,18 @@ const avatar = {
     }
     return frames;
   },
-  // how many characters fit: fixed-size characters, as many as the panel's width allows, the height kept in bounds
+  // COLS characters across, the font sized so they fill the panel's width (smaller if she'd be too tall)
   fit() {
     if (!this.ready) return;
-    const side = $("#side"), width = this.el.clientWidth - 8;
+    const side = $("#side"), width = this.el.clientWidth - 8, cols = this.colsWanted || COLS;
     const probe = this.fit.probe || (this.fit.probe = Object.assign(document.createElement("span"), { textContent: "@".repeat(50) }));
+    probe.style.fontSize = "100px";
     if (!probe.isConnected) this.pre.appendChild(probe);
-    const cw = probe.getBoundingClientRect().width / 50 || 3;
+    const em = probe.getBoundingClientRect().width / 5000 || 0.6;   // a character's width, per px of font size
     probe.remove();
-    let cols = Math.max(30, Math.min(AW, Math.floor(width / cw)));
-    const maxRows = Math.floor((side.clientHeight * 0.45) / (cw * 2));
-    let rows = Math.round(cols * this.AH / AW / 2);
-    if (rows > maxRows) { rows = Math.max(20, maxRows); cols = Math.round(rows * 2 * AW / this.AH); }
+    const rows = Math.round(cols * ((VIEW[3] - VIEW[1]) * this.AH) / ((VIEW[2] - VIEW[0]) * AW) / 2);
+    const cw = Math.min(width / cols, (side.clientHeight * 0.45) / (rows * 2));
+    this.pre.style.fontSize = (cw / em) + "px";
     this.pre.style.lineHeight = (cw * 2) + "px";   // keep the cells about twice as tall as wide
     if (cols !== this.cols || rows !== this.rows) { this.cols = cols; this.rows = rows; this.lv = null; }
   },
@@ -92,15 +96,16 @@ const avatar = {
   },
   // a mood from her reaction to a reply (sessions.py MOODS): that clip plays next, once, if she has it
   react(clip) { if (this.clips[clip]) { this.moodClip = clip; this.moodUntil = Date.now() + 20000; } },
-  idleExtras() { return Object.keys(this.clips).filter((n) => n.startsWith("idle_") || ["looking", "hair", "laughing"].includes(n)); },
-  // the start of an expression, played only part way and back: a glance, a hint of a smile, a moment's thought
+  // laughing is kept for when something's funny (a mood), not for idling
+  idleExtras() { return Object.keys(this.clips).filter((n) => n.startsWith("idle_") || ["looking", "hair"].includes(n)); },
+  // the start of an expression, played only part way and back: a glance, a moment's thought. Not the big-smile ones.
   microClips() {
-    return Object.keys(this.clips).filter((n) => n !== "idle" && n !== "talking" && n !== "hair" && n !== "idle_tuck");
+    return Object.keys(this.clips).filter((n) => !["idle", "talking", "hair", "idle_tuck", "laughing", "looking"].includes(n));
   },
-  // idle, back at the start frame: a mannerism if one's due (or a mood to show), else a small change of expression
-  // (most of the time) or a short stretch of her idle sway. Something changes every couple of seconds.
+  // idle, back at the start frame: a mannerism if one's due (or a mood to show), else now and then a small change of
+  // expression, but mostly out to the calm end of her idle clip to rest there a few seconds (swaying among REST).
   nextIdle(now) {
-    this.microClip = null;
+    this.microClip = null; this.restUntil = 0;
     if (this.idleExtra && this.clip === this.idleExtra && !this.extraPending) {   // just played: the next in a while
       this.idleExtra = null; this.nextIdleExtra = now + 7000 + Math.random() * 9000;
     }
@@ -111,19 +116,23 @@ const avatar = {
     }
     if (this.idleExtra) { this.clip = this.idleExtra; this.turnAt = 0; return; }   // the whole thing
     const micro = this.microClips();
-    if (micro.length && Math.random() < 0.6) {
+    if (micro.length && Math.random() < 0.25) {
       this.clip = this.microClip = this.any(micro, this.lastMicro); this.lastMicro = this.clip;
       this.turnAt = 5 + Math.floor(Math.random() * 12);   // 0.4 to 1.4 s out, the same back
-    } else { this.clip = "idle"; this.turnAt = 10 + Math.floor(Math.random() * 26); }
+    } else {
+      this.clip = "idle"; this.turnAt = Math.min(this.clips.idle.length - 1, REST[1]);
+      this.restUntil = now + 4000 + Math.random() * 6000;
+    }
   },
   any(list, not) { const l = list.length > 1 ? list.filter((n) => n !== not) : list; return l[Math.floor(Math.random() * l.length)]; },
 
   // one frame of greyscale -> ASCII: down to the character grid, local contrast, her tones spread, the ramp
   toAscii(grey) {
-    const C = this.cols, R = this.rows, sx = AW / C, sy = this.AH / R, cell = new Float32Array(C * R);
+    const C = this.cols, R = this.rows, cell = new Float32Array(C * R);
+    const ox = VIEW[0] * AW, oy = VIEW[1] * this.AH, sx = (VIEW[2] - VIEW[0]) * AW / C, sy = (VIEW[3] - VIEW[1]) * this.AH / R;
     for (let r = 0; r < R; r++) for (let c = 0; c < C; c++) {   // average of the source pixels under the cell
-      const x0 = Math.floor(c * sx), x1 = Math.max(x0 + 1, Math.floor((c + 1) * sx));
-      const y0 = Math.floor(r * sy), y1 = Math.max(y0 + 1, Math.floor((r + 1) * sy));
+      const x0 = Math.floor(ox + c * sx), x1 = Math.max(x0 + 1, Math.floor(ox + (c + 1) * sx));
+      const y0 = Math.floor(oy + r * sy), y1 = Math.max(y0 + 1, Math.floor(oy + (r + 1) * sy));
       let s = 0;
       for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) s += grey[y * AW + x];
       cell[r * C + c] = s / ((x1 - x0) * (y1 - y0));
@@ -172,8 +181,10 @@ const avatar = {
       this.frame = this.lipFrame(now);
     } else {
       const end = Math.min(frames.length - 1, this.turnAt || Infinity);   // a short play turns back early
-      this.frame += this.dir;
+      const resting = st === "idle" && this.clip === "idle" && now < this.restUntil;
+      if (!resting || this.frame < REST[0] || Math.random() < 0.5) this.frame += this.dir;   // resting: slower sways
       if (this.frame >= end) { this.frame = end; this.dir = -1; }
+      if (resting && this.dir < 0 && this.frame <= REST[0]) { this.frame = REST[0]; this.dir = 1; }
       if (this.frame <= 0) {   // forward and back: what next?
         this.frame = 0; this.dir = 1;
         if (st === "idle") this.nextIdle(now);
