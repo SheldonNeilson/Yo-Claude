@@ -104,9 +104,9 @@ function handle(e) {
       break;
     }
     case "display": S.display = e; showDisplay(); break;
-    case "levels": inbar.event(e); break;
+    case "levels": inbar.event(e); avatar.levels(e.levels); break;
     case "live": if (S.active && e.session === S.active.id) transcript.live(e.image); break;
-    case "settings": S.settings = e.settings; renderToggles(); break;
+    case "settings": S.settings = e.settings; renderToggles(); avatar.apply(); break;
     case "folder": S.folder = e.folder; renderHead(); break;
     case "confirm_quit":
       confirmBox(`Claude is in the middle of a reply in ${e.busy.map((b) => `“${b.title}”`).join(", ")}. ` +
@@ -1286,6 +1286,7 @@ window.addEventListener("pywebviewready", async () => {
   $("#sessionHead").insertBefore(follow.button("chat"), $("#sessionHead .spacer").nextSibling);
   renderToggles(); renderTree(); renderHead(); renderTranscript(); renderState(); planBox.update();
   setTimeout(() => composer.preload(), 1500);
+  avatar.init();
   if (S.settings.panel_open) $("#app").classList.add("with-panel");
   panel.load();
   MASCOT.draw($("#logo"), "idle", 0, 1);

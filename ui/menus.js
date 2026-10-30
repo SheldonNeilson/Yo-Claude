@@ -66,6 +66,7 @@ const MENUS = {
     ["Zoom out", () => zoom(-0.1), { kbd: "Ctrl+-" }],
     ["Actual size", () => zoom(0), { kbd: "Ctrl+0" }],
     "-",
+    ["Yo Claude's face (bottom left)", () => toggleSetting("avatar"), { checked: setting("avatar") }],
     ["Floating bar when the window is closed", () => toggleSetting("show_bar"), { checked: setting("show_bar") }],
     ["Keep the floating bar visible when idle", () => toggleSetting("bar_when_idle"), { checked: setting("bar_when_idle") }],
   ],

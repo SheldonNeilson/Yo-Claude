@@ -337,6 +337,15 @@ code.pathlink:hover { color: var(--orange2); background: var(--bg3); }
 .thought.live .ttext::after { content: "▍"; color: var(--amber); animation: blink 1s steps(1) infinite; font-style: normal; }
 @keyframes blink { 50% { opacity: 0; } }
 
+/* Yo Claude's face, at the bottom of the sessions list: a 3D head drawn in coloured characters */
+.avatar { position: relative; border-top: 1px solid var(--line); padding: 4px 0 0; display: flex; justify-content: center;
+  cursor: pointer; overflow: hidden; flex: none; background: radial-gradient(ellipse at 50% 40%, #1d1a18 0%, var(--bg) 70%); }
+.avatar pre { margin: 0; font-size: 7px; line-height: 7px; letter-spacing: 0; white-space: pre;
+  font-family: Consolas, "Cascadia Mono", monospace; }   /* each cell is a half block: two square pixels */
+.avatar pre i { font-style: normal; display: inline-block; height: 7px; vertical-align: top; }
+.avatar .afx { position: absolute; top: 14px; right: 14px; font-size: 13px; color: var(--amber); white-space: pre; }
+.avatar .afx.st-listening, .avatar .afx.st-using_pc { color: var(--blue); } .avatar .afx.st-paused { color: var(--faint); }
+
 /* a row Claude pointed you at */
 #panel .node.flash { animation: rowflash .5s ease-in-out 4; }
 @keyframes rowflash { 50% { background: var(--orange); color: var(--bg); } }
