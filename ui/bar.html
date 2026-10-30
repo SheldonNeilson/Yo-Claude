@@ -6,12 +6,28 @@
 <link rel="stylesheet" href="app.css">
 <style>
   html, body { background: var(--bg); overflow: hidden; }
-  #bar { min-height: 56px; padding: 6px 12px; border: 2px solid var(--line2); box-sizing: border-box; width: 100vw; }
+  #wrap { border: 2px solid var(--line2); box-sizing: border-box; width: 100vw; }
+  #bar { min-height: 52px; padding: 6px 12px; box-sizing: border-box; }
   #bar .mb-text { -webkit-line-clamp: 6; max-height: 120px; }
+  /* under the bar (each optional, View menu): her face, and a few lines on what's happening in the open session */
+  #more { display: flex; gap: 10px; border-top: 1px solid var(--line); padding: 6px 12px 8px; }
+  #face { flex: none; width: 128px; height: 170px; }
+  #face .avatar { border: 0; padding: 0; height: 100%; align-items: flex-start; }
+  #feed { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: flex-end; gap: 3px; font-size: 12px;
+    line-height: 1.35; min-height: 18px; }
+  #feed .fl { display: flex; gap: 8px; color: var(--dim); }
+  #feed .fl:last-child { color: var(--text); }
+  #feed .who { flex: none; width: 7ch; text-align: right; }
+  #feed .what { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #feed .you .who { color: var(--orange2); } #feed .claude .who { color: var(--orange); }
+  #feed .thinks .who, #feed .thinks .what { color: #8a7f74; font-style: italic; }
+  #feed .doing .who { color: var(--amber); } #feed .advisor .who { color: #7fb0c0; }
+  #feed .empty { color: var(--faint); font-style: italic; }
 </style>
 </head>
 <body>
-<div id="bar" class="minibar pywebview-drag-region">
+<div id="wrap" class="pywebview-drag-region">
+<div id="bar" class="minibar">
   <canvas class="mb-m" width="48" height="30" title="Talk"></canvas>
   <canvas class="mb-meter" width="120" height="36"></canvas>
   <div class="mb-txt"><div class="mb-label"></div><div class="mb-text hidden"></div></div>
@@ -19,25 +35,108 @@
   <button id="open" class="btn" title="Open the full window (the bar moves into it)">[⤢]</button>
   <button id="min" class="btn" title="Hide until next time">[_]</button>
 </div>
+<div id="more" class="hidden"><div id="face" class="hidden"></div><div id="feed" class="hidden"></div></div>
+</div>
 <script src="mascot.js"></script>
 <script src="minibar.js"></script>
+<script src="avatar.js"></script>
 <script>
 "use strict";
 const $ = (s) => document.querySelector(s);
 const api = () => window.pywebview.api;
+function el(tag, cls, html) { const e = document.createElement(tag); if (cls) e.className = cls; if (html != null) e.innerHTML = html; return e; }
+const S = { settings: {}, display: {}, active: null, items: [] };   // (what avatar.js reads)
 let lastH = 0;
-const bar = new MiniBar($("#bar"), {
-  onLayout() {
-    const h = Math.ceil($("#bar").getBoundingClientRect().height);
-    if (Math.abs(h - lastH) > 2) { lastH = h; api().bar_resize(h); }
+function relayout() {
+  const h = Math.ceil($("#wrap").getBoundingClientRect().height);
+  if (window.pywebview?.api && Math.abs(h - lastH) > 2) { lastH = h; api().bar_resize(h); }   // (once it's connected)
+}
+const bar = new MiniBar($("#bar"), { onLayout: relayout });
+
+// ---------- what's happening: your messages, Claude's thinking and what it's doing, its replies in a line ----------
+const FEED_LINES = 5;
+const plain = (t) => (t || "").replace(/```[\s\S]*?(```|$)/g, " [code] ").replace(/<advisor>[\s\S]*?(<\/advisor>|$)/g, "")
+  .replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/[#*_`>|]+/g, "").replace(/\s+/g, " ").trim();
+const firstBit = (t, n = 170) => { const p = plain(t), m = p.match(/^.{20,}?[.!?](\s|$)/); return (m ? m[0] : p).slice(0, n).trim(); };
+const lastBit = (t, n = 150) => { const p = plain(t), s = p.split(/(?<=[.!?])\s+/).filter(Boolean); return (s.at(-1) || "").slice(-n); };
+function toolLine(it) {
+  const inp = it.input || {};
+  const arg = inp.description || inp.command || inp.file_path || inp.pattern || inp.url || inp.query || it.brief || "";
+  return `${(it.name || "").replace(/^mcp__[^_]+__/, "")} ${String(arg).split("\n")[0]}`.trim();
+}
+function feedLines() {
+  const said = new Map();   // Claude's message -> the short line Yo Claude said about it (its summary)
+  for (const it of S.items) if (it?.kind === "spoken" && it.for != null) said.set(it.for, it.text);
+  const out = [];
+  for (const it of S.items) {
+    if (!it) continue;
+    const prev = out.at(-1);
+    if (it.kind === "user" && !it.queued) out.push(["you", plain(it.text)]);
+    else if (it.kind === "thinking") out.push(["thinks", lastBit(it.text) || "…"]);
+    else if (it.kind === "tool") {
+      if (prev?.[0] === "doing") prev[1] = toolLine(it); else out.push(["doing", toolLine(it)]);
+    } else if (it.kind === "advisor") out.push(["advisor", it.text ? firstBit(it.text) : "reading the conversation…"]);
+    else if (it.kind === "assistant") {
+      const line = said.get(it.i) || (it.streaming ? "writing… " + lastBit(it.text, 120) : firstBit(it.text));
+      if (prev?.[0] === "claude") prev[1] = line; else out.push(["claude", line]);
+    }
+  }
+  return out.slice(-FEED_LINES);
+}
+let feedQueued = false;
+function renderFeed() {
+  if (feedQueued) return;
+  feedQueued = true;
+  requestAnimationFrame(() => {
+    feedQueued = false;
+    const f = $("#feed"), lines = feedLines();
+    f.replaceChildren(...(lines.length ? lines.map(([who, what]) => {
+      const n = el("div", "fl " + who);
+      n.append(el("span", "who", who === "doing" ? "doing" : who), Object.assign(el("span", "what"), { textContent: what, title: what }));
+      return n;
+    }) : [el("div", "empty", "nothing yet in this session")]));
+  });
+}
+
+// ---------- her face and the feed, each optional (View menu) ----------
+function applyMore() {
+  const face = S.settings.bar_avatar !== false, feed = S.settings.bar_feed !== false;
+  $("#face").classList.toggle("hidden", !face);
+  $("#feed").classList.toggle("hidden", !feed);
+  $("#more").classList.toggle("hidden", !face && !feed);
+  if (face && !avatar.el && !document.hidden) {   // decoded only once she's first shown; fewer, bigger characters
+    avatar.colsWanted = 44; avatar.init($("#face"));
+  }
+  avatar.apply();
+  if (feed) renderFeed();
+  requestAnimationFrame(relayout);
+}
+document.addEventListener("visibilitychange", applyMore);
+
+window.app = {
+  events(list) {
+    for (const e of list) {
+      bar.event(e);
+      switch (e.kind) {
+        case "display": S.display = e; break;
+        case "levels": avatar.levels(e.levels); break;
+        case "speech": avatar.speech(e); break;
+        case "mood": avatar.react(e.clip); break;
+        case "settings": S.settings = e.settings; applyMore(); break;
+        case "opened": S.active = e.session; S.items = e.items || []; renderFeed(); break;
+        case "item": if (S.active && e.session === S.active.id) { S.items[e.item.i] = e.item; renderFeed(); } break;
+        case "delta": if (S.active && e.session === S.active.id && S.items[e.i]) { S.items[e.i].text += e.text; renderFeed(); } break;
+      }
+    }
   },
-});
-window.app = { events(list) { for (const e of list) bar.event(e); } };
+};
 $("#open").onclick = () => api().open_main();
 $("#min").onclick = () => api().bar_minimise();
 window.addEventListener("pywebviewready", async () => {
   const s = await api().init();
+  S.settings = s.settings || {}; S.display = s.display || {}; S.active = s.active; S.items = s.items || [];
   bar.event({ kind: "display", ...s.display });
+  applyMore();
 });
 </script>
 </body>

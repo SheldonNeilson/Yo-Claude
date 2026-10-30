@@ -69,6 +69,8 @@ const MENUS = {
     ["Yo Claude's face (bottom left)", () => toggleSetting("avatar"), { checked: setting("avatar") }],
     ["Floating bar when the window is closed", () => toggleSetting("show_bar"), { checked: setting("show_bar") }],
     ["Keep the floating bar visible when idle", () => toggleSetting("bar_when_idle"), { checked: setting("bar_when_idle") }],
+    ["Floating bar: her face", () => toggleSetting("bar_avatar"), { checked: setting("bar_avatar") }],
+    ["Floating bar: what's happening (you, thoughts, replies)", () => toggleSetting("bar_feed"), { checked: setting("bar_feed") }],
   ],
   session: () => {
     const s = activeSession(), a = S.active;

@@ -18,15 +18,18 @@ const avatar = {
   clip: "idle", frame: 0, dir: 1, turnAt: 20, rewinding: false, idleExtra: null, nextIdleExtra: 0,
   cols: 0, rows: 0, AH: 0, lv: null, glitchRow: -1,
 
-  async init() {
-    const side = $("#side"), foot = side.querySelector(".sidefoot");
+  // `mount`: a box to fill (the floating bar's); without one she goes at the bottom of the window's sidebar
+  async init(mount) {
+    this.mount = mount || null;
+    this.host = mount || $("#side");
     this.el = el("div", "avatar");
     this.el.dataset.tip = "Yo Claude · click to talk";
     this.el.onclick = () => api().talk();
     this.pre = el("pre");
     this.fxEl = el("div", "afx");
     this.el.append(this.pre, this.fxEl);
-    foot.after(this.el);   // at the very bottom, under clean up and trash
+    if (mount) mount.appendChild(this.el);
+    else this.host.querySelector(".sidefoot").after(this.el);   // at the very bottom, under clean up and trash
     this.apply();
     let manifest;
     try { manifest = await (await fetch("avatar/clips.json", { cache: "no-store" })).json(); } catch (_) { return; }
@@ -37,11 +40,11 @@ const avatar = {
       if (name === "idle" && this.clips.idle) { this.ready = true; this.fit(); }   // start as soon as idle is in
     }
     if (!this.ready) return;
-    new ResizeObserver(() => this.fit()).observe(side);
+    new ResizeObserver(() => this.fit()).observe(this.host);
     this.nextIdleExtra = Date.now() + 8000;
     setInterval(() => this.tick(), 500 / this.fps);   // twice the clips' rate: lip sync uses every beat, the rest every other
   },
-  apply() { this.el?.classList.toggle("hidden", S.settings?.avatar === false); },
+  apply() { this.el?.classList.toggle("hidden", S.settings?.[this.mount ? "bar_avatar" : "avatar"] === false); },
   levels(list) {   // the voice's loudness, as it plays: her mouth's fallback if she has no speech envelope
     if (list?.length) { this.level = Math.min(1, (list.at(-1) || 0) / 3000); this.levelAt = Date.now(); }
   },
@@ -70,14 +73,15 @@ const avatar = {
   // COLS characters across, the font sized so they fill the panel's width (smaller if she'd be too tall)
   fit() {
     if (!this.ready) return;
-    const side = $("#side"), width = this.el.clientWidth - 8, cols = this.colsWanted || COLS;
+    const width = this.el.clientWidth - (this.mount ? 0 : 8), cols = this.colsWanted || COLS;
+    const maxH = this.mount ? this.host.clientHeight : this.host.clientHeight * 0.45;
     const probe = this.fit.probe || (this.fit.probe = Object.assign(document.createElement("span"), { textContent: "@".repeat(50) }));
     probe.style.fontSize = "100px";
     if (!probe.isConnected) this.pre.appendChild(probe);
     const em = probe.getBoundingClientRect().width / 5000 || 0.6;   // a character's width, per px of font size
     probe.remove();
     const rows = Math.round(cols * ((VIEW[3] - VIEW[1]) * this.AH) / ((VIEW[2] - VIEW[0]) * AW) / 2);
-    const cw = Math.min(width / cols, (side.clientHeight * 0.45) / (rows * 2));
+    const cw = Math.min(width / cols, maxH / (rows * 2));
     this.pre.style.fontSize = (cw / em) + "px";
     this.pre.style.lineHeight = (cw * 2) + "px";   // keep the cells about twice as tall as wide
     if (cols !== this.cols || rows !== this.rows) { this.cols = cols; this.rows = rows; this.lv = null; }

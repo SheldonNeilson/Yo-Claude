@@ -77,6 +77,10 @@ def display_state(voice, work):
     return voice or "starting"
 
 
+# what the floating bar also gets, for its face and its feed of what's happening (besides the display state and levels)
+BAR_FEED = {"item", "delta", "opened", "settings", "speech", "mood"}
+
+
 class App:
     def __init__(self, args):
         self.args = args
@@ -271,6 +275,8 @@ class App:
                 elif kind == "announce":   # a session is done: the voice says its short line when it's free
                     self.commands.put(("announce", d["text"]))
                 main_events.append({"kind": kind, **d})
+                if kind in BAR_FEED:
+                    bar_events.append(main_events[-1])
             new_display = display_state(self.voice_state, self.work_state)
             if new_display != self.display or any(e["kind"] in ("state", "work") for e in main_events):
                 self.display = new_display
@@ -944,7 +950,7 @@ class Api:
 
     def bar_resize(self, height):
         log.debug("bar_resize(%s)", height)
-        self._app.place_bar(max(56, min(220, int(height))))
+        self._app.place_bar(max(56, min(320, int(height))))
 
     def compact(self):
         """Expanded -> compact: hide the window, show the bar."""
