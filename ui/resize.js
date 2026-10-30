@@ -1,7 +1,7 @@
 // Drag the edges of the sessions list and the right-hand panel to resize them (double-click puts them back).
 "use strict";
 const PANES = {
-  side: { el: "#side", edge: "right", setting: "side_width", css: "--side-w", min: 180, max: 560, fallback: 260 },
+  side: { el: "#side", edge: "right", setting: "side_width", css: "--side-w", min: 180, max: 560, fallback: 560 },
   panel: { el: "#panel", edge: "left", setting: "panel_width", css: "--panel-w", min: 240, max: 900, fallback: 340 },
 };
 const MIN_CHAT = 520;   // the conversation keeps at least this much

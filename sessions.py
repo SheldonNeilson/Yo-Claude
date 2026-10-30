@@ -86,10 +86,12 @@ UI_PROMPT = (
     " The user is looking at Yo Claude's window. When they ask to see, show or open something (a file, a folder, a "
     "diff), use the yo-claude tools: show_file opens a file in front of them, show_folder opens the files panel at a "
     "folder, show_diff shows what changed in a file, show_panel switches the right-hand panel. Reading a file yourself "
-    "shows them nothing. Also use them when seeing it would help, but not for every file you touch. When the user "
-    "should pick several things from a list (which to do, keep, include or fix), use the yo-claude checklist tool "
-    "(mcp__yo-claude__checklist) instead of writing the list out: they tick yes or no for each item and can say why. "
-    "For one choice between a few options, use AskUserQuestion instead."
+    "shows them nothing. Also use them when seeing it would help, but not for every file you touch."
+)
+CHECKLIST_PROMPT = (   # (with the checklist tool: Options > Tick Lists)
+    " When the user should pick several things from a list (which to do, keep, include or fix), use the yo-claude "
+    "checklist tool (mcp__yo-claude__checklist) instead of writing the list out: they tick yes or no for each item and "
+    "can say why. For one choice between a few options, use AskUserQuestion instead."
 )
 PC_CONTROL_PROMPT = (
     " You can see and control the user's screen, keyboard and mouse with the screen-control tools; use them when the "
@@ -654,7 +656,11 @@ class Session:
         if PC_CONTROL_SERVER in servers:
             system += PC_CONTROL_PROMPT
         servers[UI_SERVER] = self.ui_tools()
-        system += UI_PROMPT + ADVISOR_PROMPT
+        system += UI_PROMPT   # (the Options menu: tick lists, advisor notes; from the session's next start)
+        if r.settings.get("checklist_tool", True):
+            system += CHECKLIST_PROMPT
+        if r.settings.get("advisor_relay", True):
+            system += ADVISOR_PROMPT
         opts = dict(
             cwd=self.cwd or CHAT_DIR,
             can_use_tool=self.can_use_tool,
@@ -736,7 +742,10 @@ class Session:
         async def checklist(a):
             return reply(await sess.checklist(a))
 
-        return sdk.create_sdk_mcp_server(UI_SERVER, tools=[show_folder, show_file, show_diff, show_panel, checklist])
+        tools = [show_folder, show_file, show_diff, show_panel]
+        if sess.router.settings.get("checklist_tool", True):
+            tools.append(checklist)
+        return sdk.create_sdk_mcp_server(UI_SERVER, tools=tools)
 
     async def can_use_tool(self, tool, inp, ctx):
         if tool.startswith(f"mcp__{UI_SERVER}__"):   # only shows things in the window
@@ -775,7 +784,7 @@ class Session:
         in the same order, when the session is next opened (Router.open). Their text and attached files (not pasted
         pictures)."""
         pend = []
-        for i in self.order:
+        for i in self.order if self.router.settings.get("keep_queue", True) else []:
             it = self.items[i]
             if it.get("kind") == "user" and it.get("queued") and not it.get("cancelled") and not it.get("sent_now"):
                 pend.append({"text": it.get("text", ""), "attachments": list(it.get("attachments") or [])})
@@ -910,7 +919,8 @@ class Session:
     async def suggest_early(self, n, asked):
         """While Claude works on your message: a follow-up you might queue (grey in the empty box, Tab takes it,
         Enter queues it), from your message alone. suggest() replaces it once the reply is in."""
-        if not self.router.settings.get("suggest_next", True) or not (asked or "").strip():
+        st = self.router.settings
+        if not st.get("suggest_next", True) or not st.get("suggest_early", True) or not (asked or "").strip():
             return
         try:
             text = await suggest_followup(self.router.title_of(self.id), asked)

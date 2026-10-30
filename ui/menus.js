@@ -68,11 +68,9 @@ const MENUS = {
     ["Zoom out", () => zoom(-0.1), { kbd: "Ctrl+-" }],
     ["Actual size", () => zoom(0), { kbd: "Ctrl+0" }],
     "-",
-    ["Yo Claude's face (bottom left)", () => toggleSetting("avatar"), { checked: setting("avatar") }],
     ["Floating bar when the window is closed", () => toggleSetting("show_bar"), { checked: setting("show_bar") }],
+    ["Start Maximized", () => toggleSetting("start_maximized"), { checked: setting("start_maximized") }],
     ["Keep the floating bar visible when idle", () => toggleSetting("bar_when_idle"), { checked: setting("bar_when_idle") }],
-    ["Floating bar: her face", () => toggleSetting("bar_avatar"), { checked: setting("bar_avatar") }],
-    ["Floating bar: what's happening (you, thoughts, replies)", () => toggleSetting("bar_feed"), { checked: setting("bar_feed") }],
   ],
   session: () => {
     const s = activeSession(), a = S.active;
@@ -97,8 +95,6 @@ const MENUS = {
     ["Listen for “Yo Claude”", () => toggleSetting("listening"), { checked: setting("listening") }],
     ["Read replies aloud", () => toggleSetting("voice_replies"), { checked: setting("voice_replies") }],
     ["Say when a session is done", () => toggleSetting("notify_done", true), { checked: setting("notify_done", true) }],
-    ["Suggest my next message", () => toggleSetting("suggest_next"), { checked: setting("suggest_next") }],
-    ["Fix my spelling and grammar (typed and spoken)", () => toggleSetting("fix_text"), { checked: setting("fix_text") }],
     ["More accurate speech recognition (slower)", () => toggleSetting("accurate_speech", false), { checked: setting("accurate_speech", false) }],
     ["PC control (screen, keyboard, mouse)", () => toggleSetting("pc_control", false), { checked: setting("pc_control", false) }],
     "-",
@@ -110,6 +106,28 @@ const MENUS = {
     "-",
     ["Open log", () => api().open_log()],
     ["Open Yo Claude's data folder", () => api().open_data_folder()],
+  ],
+  // the extras, each on or off (named the old way). Claude's own (tick lists, advisor notes) apply from a session's
+  // next start; the rest at once.
+  options: () => [
+    ["sub:writing"],
+    ["AutoCorrect (Haiku)", () => toggleSetting("fix_text"), { checked: setting("fix_text") }],
+    ["Word Prediction", () => toggleSetting("suggest_next"), { checked: setting("suggest_next") }],
+    ["Predict While Claude Works", () => toggleSetting("suggest_early"), { checked: setting("suggest_early") }],
+    ["Reply & Comment on Selection", () => toggleSetting("reply_menu"), { checked: setting("reply_menu") }],
+    "-",
+    ["sub:claude"],
+    ["Tick Lists", () => toggleSetting("checklist_tool"), { checked: setting("checklist_tool") }],
+    ["Show Advisor Notes", () => toggleSetting("advisor_relay"), { checked: setting("advisor_relay") }],
+    ["Remember Queued Messages", () => toggleSetting("keep_queue"), { checked: setting("keep_queue") }],
+    "-",
+    ["sub:face & fun"],
+    ["Face in Sidebar", () => toggleSetting("avatar"), { checked: setting("avatar") }],
+    ["Face on Floating Bar", () => toggleSetting("bar_avatar"), { checked: setting("bar_avatar") }],
+    ["Activity on Floating Bar", () => toggleSetting("bar_feed"), { checked: setting("bar_feed") }],
+    ["Animated Tray Icon", () => toggleSetting("tray_animate"), { checked: setting("tray_animate") }],
+    ["Arcade While You Wait", () => toggleSetting("invaders"), { checked: setting("invaders") }],
+    ["Play Bug Invaders Now", () => window.invaders?.show()],
   ],
   help: () => [
     ["Welcome tour", () => training.open(), { kbd: "F1" }],
@@ -184,7 +202,7 @@ $("#transcript").addEventListener("contextmenu", (e) => {
   const raw = msg && rawText.get(msg);
   const items = [];
   const quote = sel.trim(), node = getSelection().anchorNode;   // (taken now: clicking the menu clears the selection)
-  if (quote && node && $("#transcript").contains(node)) {
+  if (quote && node && $("#transcript").contains(node) && setting("reply_menu")) {
     items.push(["Reply to this", () => composer.addComment(quote, "")]);
     items.push(["Comment on this…", () => commentBox(quote, { x: e.clientX, y: e.clientY }, "", (t) => composer.addComment(quote, t))]);
     items.push("-");

@@ -5,13 +5,14 @@
 <title>Yo Claude</title>
 <link rel="stylesheet" href="vendor/hl-dark.min.css">
 <link rel="stylesheet" href="app.css">
+<link rel="stylesheet" href="invaders.css">
 </head>
 <body>
 <div id="app">
   <nav id="menubar">
     <button data-menu="file">File</button><button data-menu="edit">Edit</button><button data-menu="view">View</button>
     <button data-menu="session">Session</button><button data-menu="voice">Voice</button><button data-menu="tools">Tools</button>
-    <button data-menu="help">Help</button>
+    <button data-menu="options">Options</button><button data-menu="help">Help</button>
     <span class="spacer"></span>
     <span id="paneBtns" title="Which panes show beside the chat">
       <button id="sideBtn" class="panebtn" title="Sessions list (Ctrl+Shift+B)"><b>◧</b> sessions</button><button id="focusBtn" class="panebtn" title="Just the chat: hide both panes, or bring them back"><b>▣</b> focus</button><button id="panelBtn" class="panebtn" title="Files, changes and git (Ctrl+B)"><b>◨</b> files</button>
@@ -112,5 +113,6 @@
 <script src="menus.js"></script>
 <script src="meters.js"></script>
 <script src="resize.js"></script>
+<script src="invaders.js"></script>
 </body>
 </html>

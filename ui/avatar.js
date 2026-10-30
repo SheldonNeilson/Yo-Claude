@@ -104,7 +104,7 @@ const avatar = {
   fit() {
     if (!this.ready) return;
     const width = this.el.clientWidth - (this.mount ? 0 : 8), cols = this.colsWanted || COLS;
-    const maxH = this.mount ? this.host.clientHeight : this.host.clientHeight * 0.45;
+    const maxH = this.mount ? this.host.clientHeight : this.host.clientHeight * 0.62;   // (the sessions list keeps the rest)
     const probe = this.fit.probe || (this.fit.probe = Object.assign(document.createElement("span"), { textContent: "@".repeat(50) }));
     probe.style.fontSize = "100px";
     if (!probe.isConnected) this.pre.appendChild(probe);

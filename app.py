@@ -95,6 +95,9 @@ class App:
         self.ready = {}            # window -> loaded
         self.tick = 0
         self.taskbar = None
+        if not self.settings.get("face_max_v1"):   # once: the sidebar at its widest, so her face shows at its biggest
+            self.settings.update(side_width=560, face_max_v1=True)
+            self.settings.save()
         folder = self.settings.get("folder")
         self.router.set_folder(folder if folder and os.path.isdir(folder) else None)
         self.api = Api(self)
@@ -104,7 +107,7 @@ class App:
         x, y = int(left + (right - left - width) / 2), int(top + (bottom - top - height) / 2)
         self.main = webview.create_window(
             "Yo Claude", os.path.join(UI, "index.html"), js_api=self.api, width=width, height=height, x=x, y=y,
-            min_size=(760, 480),
+            min_size=(760, 480), maximized=self.settings.get("start_maximized", True),   # (View > Start Maximized)
             background_color="#111110", hidden=not self.settings.get("show_window", True))
         self.bar = webview.create_window(
             "Yo Claude bar", os.path.join(UI, "bar.html"), js_api=self.api, width=560, height=56, min_size=(300, 40),
@@ -462,7 +465,8 @@ class App:
 
     def update_tray(self):
         if self.tray:
-            self.tray.icon = icons.tray_frame(self.display, self.tick)
+            moving = self.settings.get("tray_animate", True)   # (Options > Animated Tray Icon)
+            self.tray.icon = icons.tray_frame(self.display, self.tick if moving else 1)
             self.tray.title = f"Yo Claude – {self.display.replace('_', ' ')}"
 
     def animate(self):

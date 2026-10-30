@@ -1,0 +1,26 @@
+/* Bug Invaders (invaders.js): an arcade cabinet over the chat transcript while Claude works on a reply.
+   The frame is the same kind of character-tile border image as the chat bubbles: dim until you click in, then orange. */
+#invaders {
+  --inv-frame: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='33' height='90'%3E%3Cg fill='%236a5a4e' text-anchor='middle' font-family='Cascadia Mono%2C Consolas%2C Courier New%2C monospace' font-size='20'%3E%3Ctext x='5.5' y='22'%3E%2B%3C/text%3E%3Ctext x='16.5' y='22'%3E=%3C/text%3E%3Ctext x='27.5' y='22'%3E%2B%3C/text%3E%3Ctext x='5.5' y='52'%3E%7C%3C/text%3E%3Ctext x='27.5' y='52'%3E%7C%3C/text%3E%3Ctext x='5.5' y='82'%3E%2B%3C/text%3E%3Ctext x='16.5' y='82'%3E=%3C/text%3E%3Ctext x='27.5' y='82'%3E%2B%3C/text%3E%3C/g%3E%3C/svg%3E");
+  --inv-frame-on: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='33' height='90'%3E%3Cg fill='%23d97757' text-anchor='middle' font-family='Cascadia Mono%2C Consolas%2C Courier New%2C monospace' font-size='20'%3E%3Ctext x='5.5' y='22'%3E%2B%3C/text%3E%3Ctext x='16.5' y='22'%3E=%3C/text%3E%3Ctext x='27.5' y='22'%3E%2B%3C/text%3E%3Ctext x='5.5' y='52'%3E%7C%3C/text%3E%3Ctext x='27.5' y='52'%3E%7C%3C/text%3E%3Ctext x='5.5' y='82'%3E%2B%3C/text%3E%3Ctext x='16.5' y='82'%3E=%3C/text%3E%3Ctext x='27.5' y='82'%3E%2B%3C/text%3E%3C/g%3E%3C/svg%3E");
+  position: absolute; z-index: 4; display: none; outline: none; background: var(--bg, #111110);
+  border-style: solid; border-width: 1.5em 1ch; border-image-source: var(--inv-frame); border-image-slice: 30 11;
+  border-image-width: 1.5em 1ch; border-image-repeat: round; line-height: 1.5em; user-select: none;
+  box-shadow: inset 0 0 60px rgba(217, 119, 87, .06);
+}
+#invaders:focus { border-image-source: var(--inv-frame-on); box-shadow: inset 0 0 60px rgba(217, 119, 87, .12); }
+#invaders canvas { display: block; width: 100%; height: 100%; cursor: pointer; }
+#invaders:focus canvas { cursor: none; }
+/* CRT: scanlines and a dark edge, over the picture only */
+#invaders::after { content: ""; position: absolute; inset: 0; pointer-events: none;
+  background: repeating-linear-gradient(to bottom, rgba(0, 0, 0, 0) 0 2px, rgba(0, 0, 0, .2) 2px 3px),
+              radial-gradient(ellipse at center, rgba(0, 0, 0, 0) 62%, rgba(0, 0, 0, .42) 100%); }
+#invaders .inv-tag { position: absolute; background: var(--bg, #111110); padding: 0 1ch; white-space: pre; line-height: 1.5em; }
+#invaders .inv-title { top: -1.5em; left: 2ch; color: #8a7f74; }
+#invaders:focus .inv-title { color: var(--orange, #d97757); }
+#invaders .inv-ctl { top: -1.5em; right: 2ch; display: flex; gap: 1ch; }
+#invaders .inv-ctl button { border: 0; padding: 0; background: none; line-height: 1.5em; color: var(--dim, #8f8a80); }
+#invaders .inv-ctl button:hover { color: var(--orange, #d97757); }
+#invaders .inv-status { bottom: -1.5em; left: 2ch; color: var(--amber, #e8b04b); }
+#invaders .inv-keys { bottom: -1.5em; right: 2ch; color: var(--faint, #5c5a56); }
+#invaders.narrow .inv-keys { display: none; }
