@@ -65,6 +65,18 @@ def runs_of(values, cut):
     return runs
 
 
+def first_frame(video):
+    raw = subprocess.run(["ffmpeg", "-loglevel", "error", "-i", str(video), "-vf", r"select=eq(n\,0),scale=64:110,format=gray",
+                          "-frames:v", "1", "-f", "rawvideo", "-"], capture_output=True).stdout
+    return raw
+
+
+def same_person(a, b):
+    """Every clip of a character starts from the same frame: two first frames that differ a lot are two people."""
+    x, y = first_frame(a), first_frame(b)
+    return len(x) == len(y) and sum(abs(p - q) for p, q in zip(x, y)) / max(1, len(x)) < 25
+
+
 def main(folder: Path, only=()):
     OUT.mkdir(exist_ok=True)
     manifest = OUT / "clips.json"
@@ -81,6 +93,10 @@ def main(folder: Path, only=()):
         out = OUT / f"{name}.mp4"
         subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(src), "-vf", vf, "-an", "-c:v", "libx264",
                         "-crf", "24", "-preset", "slow", "-movflags", "+faststart", str(out)], check=True)
+        if name != "idle" and (OUT / "idle.mp4").exists() and not same_person(out, OUT / "idle.mp4"):
+            out.unlink()   # (another character's video, picked up by mistake: every clip starts from this one's start frame)
+            print(f"{out.name}: SKIPPED, its first frame isn't this character")
+            continue
         frames = int(subprocess.run(["ffprobe", "-v", "error", "-count_frames", "-select_streams", "v:0",
                                      "-show_entries", "stream=nb_read_frames", "-of", "csv=p=0", str(out)],
                                     capture_output=True, text=True, check=True).stdout.strip())
