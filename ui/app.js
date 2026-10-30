@@ -10,7 +10,7 @@ const api = () => new Proxy(window.pywebview.api, {
     return r;
   }),
 });
-const S = { settings: {}, folder: null, workspaces: [], groups: [], lists: {}, busy: new Set(), bg: new Set(), active: null,
+const S = { settings: {}, folder: null, workspaces: [], groups: [], lists: {}, busy: new Set(), bg: new Set(), work: {}, active: null,
             items: [], display: { state: "starting" }, filter: "", manual: {}, more: new Set() };
 
 const MODELS = [["", "model: default"], ["claude-fable-5-1", "Fable 5.1"], ["claude-opus-5-5", "Opus 5.5"],
@@ -99,10 +99,11 @@ function handle(e) {
       tasks.sessionChanged();
       planBox.collapsed = null; planBox.update();
       composer.preload();
+      showDisplay();   // the bar follows the conversation you switched to
       panel.refresh(true);
       break;
     }
-    case "display": S.display = e; renderState(); inbar.event(e); break;
+    case "display": S.display = e; showDisplay(); break;
     case "levels": inbar.event(e); break;
     case "live": if (S.active && e.session === S.active.id) transcript.live(e.image); break;
     case "settings": S.settings = e.settings; renderToggles(); break;
@@ -113,6 +114,8 @@ function handle(e) {
                  () => api().quit(true));
       break;
     case "work":
+      S.work[e.session] = e.session_state;
+      setTimeout(showDisplay, 0);
       if (e.session_state === "idle") S.busy.delete(e.session); else S.busy.add(e.session);
       if (e.session_state === "background") S.bg.add(e.session); else S.bg.delete(e.session);
       renderTree();
@@ -150,16 +153,34 @@ function renderToggles() {
   $("#tVoice").classList.toggle("on", S.settings.voice_replies !== false);
   $("#tPc").classList.toggle("on", !!S.settings.pc_control);
 }
+// The window shows the conversation you have open: what Yo Claude is doing overall (any session) stays on the tray
+// and the floating bar. Your voice (listening, speaking) and a question waiting in any session still show here.
+const WORK_TO_STATE = { thinking: "thinking", using_pc: "using_pc", awaiting_approval: "approval", background: "background" };
+function localDisplay() {
+  const d = S.display || {}, voice = d.voice;
+  const others = Object.entries(S.work).filter(([id, w]) => id !== S.active?.id && ["thinking", "using_pc", "awaiting_approval"].includes(w)).length;
+  if (["listening", "speaking"].includes(voice) || d.state === "approval" || d.state === "starting" || d.state === "error") return { ...d, others };
+  const mine = S.active ? (S.work[S.active.id] || (S.active.busy ? "thinking" : "idle")) : "idle";
+  const state = WORK_TO_STATE[mine] || (voice === "thinking" ? "thinking" : voice === "paused" ? "paused" : "idle");
+  return { ...d, state, others };
+}
+function showDisplay() {
+  S.local = localDisplay();
+  renderState();
+  inbar.event({ ...S.local, kind: "display" });
+}
 function renderState() {
-  const st = S.display.state || "idle";
+  const st = (S.local || S.display).state || "idle";
   let label = STATE_LABEL[st] || st;
   if (st === "thinking") label = SPIN[Math.floor(performance.now() / 120) % SPIN.length] + " thinking…";
+  const others = S.local?.others || 0;
+  if (others) label += ` · ${others} other${others > 1 ? "s" : ""} working`;
   $("#stateLabel").textContent = label;
   $("#stateLabel").style.color = MASCOT.colors[st] || "";
 }
 function animate() {   // spinners: header state, busy sessions in the tree, running activity groups
   const t = performance.now();
-  if (S.display.state === "thinking") renderState();
+  if ((S.local || S.display).state === "thinking") renderState();
   const glyph = SPIN[Math.floor(t / 120) % SPIN.length];
   document.querySelectorAll(".spin").forEach((n) => { n.textContent = glyph; });
   if (Math.floor(t / 1000) !== animate.sec) {   // background-task timers, once a second
@@ -1241,7 +1262,7 @@ window.addEventListener("pywebviewready", async () => {
   if (S.settings.panel_open) $("#app").classList.add("with-panel");
   panel.load();
   MASCOT.draw($("#logo"), "idle", 0, 1);
-  inbar.event({ kind: "display", ...S.display });
+  showDisplay();
   requestAnimationFrame(animate);
   $("#input").focus();
   api().ui_loaded(`tree: ${S.workspaces.length} folders, ${allSessions().length} sessions; transcript: ${S.items.length} items`);
