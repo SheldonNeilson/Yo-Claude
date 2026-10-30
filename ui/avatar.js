@@ -177,6 +177,10 @@ avatar.lipFrame = function (now) {
   const loud = now - (this.levelAt || 0) < 300 ? this.level : 0;
   this.mouthGoal = (this.mouthGoal || 0) * 0.35 + Math.min(1, loud * 1.7) * 0.65;
   const m = this.mouth, target = this.mouthGoal;
+  if (target < 0.08) {   // a pause between words: never frozen, drift slowly among the closed-mouth frames
+    const closed = this.closedFrames || (this.closedFrames = [...m.keys()].sort((a, b) => m[a] - m[b]).slice(0, 8).sort((a, b) => a - b));
+    return closed[Math.floor(now / 650) % closed.length];
+  }
   let best = this.frame, bestScore = Infinity;
   for (let i = 0; i < m.length; i++) {
     const score = Math.abs(m[i] - target) * 4 + Math.abs(i - this.frame) / m.length;
