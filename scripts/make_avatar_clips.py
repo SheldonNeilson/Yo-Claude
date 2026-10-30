@@ -8,9 +8,14 @@ Here they're cropped to face, hair and shoulders, shrunk and re-encoded small.
     python scripts/make_avatar_clips.py D:/Temp/yoclaude-faces/clips            (all of them: the manifest is replaced)
     python scripts/make_avatar_clips.py D:/Temp/yoclaude-faces/clips idle_yawn  (just these: added to the manifest)
 
+    python scripts/make_avatar_clips.py --measure                              (just measure the blinks again)
+
 The window rereads clips.json every minute or so and picks up new or changed clips without a restart. Each entry
-is {"frames": n, "stamp": size-mtime}, so a re-made clip is noticed too.
+is {"frames": n, "stamp": size-mtime, "blinks": [[first, last], ...]}: a re-made clip is noticed by its stamp, and
+the face skips over the blinks (the generated clips blink far more than people do). Blinks are measured with
+mediapipe's face landmarker (scripts/face_measure.py) in its own environment: FACEMESH, if it's there.
 """
+import os
 import json
 import subprocess
 import sys
@@ -22,6 +27,33 @@ CROP = (0.14, 0.03, 0.86, 0.66)   # out of the 480x832 clip: left, top, right, b
 WIDTH = 320                       # pixels across: plenty for ~160 characters
 FPS = 12
 OUT = Path(__file__).resolve().parent.parent / "ui" / "avatar"
+FACEMESH = os.environ.get("YOCLAUDE_FACEMESH", r"D:/Temp/yoclaude-scratch/facemesh/.venv/Scripts/python.exe")
+BLINK = 0.4                       # eyeBlink above this: her eyes are (nearly) shut
+
+
+def blinks(names):
+    """{name: [[first, last], ...]} frames with her eyes shut, for these prepared clips (empty without FACEMESH)."""
+    if not names or not os.path.exists(FACEMESH):
+        return {}
+    r = subprocess.run([FACEMESH, "-I", str(Path(__file__).with_name("face_measure.py")),
+                        *[str(OUT / f"{n}.mp4") for n in names]], capture_output=True, text=True)
+    try:
+        data = json.loads(r.stdout.strip().splitlines()[-1])
+    except (ValueError, IndexError):
+        print("couldn't measure blinks:", r.stderr[-300:])
+        return {}
+    out = {}
+    for name, m in data.items():
+        runs, a = [], -1
+        shut = [(b or 0) > BLINK for b in m["blink"]] + [False]
+        for i, s in enumerate(shut):
+            if s and a < 0:
+                a = i
+            elif not s and a >= 0:
+                runs.append([a, i - 1])
+                a = -1
+        out[name] = runs
+    return out
 
 
 def main(folder: Path, only=()):
@@ -46,6 +78,12 @@ def main(folder: Path, only=()):
         st = out.stat()
         made[name] = {"frames": frames, "stamp": f"{st.st_size}-{int(st.st_mtime)}"}
         print(f"{out.name}: {frames} frames, {st.st_size // 1024} KB")
+    write(manifest, made, [n for n in made if not only or n in only])
+
+
+def write(manifest, made, measure):
+    for name, runs in blinks(measure).items():
+        made[name]["blinks"] = runs
     tmp = manifest.with_suffix(".tmp")   # written whole, then swapped in: the window never reads half of it
     tmp.write_text(json.dumps({"fps": FPS, "clips": made}, indent=1), encoding="utf-8")
     tmp.replace(manifest)
@@ -54,5 +92,9 @@ def main(folder: Path, only=()):
         old.unlink()   # the baked-text version this replaces
 
 
-if __name__ == "__main__":
+if __name__ == "__main__" and sys.argv[1:2] == ["--measure"]:
+    m = OUT / "clips.json"
+    clips = json.loads(m.read_text(encoding="utf-8"))["clips"]
+    write(m, clips, list(clips))
+elif __name__ == "__main__":
     main(Path(sys.argv[1] if len(sys.argv) > 1 else r"D:\Temp\yoclaude-faces\clips"), set(sys.argv[2:]))
