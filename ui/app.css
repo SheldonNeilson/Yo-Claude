@@ -710,6 +710,9 @@ b.lo { color: var(--green); } b.mid { color: var(--amber); } b.hi { color: var(-
 .phead.pnav .pwhere { flex: 1; min-width: 60px; font-size: 12px; padding: 2px 6px; }
 .fcols { display: flex; padding: 2px 8px; border-bottom: 1px solid var(--line); font-size: 11px; }
 .fcols .fcol { border: 0; background: none; padding: 0 4px; color: var(--faint); } .fcols .fcol.on { color: var(--orange); }
-.fcols .fcol.name { flex: 1; text-align: left; } .fcols .fcol.mtime { width: 11ch; text-align: right; }
+.fcols .fcol.name { flex: 1; text-align: left; } .fcols .fcol.mtime { flex: none; min-width: 11ch; text-align: right; }
 .ftree .node { display: flex; align-items: baseline; } .ftree .node .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .ftree .node .mt { flex: none; width: 11ch; text-align: right; color: var(--faint); font-size: 11px; padding-right: 6px; white-space: nowrap; }
+
+/* buttons never wrap their label onto a second line (a narrow space clips or squeezes them instead) */
+button { white-space: nowrap; }
