@@ -3,7 +3,7 @@
 const $ = (s) => document.querySelector(s);
 const api = () => window.pywebview.api;
 const S = { settings: {}, folder: null, workspaces: [], groups: [], lists: {}, busy: new Set(), active: null,
-            items: [], display: { state: "starting" }, filter: "", open: new Set([""]), more: new Set() };
+            items: [], display: { state: "starting" }, filter: "", manual: {}, more: new Set() };
 
 const MODELS = [["", "model: default"], ["claude-fable-5-1", "Fable 5.1"], ["claude-opus-5-5", "Opus 5.5"],
                 ["claude-sonnet-5-5", "Sonnet 5.5"], ["claude-haiku-5-5", "Haiku 5.5"]];
@@ -16,7 +16,8 @@ const STATE_LABEL = { starting: "booting…", idle: "● ready", paused: "○ wa
 const SPIN = "·✢✳✶✻✽✻✶✳✢";
 const SESSIONS_SHOWN = 12;   // per folder, before "show more"
 const RECENT_SHOWN = 8;      // in the Recent section at the top of the tree
-const RECENT_CLOSED = "__recent_closed__";   // in S.open (saved) when Recent is collapsed; open by default
+const RECENT_KEY = "__recent__";
+const ACTIVE_WINDOW_MS = 24 * 3600 * 1000;   // folders with activity this recent open by themselves
 
 // ---------- safety: Claude's text is rendered as markdown, never as raw HTML ----------
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -83,8 +84,7 @@ function handle(e) {
     case "opened": {
       S.active = e.session; S.items = e.items || []; S.folder = e.session.cwd;
       const s = findSession(S.active.id); if (s) s.unseen = false;
-      S.open.add(keyOf(S.active.cwd));
-      renderTranscript(); renderHead(); renderTree();
+      renderTranscript(); renderHead(); renderTree();   // its folder opens by itself (it holds the active session)
       panel.refresh(true);
       break;
     }
@@ -165,21 +165,40 @@ async function loadLists() {
   keys.forEach((cwd, i) => { S.lists[keyOf(cwd)] = lists[i] || []; });
   for (const s of allSessions()) if (s.busy) S.busy.add(s.id);
 }
-function saveOpen() { api().set_setting("tree_open", [...S.open]); }
+// A folder is open when it has recent activity (busy, unseen reply, changed in the last day, or holds the session
+// you're in), closed otherwise. Opening or closing one yourself wins until something new happens in it.
+function lastActivity(sessions) {
+  let t = 0;
+  for (const s of sessions) {
+    if (S.busy.has(s.id) || s.unseen || (S.active && s.id === S.active.id)) return Date.now();
+    t = Math.max(t, s.modified || 0);
+  }
+  return t;
+}
+function isOpen(key, sessions, autoDefault) {
+  const m = S.manual[key];
+  const latest = sessions ? lastActivity(sessions) : 0;
+  if (m && m.at >= latest) return m.open;
+  return autoDefault !== undefined ? autoDefault : latest > Date.now() - ACTIVE_WINDOW_MS;
+}
+function setOpen(key, open) {
+  S.manual[key] = { open, at: Date.now() };
+  api().set_setting("tree_manual", S.manual);
+}
 function renderTree() {
   const tree = $("#tree");
   const scroll = tree.scrollTop;
   tree.innerHTML = "";
   const f = S.filter.toLowerCase();
   if (!f) {   // the latest sessions from every folder, so nothing recent hides in a collapsed folder
-    const open = !S.open.has(RECENT_CLOSED);
+    const open = isOpen(RECENT_KEY, null, true);
     const recent = allSessions().slice().sort((a, b) => (b.modified || 0) - (a.modified || 0)).slice(0, RECENT_SHOWN);
     const head = el("div", "fnode recent");
     head.innerHTML = `<span class="tw">${open ? "▾" : "▸"}</span><span class="fname">◷ RECENT</span>` +
       `${recent.some((s) => S.busy.has(s.id)) ? '<span class="spin busy">✻</span>' : ""}` +
       `${recent.some((s) => s.unseen) ? '<span class="dot"></span>' : ""}`;
     head.title = "The latest sessions from every folder";
-    head.onclick = () => { open ? S.open.add(RECENT_CLOSED) : S.open.delete(RECENT_CLOSED); saveOpen(); renderTree(); };
+    head.onclick = () => { setOpen(RECENT_KEY, !open); renderTree(); };
     tree.appendChild(head);
     if (open) for (const s of recent) tree.appendChild(sessionRow(s, true));
   }
@@ -188,7 +207,7 @@ function renderTree() {
   for (const n of nodes) {
     const all = (S.lists[n.key] || []).filter((s) => !f || (s.title || "").toLowerCase().includes(f) || (s.first || "").toLowerCase().includes(f));
     const busy = all.some((s) => S.busy.has(s.id)), unseen = all.some((s) => s.unseen);
-    const open = S.open.has(n.key) || (f && all.length);
+    const open = (f && all.length) || isOpen(n.key, S.lists[n.key] || []);
     const head = el("div", "fnode" + (sameFolder(S.active?.cwd ?? null, n.cwd) && S.active ? " here" : ""));
     head.innerHTML = `<span class="tw">${open ? "▾" : "▸"}</span><span class="fname">${n.cwd ? "▤ " : "◇ "}${esc(n.label)}</span>` +
       `${busy ? '<span class="spin busy">✻</span>' : ""}${unseen ? '<span class="dot" title="New reply"></span>' : ""}` +
@@ -196,8 +215,7 @@ function renderTree() {
     head.title = n.title;
     head.onclick = (e) => {
       if (e.target.closest(".fadd")) return api().new_session(n.cwd);
-      S.open.has(n.key) ? S.open.delete(n.key) : S.open.add(n.key);
-      saveOpen(); renderTree();
+      setOpen(n.key, !open); renderTree();
     };
     head.oncontextmenu = (e) => { e.preventDefault(); folderMenu(e, n); };
     tree.appendChild(head);
@@ -258,6 +276,53 @@ function sessionMenu(e, s) {
 $("#search").oninput = (e) => { S.filter = e.target.value; renderTree(); };
 $("#addFolderBtn").onclick = () => api().add_folder();
 $("#newChatBtn").onclick = () => api().new_session(null);
+$("#cleanBtn").onclick = async () => {   // suggested stale sessions, all ticked, moved to the (restorable) trash
+  const d = dialog("Clean up stale conversations");
+  d.classList.add("wide");
+  const note = el("div", "dim", "Looking for empty, short and long-untouched sessions…");
+  d.appendChild(note);
+  const rows = await api().stale_sessions();
+  if (!rows.length) { note.textContent = "Nothing to clean up: everything has been used recently."; addButtons(d, [["close", closeModal, "primary"]]); return; }
+  note.innerHTML = `${rows.length} suggestion${rows.length > 1 ? "s" : ""}. They go to the <b>trash</b>, where you can restore them. ` +
+    "Pinned, open and busy sessions and anything used in the last week are never suggested.";
+  const list = el("div", "cleanlist");
+  const boxes = [];
+  const byFolder = new Map();
+  for (const r of rows) { const k = r.cwd || ""; if (!byFolder.has(k)) byFolder.set(k, []); byFolder.get(k).push(r); }
+  for (const [k, items] of byFolder) {
+    list.appendChild(el("div", "cleanfolder", esc(k ? "▤ " + k : "◇ chats")));
+    for (const r of items) {
+      const row = el("label", "cleanrow");
+      const cb = el("input"); cb.type = "checkbox"; cb.checked = true;
+      row.append(cb, el("span", "t", esc(r.title)), el("span", "why", esc(r.reason)),
+                 el("span", "dim", esc(ago(r.modified)) + (r.source !== "yoclaude" ? " · cli" : "")));
+      boxes.push([cb, r]); list.appendChild(row);
+    }
+  }
+  d.appendChild(list);
+  const go = () => {
+    const picked = boxes.filter(([cb]) => cb.checked).map(([, r]) => ({ id: r.id, cwd: r.cwd }));
+    goBtn.textContent = `move ${picked.length} to trash`; goBtn.disabled = !picked.length;
+    return picked;
+  };
+  list.onchange = go;
+  addButtons(d, [
+    ["select all", () => { boxes.forEach(([cb]) => cb.checked = true); go(); }],
+    ["select none", () => { boxes.forEach(([cb]) => cb.checked = false); go(); }],
+    ["cancel", closeModal],
+    ["move to trash", async () => {
+      const picked = go();
+      if (!picked.length) return;
+      goBtn.disabled = true; goBtn.textContent = "moving…";
+      const failed = await api().clean_up(picked);
+      closeModal();
+      if (failed?.length) alertBox(`Moved ${picked.length - failed.length}. ${failed.length} couldn't be moved: ` +
+                                   failed.map((f) => f.error).filter((v, i, a) => a.indexOf(v) === i).join(" "));
+    }, "danger"],
+  ]);
+  const goBtn = d.querySelector(".btns button:last-child");
+  go();
+};
 $("#trashBtn").onclick = async () => {
   const rows = await api().trash();
   const d = dialog("Trash");
@@ -763,7 +828,7 @@ window.addEventListener("pywebviewready", async () => {
   const s = await api().init();
   Object.assign(S, { settings: s.settings, folder: s.folder, workspaces: s.workspaces || [], groups: s.groups,
                      active: s.active, items: s.items || [], display: s.display });
-  S.open = new Set(s.settings.tree_open || ["", ...S.workspaces.slice(0, 2).map(keyOf)]);
+  S.manual = s.settings.tree_manual || {};
   await loadLists();
   renderToggles(); renderTree(); renderHead(); renderTranscript(); renderState();
   if (S.settings.panel_open) $("#app").classList.add("with-panel");

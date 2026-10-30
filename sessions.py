@@ -42,6 +42,10 @@ CHAT_MODEL = "sonnet"
 MAX_LIVE = 6              # connected sessions kept warm (several folders can be working at once)
 ATTACH_DIR = os.path.join(os.path.expanduser("~"), ".yoclaude", "attachments")   # pasted images, kept viewable
 RESULT_PREVIEW = 4000     # characters of a tool result kept for the transcript
+QUIET_DAYS = 7            # clean-up never suggests anything touched more recently
+STALE_DAYS = 30           # ...and suggests anything untouched for this long
+EMPTY_BYTES = 3_000       # session files this small have no real conversation in them
+SMALL_BYTES = 20_000      # "short" conversations: suggested once they're QUIET_DAYS old
 
 VOICE_NOTE = (
     " Messages that start with [voice] were spoken and transcribed by speech recognition, so they may contain "
@@ -756,7 +760,52 @@ class Router:
         folder = os.path.join(PROJECTS_DIR, sdk.project_key_for_directory(cwd or CHAT_DIR))
         return folder, os.path.join(folder, f"{sid}.jsonl")
 
-    def delete(self, sid, cwd):
+    def stale(self):
+        """Sessions worth cleaning up, oldest first: empty ones, short ones a week old, and anything untouched for
+        STALE_DAYS. Never pinned, open, busy, or touched in the last QUIET_DAYS."""
+        now = time.time() * 1000
+        out = []
+        for cwd in [None] + self.workspaces():
+            try:
+                infos = sdk.list_sessions(directory=cwd or CHAT_DIR)
+            except Exception as e:
+                log.warning("list_sessions failed for %s: %s", cwd, e)
+                continue
+            for s in infos:
+                m = self.meta.data["sessions"].get(s.session_id, {})
+                if m.get("pinned") or s.session_id in self.live or s.session_id in self.work:
+                    continue
+                days = (now - (s.last_modified or now)) / 86_400_000
+                if days < QUIET_DAYS:
+                    continue
+                size = s.file_size or 0
+                if size < EMPTY_BYTES or not (s.first_prompt or s.custom_title or s.summary):
+                    reason = "empty"
+                elif size < SMALL_BYTES:
+                    reason = f"short, untouched for {int(days)} days"
+                elif days >= STALE_DAYS:
+                    reason = f"untouched for {int(days)} days"
+                else:
+                    continue
+                out.append({"id": s.session_id, "cwd": cwd, "reason": reason, "modified": s.last_modified,
+                            "size": size, "source": m.get("source", "claude code"),
+                            "title": m.get("title") or s.custom_title or s.summary or s.first_prompt or "(empty)"})
+        out.sort(key=lambda x: x["modified"] or 0)
+        return out[:200]
+
+    def delete_many(self, items):
+        """Move several sessions to the trash; returns the ones that couldn't be moved, with why."""
+        failed, folders = [], set()
+        for it in items:
+            err = self.delete(it["id"], it.get("cwd"), notify=False)
+            if err:
+                failed.append({"id": it["id"], "error": err})
+            folders.add(it.get("cwd"))
+        for cwd in folders:
+            self.sessions_changed(cwd)
+        return failed
+
+    def delete(self, sid, cwd, notify=True):
         """Move a session to Yo Claude's trash (restorable). Refused while it's busy or was written in the last minute,
         which probably means it's open in another Claude Code window."""
         s = self.live.get(sid)
@@ -777,8 +826,9 @@ class Router:
         shutil.move(path, os.path.join(dest, f"{sid}.jsonl"))
         if os.path.isdir(os.path.join(folder, sid)):   # its subagent transcripts
             shutil.move(os.path.join(folder, sid), os.path.join(dest, sid))
-        self.meta.update(sid, deleted={"at": time.time(), "from": folder})
-        self.sessions_changed(cwd)
+        self.meta.update(sid, deleted={"at": time.time(), "from": folder}, cwd=cwd)
+        if notify:
+            self.sessions_changed(cwd)
         return None
 
     def trash(self):

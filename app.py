@@ -592,6 +592,12 @@ class Api:
     def delete(self, sid, cwd):
         return self._app.router.delete(sid, cwd)
 
+    def stale_sessions(self):
+        return self._app.router.stale()
+
+    def clean_up(self, items):
+        return self._app.router.delete_many(items or [])
+
     def trash(self):
         return self._app.router.trash()
 
