@@ -5,6 +5,13 @@ window.tasks = {
   list: [], open: null, output: null, seen: null, timer: null, scope: "session",
 
   running() { return this.list.filter((t) => t.status === "running"); },
+  // Another conversation was opened: don't leave a different session's subagent on screen; show this one's tasks.
+  sessionChanged() {
+    const t = this.open && this.list.find((x) => x.key === this.open);
+    if (this.open && (!t || !this.here(t))) { this.open = null; this.output = null; }
+    this.scope = "session";
+    if (panel.shown() && panel.tab === "tasks") this.render(); else panel.renderTabs();
+  },
   here(t) { return t.session === S.active?.id; },
   runningHere() { return this.running().filter((t) => this.here(t)); },
   runningElsewhere() { return this.running().filter((t) => !this.here(t)); },
@@ -22,7 +29,7 @@ window.tasks = {
   },
   show(key) {
     if (!panel.shown()) { $("#app").classList.add("with-panel"); api().set_setting("panel_open", true); }
-    if (key !== undefined) { this.open = key; this.output = null; this.runOpen = new Map(); }
+    if (key !== undefined) { this.open = key; this.output = null; this.runOpen = new Map(); follow.set("task", true); }
     panel.tab = "tasks";
     panel.render();
     if (this.open) this.loadOutput();
@@ -34,17 +41,16 @@ window.tasks = {
     this.output = out;
     const pre = $("#taskOut");
     if (!pre) return this.render();
-    if (out.items) {   // a subagent: redraw its log when it has new steps, staying at the bottom if you were there
+    if (out.items) {   // a subagent: redraw its log when it has new steps; follow it only while the toggle is on
       if (+pre.dataset.n === out.items.length) return;
-      const pb = $("#pbody"), atEnd = pb.scrollHeight - pb.scrollTop - pb.clientHeight < 40;
+      const pb = $("#pbody"), keep = pb.scrollTop;
       const t = this.list.find((x) => x.key === key);
       pre.replaceWith(this.agentLog(out.items, t?.status === "running"));
-      if (atEnd) pb.scrollTop = pb.scrollHeight;
+      if (follow.on.task) follow.stick("task", pb); else pb.scrollTop = keep;
       return;
     }
-    const atEnd = pre.scrollHeight - pre.scrollTop - pre.clientHeight < 30;
     pre.textContent = out.error || out.text || out.note || "(no output yet)";
-    if (atEnd) pre.scrollTop = pre.scrollHeight;
+    follow.stick("task", pre);
   },
 
   render() {
@@ -106,14 +112,16 @@ Click to see its output`;
     body.scrollTop = keep;
   },
   renderOne(body, t) {
+    // the header and its buttons stay pinned to the top of the panel however far down the log you've scrolled
+    const top = el("div", "tasktop");
     const head = el("div", "phead taskhead");
     const back = el("button", "", "← tasks");
     back.onclick = () => { this.open = null; this.output = null; this.render(); };
     head.append(back, el("span", "tdesc", `${statusMark(t)} ${esc(t.description)}`));
-    body.appendChild(head);
+    top.appendChild(head);
+    body.appendChild(top);
     const info = el("div", "pinfo", `${esc(statusWord(t))} · ${esc(elapsed(t))} · ${t.kind === "agent" ? "subagent" : "background command"}` +
       `<br>in <span class="tsess">${esc(t.title)}</span>` + (t.summary ? `<br>${esc(t.summary)}` : ""));
-    body.appendChild(info);
     const bar = el("div", "phead");
     if (t.session !== S.active?.id) {
       const go = el("button", "primary", "open its conversation");
@@ -128,15 +136,21 @@ Click to see its output`;
     const copy = el("button", "", "copy");
     copy.onclick = () => copyText(this.output?.text ?? $("#taskOut")?.textContent ?? "", "output copied");
     bar.appendChild(copy);
+    bar.appendChild(follow.button("task"));
+    top.appendChild(bar);
+    body.appendChild(info);
     if (this.output?.path) {
       const file = el("button", "", "open file");
       file.onclick = () => api().open_path(this.output.path, "open");
       bar.appendChild(file);
     }
-    body.appendChild(bar);
     if (this.output?.items) {
+      // render() runs on every task-list refresh while it works: only jump to the end while following,
+      // otherwise put the view back where you'd scrolled to
+      const keep = follow.pos.pbody ?? 0;
       body.appendChild(this.agentLog(this.output.items, t.status === "running"));
-      body.scrollTop = body.scrollHeight;
+      follow.bind("task", body);
+      if (follow.on.task) follow.stick("task", body); else body.scrollTop = keep;
       return;
     }
     const pre = el("pre", "viewer taskout");
@@ -144,7 +158,8 @@ Click to see its output`;
     pre.textContent = this.output ? (this.output.error || this.output.text || this.output.note || "(no output yet)") : "loading…";
     body.appendChild(pre);
     if (this.output?.cut) pre.before(el("div", "dim small tcut", "showing the end of the output"));
-    pre.scrollTop = pre.scrollHeight;
+    follow.bind("task", pre);
+    if (follow.on.task) follow.stick("task", pre); else pre.scrollTop = follow.pos.taskOut ?? 0;
   },
   // A subagent's work laid out like the conversation: its brief, what it said, its tool calls folded into
   // "N steps" (click to see each one; the latest run stays open while it works) and its report back.

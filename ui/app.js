@@ -96,6 +96,7 @@ function handle(e) {
       S.active = e.session; S.items = e.items || []; S.folder = e.session.cwd;
       const s = findSession(S.active.id); if (s) s.unseen = false;
       renderTranscript(); renderHead(); renderTree();   // its folder opens by itself (it holds the active session)
+      tasks.sessionChanged();
       planBox.collapsed = null; planBox.update();
       composer.preload();
       panel.refresh(true);
@@ -495,12 +496,11 @@ const transcript = {
   },
   render(it, bulk) {
     const t = $("#transcript");
-    const nearBottom = t.scrollHeight - t.scrollTop - t.clientHeight < 80;
     t.querySelector(".empty")?.remove();
     const prev = this.last;
     this.renderInner(it);
     if (prev && prev.items && prev !== this.last) this.renderHead(prev);   // something came after it: no longer "now"
-    if (!bulk && nearBottom) t.scrollTop = t.scrollHeight;
+    if (!bulk) follow.stick("chat", t);   // stays put once you've scrolled up (the follow toggle is off)
   },
   renderInner(it) {
     const t = $("#transcript");
@@ -551,6 +551,8 @@ function renderTranscript() {
       : "chat — no folder\n\nsay “yo claude” or type below\npick or add a folder (left) for coding")));
   }
   S.items.forEach((it) => it && transcript.render(it, true));
+  follow.bind("chat", t);
+  follow.set("chat", true);             // a freshly opened conversation starts at the newest message
   t.scrollTop = t.scrollHeight;
 }
 let renderTimer = null;
@@ -571,6 +573,12 @@ function buildItem(it) {
         for (const p of it.image_paths) strip.appendChild(mediaThumb(p, cwd));
         n.appendChild(strip);
       } else if (it.images) n.appendChild(el("span", "chip small", `🖼 ${it.images} image${it.images > 1 ? "s" : ""}`));
+      if (it.uuid) {
+        const rw = el("button", "rewindbtn", "⟲ rewind");
+        rw.dataset.tip = "Go back to before this message: undo the conversation from here, the files, or both";
+        rw.onclick = (e) => { e.stopPropagation(); showRewind(it); };
+        n.appendChild(rw);
+      }
       return n;
     }
     case "assistant": return el("div", "msg assistant" + (it.streaming ? " cursor" : ""), md(it.text));
@@ -802,6 +810,52 @@ async function viewFile(path, cwd, opts = {}) {
   addButtons(d, buttons);
 }
 
+// ---------- rewind: back to before one of your messages (conversation, files or both), optionally copying it first ----------
+function showRewind(it) {
+  const a = S.active, code = !!a?.cwd;
+  const d = dialog("Rewind");
+  const short = (it.text || "").length > 240 ? it.text.slice(0, 240) + "…" : it.text || "(no text)";
+  d.appendChild(el("div", "", `<p>Go back to just before this message. It and everything after it are taken out.</p>` +
+    `<div class="rwq">&gt; ${esc(short)}</div>`));
+  const opts = [
+    ["both", "Conversation and files", "Undo the conversation from here, and put back the files Claude changed since.", code],
+    ["conversation", "Conversation only", "Keep the files as they are now.", true],
+    ["files", "Files only", "Keep the conversation; put back the files Claude changed since this message.", code],
+  ];
+  let mode = code ? "both" : "conversation";
+  const box = el("div", "rwopts");
+  for (const [v, label, help, ok] of opts) {
+    const r = el("label", "rwopt" + (ok ? "" : " disabled"),
+      `<input type="radio" name="rwmode" value="${v}" ${v === mode ? "checked" : ""} ${ok ? "" : "disabled"}>` +
+      `<span><b>${label}</b><br><span class="dim">${ok ? help : "Chats have no files to rewind."}</span></span>`);
+    r.querySelector("input").onchange = () => { mode = v; note(); };
+    box.appendChild(r);
+  }
+  d.appendChild(box);
+  const exp = el("label", "rwopt rwexport", `<input type="checkbox"><span><b>First copy this conversation to a new session</b><br>` +
+    `<span class="dim">The copy keeps everything, including the part you rewind, so that work can carry on there without being redone. ` +
+    `It shows up in the session list as “(rewound part)”.</span></span>`);
+  d.appendChild(exp);
+  const warn = el("div", "rwnote dim small");
+  const note = () => {
+    warn.innerHTML = (mode !== "conversation" ? "Files: only changes Claude made with its edit tools are put back. Changes made by commands it ran, or by you, stay. " : "") +
+      (exp.querySelector("input").checked && mode !== "conversation" ? '<span class="mid">The copy shares the same files, so rewinding them undoes its changes too.</span> ' : "") +
+      (a?.busy ? '<br><span class="del">Claude is working in this session: wait until it finishes (or stop it) to rewind.</span>' : "");
+  };
+  exp.querySelector("input").onchange = note;
+  note();
+  d.appendChild(warn);
+  addButtons(d, [["cancel", closeModal], ["rewind", async (e) => {
+    const btn = e.currentTarget; btn.disabled = true; btn.textContent = "rewinding…";
+    const r = await api().rewind(it.uuid, mode, exp.querySelector("input").checked);
+    if (r?.error) { btn.disabled = false; btn.textContent = "rewind"; toast(r.error, "error"); return; }
+    closeModal();
+    if (r?.text) { const b = $("#input"); b.value = r.text; autosize(); b.focus(); }   // your message, back in the box
+    toast(["Rewound", r?.export ? "a copy is in the session list as “(rewound part)”" : "", r?.text ? "your message is back in the box" : ""].filter(Boolean).join(" · "));
+    loadLists().then(renderTree);
+  }, "danger"]]);
+}
+
 // ---------- composer: text, attached files (chips or @mentions), pasted images ----------
 window.composer = {
   files: [], images: [], fileList: null, fileListFor: undefined, pick: -1, matches: [],
@@ -957,6 +1011,7 @@ async function send() {
   }
   sending = true;
   box.value = ""; autosize();
+  follow.set("chat", true); follow.stickAll("chat");   // you sent something: follow the reply
   composer.files = []; composer.images = []; composer.renderChips();
   try {
     const files = [...new Set([...chips, ...(await composer.mentions(text))])];
@@ -1063,6 +1118,7 @@ window.addEventListener("pywebviewready", async () => {
   renderLimits(s.limits || null);
   if (s.settings.zoom) document.body.style.zoom = s.settings.zoom;
   await loadLists();
+  $("#sessionHead").insertBefore(follow.button("chat"), $("#sessionHead .spacer").nextSibling);
   renderToggles(); renderTree(); renderHead(); renderTranscript(); renderState(); planBox.update();
   setTimeout(() => composer.preload(), 1500);
   if (S.settings.panel_open) $("#app").classList.add("with-panel");

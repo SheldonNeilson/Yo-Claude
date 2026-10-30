@@ -4,6 +4,23 @@
 class MiniBar {
   static ACTIVE = ["listening", "thinking", "speaking", "using_pc", "approval"];
   static SPIN = "·✢✳✶✻✽✻✶✳✢";
+  static HISTORY = 600;   // level readings kept: enough to fill a full-width meter with one column per reading
+
+  // smooth 1-D value noise in [0, 1] (for the "thinking" pattern: uneven, drifting, never a plain wave)
+  static noise(x) {
+    const i = Math.floor(x), f = x - i, h = (n) => { const s = Math.sin(n * 127.1 + 311.7) * 43758.5453; return s - Math.floor(s); };
+    const u = f * f * (3 - 2 * f);
+    return h(i) * (1 - u) + h(i + 1) * u;
+  }
+  thinkingLevel(i, cols, t) {
+    const n = MiniBar.noise;
+    const ripple = 0.65 * n(i * 0.42 - t * 1.6) + 0.35 * n(i * 1.3 + t * 2.7);   // slow drift + faster chatter
+    const swell = 0.35 + 0.65 * n(i * 0.09 + t * 0.45 + 40);                     // busier and quieter stretches
+    const sweep = (t * 22) % (cols + 30) - 15;                     // a bright pulse runs across every few seconds
+    const pulse = Math.exp(-((i - sweep) ** 2) / 8);
+    const sparkle = n(i * 3.7 + Math.floor(t * 12) * 1.3) > 0.9 ? 0.4 : 0;     // the odd column flickers up
+    return Math.min(1, 0.04 + 1.05 * (ripple * swell) ** 1.3 + 0.7 * pulse + sparkle);
+  }
 
   // root holds .mb-m (mascot canvas), .mb-meter (canvas), .mb-label, .mb-text and optionally .mb-stop
   constructor(root, { onLayout } = {}) {
@@ -11,7 +28,7 @@ class MiniBar {
     this.q = (s) => root.querySelector(s);
     this.onLayout = onLayout;
     this.state = "starting"; this.text = ""; this.holdUntil = 0;
-    this.levels = new Array(24).fill(0);
+    this.levels = new Array(MiniBar.HISTORY).fill(0);   // newest last; a wider meter just shows more of it
     this.colors = Object.assign({}, MASCOT.colors, { idle: "#b06a52" });
     this.q(".mb-m").onclick = () => api().talk();
     const stop = this.q(".mb-stop");
@@ -64,10 +81,10 @@ class MiniBar {
     if (c.clientWidth && Math.abs(c.width - c.clientWidth) > 4) c.width = c.clientWidth;   // stretches in the window
     g.clearRect(0, 0, c.width, c.height);
     const mid = Math.floor(c.height / 2) - 2;
-    const cols = Math.max(1, Math.floor((c.width + 1) / 5)), len = this.levels.length || 1;
-    for (let i = 0; i < cols; i++) {   // the level history spread over however many columns fit
-      let lv = this.levels[Math.min(len - 1, Math.floor(i * len / cols))] || 0;
-      if (this.state === "thinking") lv = 0.35 + 0.3 * Math.sin(t * 6 - i * 0.5);
+    const cols = Math.max(1, Math.floor((c.width + 1) / 5)), len = this.levels.length;
+    for (let i = 0; i < cols; i++) {   // one column per reading, newest at the right: wider = more history, not stretched
+      let lv = this.levels[len - cols + i] || 0;
+      if (this.state === "thinking") lv = this.thinkingLevel(i, cols, t);
       if (this.state === "paused") lv = 0;
       const n = Math.min(4, Math.round(lv * 4));
       g.globalAlpha = (0.3 + 0.7 * (i + 1) / cols) * (act ? 1 : 0.55);

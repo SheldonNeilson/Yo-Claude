@@ -198,3 +198,10 @@ document.addEventListener("keydown", (e) => {
   }
   if (e.key === "F1") { e.preventDefault(); training.open(); }
 });
+
+// ---------- text fields: the browser's own menu (spelling suggestions, cut/copy/paste) ----------
+// app.py turns WebView2's built-in menu on; cancel it everywhere except where you type, so other right-clicks keep
+// showing nothing or Yo Claude's own menus (those call preventDefault themselves).
+document.addEventListener("contextmenu", (e) => {
+  if (!e.target.closest("textarea, input:not([type=checkbox]):not([type=radio]):not([type=button]), [contenteditable=true]")) e.preventDefault();
+});

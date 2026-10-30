@@ -165,10 +165,26 @@ class App:
                 self.bus.put(("live", {"session": sid, "image": url}))
 
     def on_main_loaded(self):
+        self.enable_text_menus()
         if not self.settings.get("onboarded"):   # first run: the welcome + training walkthrough
             self.settings["onboarded"] = True
             self.settings.save()
             self.bus.put(("open_training", {}))
+
+    def enable_text_menus(self):
+        """pywebview turns WebView2's own right-click menu off outside debug mode, which also hides the spelling
+        suggestions under a red squiggle. Turn it back on; the page (menus.js) cancels it everywhere except text
+        fields, where it gives spelling suggestions plus cut/copy/paste."""
+        try:
+            from System import Func, Type   # pythonnet, loaded by pywebview's WinForms backend
+            form = self.main.native
+
+            def apply():
+                form.browser.webview.CoreWebView2.Settings.AreDefaultContextMenusEnabled = True
+
+            form.Invoke(Func[Type](apply))   # WebView2 settings may only be touched on the UI thread
+        except Exception as e:
+            log.warning("couldn't enable the text-field menu (spelling suggestions): %s", e)
 
     # --- updates (installs are git clones of the repo) ---
     def git(self, *args):
@@ -522,6 +538,11 @@ class Api:
                 "workspaces": r.workspaces(), "groups": r.meta.data["groups"], "sessions": r.list(r.folder),
                 "active": r.describe(active) if active else None, "items": active.items if active else [],
                 "display": {"state": a.display, "voice": a.voice_state, "work": a.work_state, "text": a.voice_text}}
+
+    def rewind(self, uuid, mode="both", export=False):
+        """Rewind the open session to before one of your messages (see Router.rewind)."""
+        r = self._app.router
+        return r.rewind(r.active.id, uuid, mode, bool(export)) if r.active else {"error": "Open a session first."}
 
     def set_loadout(self, kind, name, on):
         """Turn an MCP server ("mcp"), skill ("skill") or plugin ("plugin") on or off for Yo Claude's sessions."""

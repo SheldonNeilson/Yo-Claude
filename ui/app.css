@@ -311,6 +311,18 @@ code.pathlink:hover { color: var(--orange2); background: var(--bg3); }
 .msg .copybtn { top: -1.5em; right: 1ch; }
 .msg.user .copybtn { right: auto; left: 1ch; }
 
+/* rewind */
+.msg.user .rewindbtn { position: absolute; top: -1.5em; left: 9ch; padding: 0 5px; font-size: 11px; opacity: 0; background: var(--bg2); }
+.msg.user:hover .rewindbtn { opacity: 1; }
+.rwq { color: var(--orange2); white-space: pre-wrap; border-left: 2px solid var(--line2); padding: 2px 10px; margin: 0 0 10px; max-height: 8em; overflow: auto; }
+.rwopts { display: flex; flex-direction: column; gap: 6px; margin: 6px 0 10px; }
+.rwopt { display: flex; gap: 10px; align-items: flex-start; padding: 6px 10px; border: 1px solid var(--line); cursor: pointer; }
+.rwopt:hover { border-color: var(--orange); } .rwopt.disabled { opacity: .45; cursor: default; }
+.rwopt input { flex: none; width: auto; margin: 3px 0 0; padding: 0; accent-color: var(--orange); }
+.rwopt > span { flex: 1; min-width: 0; }
+.rwexport { margin-bottom: 8px; }
+.rwnote { min-height: 1.5em; }
+
 /* what's loaded (in the context window view): MCP servers, skills, memory files with their cost and a switch */
 .loadout { margin-top: 14px; border-top: 1px solid var(--line); padding-top: 10px; }
 .loadout h4 { margin: 0 0 6px; color: var(--dim); font-size: 11px; letter-spacing: 1px; text-transform: uppercase; }
@@ -488,3 +500,9 @@ b.lo { color: var(--green); } b.mid { color: var(--amber); } b.hi { color: var(-
 .ftree:focus .node.sel { box-shadow: inset 2px 0 0 var(--orange); }
 .ftree .node.cut { opacity: .45; }
 .ftree .node.drop, .ftree.drop { outline: 1px dashed var(--orange); outline-offset: -1px; }
+
+/* follow toggle (chat header, task output bar): orange while following new output */
+.followbtn { white-space: nowrap; color: var(--dim); }
+.followbtn.on { color: var(--orange); border-color: var(--orange); }
+/* the open task's header + buttons stay at the top of the panel while its log scrolls underneath */
+.tasktop { position: sticky; top: 0; z-index: 2; background: var(--bg, #111110); }

@@ -277,11 +277,15 @@ class Session:
         except Exception as e:
             log.warning("Couldn't read session %s: %s", self.id, e)
             return
+        mark = self.router.meta.session(self.id).get("rewind")
         for m in messages:
+            if mark and m.uuid == mark["drop"]:   # rewound here (until the next message makes the new branch)
+                break
             msg = m.message if isinstance(m.message, dict) else {}
             role, content = msg.get("role"), msg.get("content")
             if m.parent_tool_use_id:   # subagent internals
                 continue
+            first_user = role == "user" and not any(i.get("uuid") == m.uuid for i in self.items[-3:])
             blocks = [{"type": "text", "text": content}] if isinstance(content, str) else (content or [])
             for b in blocks:
                 if not isinstance(b, dict):
@@ -296,8 +300,10 @@ class Session:
                         attachments += re.findall(r"^Attached file \(read it as needed\): (.+)$", text, flags=re.M)
                         text = re.sub(r'\s*<attached_file path="[^"]+">.*?</attached_file>', "", text, flags=re.S)
                         text = re.sub(r"\s*^Attached file \(read it as needed\): .+$", "", text, flags=re.M).strip()
-                    self.add({"kind": role if role in ("user", "assistant") else "assistant",
-                              "text": text[8:] if voice else text, "voice": voice, "attachments": attachments})
+                    item = self.add({"kind": role if role in ("user", "assistant") else "assistant",
+                                     "text": text[8:] if voice else text, "voice": voice, "attachments": attachments})
+                    if role == "user" and first_user:
+                        item["uuid"], first_user = m.uuid, False
                 elif t == "image" and role == "user":   # a pasted image: back as a viewable picture
                     pics = result_images([b])
                     if pics:
@@ -336,9 +342,13 @@ class Session:
             mcp_servers=servers,
             system_prompt={"type": "preset", "preset": "claude_code", "append": system},
             stderr=lambda line: log.debug("claude: %s", line.rstrip()),
+            extra_args={"replay-user-messages": None},   # prompts come back with their message id (for rewind)
         )
         if self.resumed:
             opts["resume"] = self.id
+            mark = r.meta.session(self.id).get("rewind")
+            if mark:   # rewound: carry on from before the dropped message (a new branch of the same session)
+                opts.update(resume_session_at=mark["at"], resume_drops_turn=mark["drop"])
         else:
             opts["session_id"] = self.id
         if self.cwd:
@@ -398,6 +408,11 @@ class Session:
             self.reader = asyncio.ensure_future(self.read_loop(self.client))
             self.router.evict(keep=self)
             asyncio.ensure_future(self.learn_commands())
+
+    async def rewind_files_to(self, uuid):
+        """Put the folder's files back the way they were when that message was sent (Claude Code's checkpoints)."""
+        await self.connect()
+        await self.client.rewind_files(uuid)
 
     async def learn_commands(self):
         """The slash commands Claude Code offers here (built-in, skills, the folder's and your custom commands), for
@@ -467,6 +482,8 @@ class Session:
 
     def after_turn(self):
         self.stream_item = None
+        if self.router.meta.session(self.id).get("rewind"):
+            self.router.meta.update(self.id, rewind=None)
         if self.client:
             asyncio.ensure_future(self.measure_context())
         if getattr(self, "reconnect_after", False) and not self.running_tasks():   # extra folders changed mid-reply
@@ -640,6 +657,15 @@ class Session:
                         self.router.set_work(self, "using_pc")
             return None
         if isinstance(m, sdk.UserMessage):
+            if getattr(m, "uuid", None) and not m.parent_tool_use_id and not (
+                    isinstance(m.content, list) and any(isinstance(b, sdk.ToolResultBlock) for b in m.content)):
+                for item in reversed(self.items):   # your prompt, echoed back with its message id
+                    if item["kind"] == "user":
+                        if not item.get("uuid"):
+                            item["uuid"] = m.uuid
+                            self.changed(item)
+                        break
+                return None
             if isinstance(m.content, list):
                 for b in m.content:
                     if isinstance(b, sdk.ToolResultBlock):
@@ -921,6 +947,58 @@ class Router:
                   sid=sid, origin="system")
 
     # --- the tasks panel: background commands and subagents, across sessions ---
+    def rewind(self, sid, uuid, mode, export):
+        """Undo from one of your messages onwards. mode: "both" (conversation and files), "conversation" (keep the
+        files as they are) or "files" (keep the conversation). export: first copy the whole conversation to a new
+        session, so the work being rewound isn't lost (it can carry on there without redoing anything)."""
+        s = self.live.get(sid)
+        if not s:
+            return {"error": "Open the session first."}
+        if s.busy:
+            return {"error": "Claude is still working in this session. Wait until it finishes (or stop it), then rewind."}
+        if s.running_tasks():
+            return {"error": "This session has background tasks running. Wait for them, or stop them in the tasks tab."}
+        try:
+            messages = sdk.get_session_messages(sid, directory=s.cwd or CHAT_DIR)
+        except Exception as e:
+            return {"error": f"Couldn't read the conversation: {e}"}
+        at = next((i for i, m in enumerate(messages) if m.uuid == uuid), None)
+        if at is None:
+            return {"error": "Couldn't find that message in the conversation. Reopen the session and try again."}
+        if mode in ("both", "conversation") and at == 0:
+            return {"error": "That's the first message, so nothing would be left: start a new session instead."}
+        if mode in ("both", "files") and not s.cwd:
+            return {"error": "Chats have no files to rewind: choose \"conversation only\"."}
+        out = {}
+        if export:
+            try:
+                f = sdk.fork_session(sid, directory=s.cwd or CHAT_DIR, title=f"{self.title_of(sid)} (rewound part)")
+            except Exception as e:
+                return {"error": f"Couldn't copy the conversation, so nothing was rewound: {e}"}
+            out["export"] = f.session_id
+            self.meta.update(f.session_id, title=f"{self.title_of(sid)} (rewound part)", cwd=s.cwd)
+        if mode in ("both", "files"):
+            try:
+                self.run(s.rewind_files_to(uuid)).result(120)
+            except Exception as e:
+                log.warning("rewind files of %s: %s", sid, e)
+                return dict(out, error=f"Couldn't put the files back: {e}. The conversation wasn't rewound.")
+        if mode in ("both", "conversation"):
+            prompt = messages[at].message if isinstance(messages[at].message, dict) else {}
+            content = prompt.get("content")
+            text = content if isinstance(content, str) else "\n".join(
+                b.get("text", "") for b in content or [] if isinstance(b, dict) and b.get("type") == "text")
+            out["text"] = re.sub(r'\s*<attached_file path="[^"]+">.*?</attached_file>', "", text, flags=re.S).strip()
+            self.run(s.disconnect()).result(15)
+            keep = next(m for m in reversed(messages[:at]) if not m.parent_tool_use_id)   # the last message kept
+            self.meta.update(sid, rewind={"at": keep.uuid, "drop": uuid})
+            s.items, s.tasks = [], {}
+            s.load_history()
+            self.open(sid, s.cwd)   # shows the shortened conversation
+        self.sessions_changed(s.cwd)
+        log.info("Rewound %s to before %s (%s)%s", sid, uuid, mode, f", copied to {out['export']}" if export else "")
+        return out
+
     def title_of(self, sid):
         s = self.live.get(sid)
         return (self.meta.session(sid).get("title") or (s.items[0].get("text", "")[:60] if s and s.items else "")
