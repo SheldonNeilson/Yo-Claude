@@ -16,6 +16,8 @@ class MiniBar {
     this.q(".mb-m").onclick = () => api().talk();
     const stop = this.q(".mb-stop");
     if (stop) stop.onclick = () => api().stop();
+    const meter = this.q(".mb-meter");   // in the window it stretches: draw at its real width, never scaled
+    new ResizeObserver(() => { if (meter.clientWidth && meter.width !== meter.clientWidth) meter.width = meter.clientWidth; }).observe(meter);
     requestAnimationFrame(() => this.draw());
   }
   loud(v) { return Math.min(1, Math.max(0, (20 * Math.log10((v || 1) / 32768) + 62) / 45)); }
@@ -59,18 +61,21 @@ class MiniBar {
     lab.textContent = this.label(t);
     lab.style.color = act ? color : "var(--dim)";
     const c = this.q(".mb-meter"), g = c.getContext("2d");
+    if (c.clientWidth && Math.abs(c.width - c.clientWidth) > 4) c.width = c.clientWidth;   // stretches in the window
     g.clearRect(0, 0, c.width, c.height);
     const mid = Math.floor(c.height / 2) - 2;
-    this.levels.forEach((lv, i) => {
+    const cols = Math.max(1, Math.floor((c.width + 1) / 5)), len = this.levels.length || 1;
+    for (let i = 0; i < cols; i++) {   // the level history spread over however many columns fit
+      let lv = this.levels[Math.min(len - 1, Math.floor(i * len / cols))] || 0;
       if (this.state === "thinking") lv = 0.35 + 0.3 * Math.sin(t * 6 - i * 0.5);
       if (this.state === "paused") lv = 0;
       const n = Math.min(4, Math.round(lv * 4));
-      g.globalAlpha = (0.3 + 0.7 * (i + 1) / 24) * (act ? 1 : 0.55);
+      g.globalAlpha = (0.3 + 0.7 * (i + 1) / cols) * (act ? 1 : 0.55);
       g.fillStyle = color;
       const x = i * 5;
       g.fillRect(x, mid, 4, 3);
       for (let k = 1; k <= n; k++) { g.fillRect(x, mid - k * 4, 4, 3); g.fillRect(x, mid + k * 4, 4, 3); }
-    });
+    }
     g.globalAlpha = 1;
     if (this.holdUntil && Date.now() > this.holdUntil) { this.holdUntil = 0; this.layout(); }
     requestAnimationFrame(() => this.draw());

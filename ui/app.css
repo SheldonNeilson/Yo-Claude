@@ -213,6 +213,9 @@ code.pathlink:hover { color: var(--orange2); background: var(--bg3); }
 .minibar .btn { border: 0; padding: 0 3px; color: var(--dim); font-weight: bold; font-size: 12px; }
 .minibar .btn:hover { color: var(--orange); } .minibar .mb-stop:hover { color: var(--red); }
 #inbar { flex: 1; min-width: 0; border: 1px solid var(--line); padding: 2px 10px; background: var(--bg); }
+#inbar .mb-meter { flex: 1 1 auto; width: 0; min-width: 30px; height: 30px; }   /* fills the space; the compact bar keeps 120px */
+#inbar .mb-txt { flex: 0 0 auto; max-width: 45%; }
+#inbar .mb-stop { flex: none; }
 #inbar .mb-text { -webkit-line-clamp: 1; white-space: nowrap; text-overflow: ellipsis; display: block; }
 
 /* sidebar tree */
