@@ -36,6 +36,7 @@ DATA_DIR = os.path.join(os.path.expanduser("~"), ".yoclaude")
 PC_CONTROL_DATA = os.path.join(DATA_DIR, "pc-control")   # its log, saved macros and kill-switch file
 CHAT_DIR = os.path.join(DATA_DIR, "home")       # cwd for chats: outside any project, so nothing project-level loads
 TRASH_DIR = os.path.join(DATA_DIR, "trash")
+REOPEN_RECENT_S = 3 * 3600   # at start-up, the last conversation comes back if you used it this recently
 TASKS_KEEP_S = 12 * 3600        # finished tasks stay in the tasks panel this long
 TASKS_SHOWN = 40
 TASK_TAIL_BYTES = 64 * 1024     # how much of a background command's output the panel shows
@@ -1319,12 +1320,32 @@ class Router:
         s.picked = True
         self.active = s
         self.folder = s.cwd
+        self.remember_last(s)
         if self.meta.session(sid).get("unseen"):
             self.meta.update(sid, unseen=False)
             self.sessions_changed(cwd)
         self.ensure_baseline(s, "opened")
         self.emit("opened", session=self.describe(s), items=s.items)
         return s
+
+    def remember_last(self, s):
+        """The conversation you were last in (opened or talked to), to come back to at the next start."""
+        self.meta.data["last_session"] = {"id": s.id, "cwd": s.cwd, "at": time.time()}
+        self.meta.save()
+
+    def reopen_last(self):
+        """At start-up: back to the conversation you were last in, if that was within REOPEN_RECENT_S; after
+        longer than that you start in a fresh chat."""
+        last = self.meta.data.get("last_session")
+        if self.active or not last or time.time() - last.get("at", 0) > REOPEN_RECENT_S:
+            return None
+        if self.meta.session(last["id"]).get("deleted") or not os.path.exists(self.session_file(last["id"], last.get("cwd"))[1]):
+            return None
+        try:
+            return self.open(last["id"], last.get("cwd"))
+        except Exception as e:
+            log.warning("Couldn't reopen %s: %s", last["id"], e)
+            return None
 
     def ensure_baseline(self, s, kind):
         """Snapshot the folder (in the background: git can take a moment on big repos)."""
@@ -1378,6 +1399,7 @@ class Router:
             s = self.new_session()
         item = None
         if origin == "user":
+            self.remember_last(s)
             item = s.add({"kind": "user", "text": text, "voice": voice, "attachments": list(attachments),
                           "image_paths": [save_image(s.id, mt, data) for mt, data in images]})
         prompt = (f"[voice] {text}" if voice else text) + (f"\n\n{context}" if context else "")

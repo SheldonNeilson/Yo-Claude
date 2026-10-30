@@ -413,8 +413,9 @@ class Assistant:
                 threading.Thread(target=self.switch_speech, args=(True,), daemon=True).start()
         self.stt = self.stt or Transcriber()
         self.speaker = Speaker()
-        self.worker = ThreadPoolExecutor(2)   # one for the Claude turn, one to transcribe approvals meanwhile
+        self.worker = ThreadPoolExecutor(6)   # Claude turns (one per queued voice request) and approvals meanwhile
         self.job = self.utterance = None
+        self.backlog = []            # voice requests queued while Claude was answering one: (generation, future), in order
         self.approval = None         # (session, id, summary) being asked about by voice
         self.approval_job = None
         self.generation = 0          # bumps on stop, so a cancelled job's late result is ignored
@@ -435,6 +436,9 @@ class Assistant:
         self.emit("state", state=state, text=text, hold=hold)
 
     def go_idle(self, text="", hold=0.0):
+        if self.backlog:   # a request you queued by voice is next: wait for its reply instead of going idle
+            self.job = self.backlog.pop(0)
+            return self.set_state(THINKING, text, hold)
         self.wake.reset()
         self.set_state(IDLE if self.settings["listening"] else PAUSED, text, hold)
 
@@ -534,6 +538,7 @@ class Assistant:
         self.generation += 1
         self.speaker.stop()
         self.job = self.approval = self.approval_job = self.utterance = None
+        self.backlog = []
         self.go_idle()
 
     def mic_lost(self):
@@ -662,7 +667,11 @@ class Assistant:
                 self.say(DIDNT_HEAR, lambda _: self.go_idle())
             return
         self.set_state(THINKING, "")
+        self.wake.reset(); self.recent.clear()   # listening for "yo claude" again meanwhile (to queue): start clean
         self.job = (self.generation, self.worker.submit(self.think, pcm, self.generation, self.utterance.strip_wake))
+        if self.backlog:   # queued behind the reply(s) still coming: answered in the order you asked
+            self.backlog.append(self.job)
+            self.job = self.backlog.pop(0)
 
     def think(self, pcm, generation, strip_wake=False):
         """Worker thread: transcribe, run voice commands or ask Claude, render the voice.
@@ -711,6 +720,20 @@ class Assistant:
         return f"Switched to {target['title'][:60]}."
 
     def on_thinking(self, frame, p):
+        if self.approval is None and self.approval_job is None and self.job is not None and self.settings["listening"]:
+            self.recent.append(frame)
+            woke = self.wake.feed(frame, p)
+            if woke:   # "yo claude" while Claude works on your last request: queue another one
+                log.info("Wake word heard while Claude is working: queueing another request")
+                self.backlog.insert(0, self.job)   # the one being answered stays first in line
+                self.job = None
+                if self.wake.after:   # said in one breath: keep recording to the pause
+                    self.listen()
+                    self.utterance.audio = list(self.recent)
+                    self.utterance.strip_wake = True
+                else:
+                    self.say("Yes? I'll queue it.", lambda _: self.listen())
+                return
         if self.approval_job is not None:
             if not self.approval_job.done():
                 return
@@ -736,6 +759,8 @@ class Assistant:
             self.start_conversation()
         elif step == "idle":
             self.say(reply, lambda _: self.go_idle())
+        elif self.backlog:   # more queued replies to come: straight on to the next, no follow-up pause
+            self.say(reply, lambda text: self.go_idle(text, TEXT_HOLD_S), pcm)
         else:   # after an answer, keep the reply on screen and listen briefly for a follow-up
             self.say(reply, lambda text: self.listen(FOLLOWUP_LISTEN_S, followup=True, text=text), pcm)
 

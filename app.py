@@ -532,6 +532,9 @@ class Api:
     def init(self):
         a = self._app
         r = a.router
+        if not getattr(self, "reopened", False):   # once per run: back to your last conversation, if it was recent
+            self.reopened = True
+            r.reopen_last()
         active = r.active
         return {"version": VERSION, "update": getattr(a, "update_info", None), "limits": r.limits,
                 "settings": dict(a.settings), "folder": r.folder, "folders": r.meta.data["recent_folders"],
