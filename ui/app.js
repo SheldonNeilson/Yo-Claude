@@ -158,9 +158,9 @@ function renderFolder() {
   $("#modeBadge").textContent = cwd ? "CODE" : "CHAT";
   $("#modeBadge").className = "badge " + (cwd ? "code" : "chat");
 }
-// with her face on she's Yo Claudia; otherwise Yo Claude
+// Yo Claudia with the female character, Yo Claude with the male one (the default), whether the face shows or not
 function renderName() {
-  const her = S.settings?.avatar === true;
+  const her = S.settings?.character === "female";
   $("#top .brand").textContent = her ? "YO CLAUDIA" : "YO CLAUDE";
   document.title = her ? "Yo Claudia" : "Yo Claude";
 }

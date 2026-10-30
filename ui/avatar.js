@@ -33,8 +33,10 @@ const avatar = {
     else this.host.querySelector(".sidefoot").after(this.el);   // at the very bottom, under clean up and trash
     this.apply();
     this.stamps = {};
+    this.loadedBase = this.base();
     const manifest = await this.manifest();
-    if (!manifest) return;
+    this.noClips = !manifest;
+    if (!manifest) { this.apply(); return; }   // (that character has no clips yet: no face)
     this.fps = manifest.fps || 12;
     // idle first, and she starts as soon as it's in; talking next; the rest join her pool as they're decoded
     const order = Object.entries(manifest.clips).sort(([a], [b]) => (b === "idle") - (a === "idle") || (b === "talking") - (a === "talking"));
@@ -75,12 +77,14 @@ const avatar = {
     }
     return f;
   },
+  // the character's clips: Claudia's (female) in avatar/, Claude's (male, the default) in avatar/male/
+  base() { return S.settings?.character === "female" ? "avatar/" : "avatar/male/"; },
   async manifest() {   // avatar/clips.json: {fps, clips: {name: {frames, stamp}}} (or just a frame count, as it was)
-    try { const m = await (await fetch("avatar/clips.json", { cache: "no-store" })).json(); return m?.clips ? m : null; } catch (_) { return null; }
+    try { const m = await (await fetch(this.base() + "clips.json", { cache: "no-store" })).json(); return m?.clips ? m : null; } catch (_) { return null; }
   },
   async load(name, v, into = this.clips) {
     const count = typeof v === "number" ? v : v.frames;
-    try { into[name] = await this.decode(`avatar/${name}.mp4?${v.stamp || ""}`, count); } catch (e) { console.warn("avatar clip", name, e); return; }
+    try { into[name] = await this.decode(`${this.base()}${name}.mp4?${v.stamp || ""}`, count); } catch (e) { console.warn("avatar clip", name, e); return; }
     this.stamps[name] = v.stamp || "";
     (this.meta ||= {})[name] = v;
     if (name === "talking" && into === this.clips) { this.mouth = mouthOpenness(into.talking, this.AH); this.closedFrames = null; }
@@ -114,7 +118,28 @@ const avatar = {
   apply() {   // (off unless turned on; in the window, nothing's loaded until it is)
     const on = S.settings?.[this.mount ? "bar_avatar" : "avatar"] === true;
     if (on && this.wanted && !this.el) this.init();
-    this.el?.classList.toggle("hidden", !on);
+    if (this.el && this.loadedBase && this.loadedBase !== this.base()) this.switchCharacter();
+    this.el?.classList.toggle("hidden", !on || this.noClips);
+  },
+  // another character picked (Options): all of theirs decoded, then swapped in at once
+  async switchCharacter() {
+    if (this.switching) return;
+    this.switching = true; this.loadedBase = this.base();
+    try {
+      const m = await this.manifest();
+      this.noClips = !m;
+      if (m) {
+        const fresh = {};
+        this.stamps = {};
+        for (const [n, v] of Object.entries(m.clips)) await this.load(n, v, fresh);
+        if (fresh.idle) {
+          this.clips = fresh; this.clip = "idle"; this.frame = 0; this.rewinding = false; this.idleExtra = this.moodClip = null;
+          if (fresh.talking) { this.mouth = mouthOpenness(fresh.talking, this.AH); this.closedFrames = null; }
+          this.lv = null; this.analyse();
+          if (!this.ready) this.start();
+        }
+      }
+    } finally { this.switching = false; this.apply(); }
   },
   levels(list) {   // the voice's loudness, as it plays: her mouth's fallback if she has no speech envelope
     if (list?.length) { this.level = Math.min(1, (list.at(-1) || 0) / 3000); this.levelAt = Date.now(); }
@@ -196,7 +221,8 @@ const avatar = {
     }
     this.extraPending = false;
     const extras = this.idleExtras();
-    if (!this.idleExtra && extras.length && now > this.nextIdleExtra) {
+    if (!this.idleExtra && extras.length && this.bigNext) {   // (only just after a change of state)
+      this.bigNext = false;
       this.idleExtra = this.any(extras, this.lastExtra); this.lastExtra = this.idleExtra;
     }
     if (this.idleExtra) {   // the whole thing (up to any long eyes-shut stretch in it)
@@ -205,8 +231,8 @@ const avatar = {
     }
     const micro = this.microClips();
     if (micro.length && Math.random() < 0.65) {   // mostly small, subtle changes of expression
-      const gentle = micro.filter((n) => GENTLE.test(n));   // looking about, brows, tilts: most of the time
-      this.clip = this.microClip = this.any(gentle.length && Math.random() < 0.75 ? gentle : micro, this.lastMicro); this.lastMicro = this.clip;
+      const gentle = micro.filter((n) => GENTLE.test(n) || /_[sv]_/.test(n));   // looking about, brows, the subtle set
+      this.clip = this.microClip = this.any(gentle.length && Math.random() < 0.9 ? gentle : micro, this.lastMicro); this.lastMicro = this.clip;
       this.turnAt = 3 + Math.floor(Math.random() * 7);   // a hint of it: 0.25 to 0.75 s out, the same back
       this.turnAt = Math.min(this.turnAt, (this.shutAt?.[this.clip] ?? 99) - 1);   // (before any long eyes-shut stretch)
     } else {
@@ -214,6 +240,15 @@ const avatar = {
       this.blinkOk = Math.random() < 0.05;   // her idle clip's own blink: on the odd pass, else skipped over
       this.restUntil = now + 1500 + Math.random() * 3500;
     }
+  },
+  // how far into a clip she goes in a busy state: all the way just after the state changed, else only a hint of it
+  pickTurn(st) {
+    this.speed = 0.6 + Math.random() * 0.5;
+    const shut = this.shutAt?.[this.clip] ?? 99, n = this.clips[this.clip]?.length || 61;
+    if (st === "speaking") { this.turnAt = 0; return; }
+    if (this.bigNext) { this.bigNext = false; this.turnAt = shut < n ? shut - 1 : 0; return; }   // (up to any eyes-shut stretch)
+    this.turnAt = Math.min(4 + Math.floor(Math.random() * 8), (this.shutAt?.[this.clip] ?? 99) - 1);
+    this.holdFor = Math.random() < 0.4 ? 300 + Math.random() * 1200 : 0;
   },
   any(list, not) { const l = list.length > 1 ? list.filter((n) => n !== not) : list; return l[Math.floor(Math.random() * l.length)]; },
 
@@ -251,6 +286,7 @@ const avatar = {
   tick() {
     if (!this.el || this.el.offsetParent === null || document.hidden || !this.cols) return;   // (not shown: no work)
     const st = this.state(), now = Date.now(), group = this.group(st);
+    if (st !== this.lastSt) { this.lastSt = st; this.bigNext = true; }   // a change of state: one bigger move allowed
     this.beat = (this.beat || 0) + 1;
     if (this.beat % 2 && !(st === "speaking" && this.clip === "talking" && this.mouth && !this.rewinding)) return;
     let want = group.includes(this.clip) ? this.clip : this.any(group);   // stay on a suitable clip until it ends
@@ -260,7 +296,7 @@ const avatar = {
     }
     if (st === "idle")   // idle picks its next move each time she's back at the start frame (nextIdle)
       want = this.idleExtra || (this.clip === "idle" || this.clip === this.microClip ? this.clip : "idle");
-    else this.turnAt = 0;   // the other states play their clips all the way
+    else if (st === "speaking") this.turnAt = 0;   // talking plays all the way (lip sync)
     const frames = this.clips[this.clip];
     const lipSync = st === "speaking" && this.clip === "talking" && this.mouth && !this.rewinding;
     if (want !== this.clip && !this.rewinding) this.rewinding = true;   // back to the shared start frame first
@@ -268,14 +304,14 @@ const avatar = {
       this.frame = this.stepPast(Math.max(0, this.frame - 3), -1, frames);   // (no blink on the way back either)
       if (this.frame === 0) {
         this.rewinding = false; this.dir = 1;
-        if (st === "idle") this.nextIdle(now); else { this.clip = want; this.turnAt = 0; }
+        if (st === "idle") this.nextIdle(now); else { this.clip = want; this.pickTurn(st); }
       }
     } else if (lipSync) {
       this.frame = this.lipFrame(now);
     } else {
       const end = Math.min(frames.length - 1, this.turnAt || Infinity);   // a short play turns back early
       const resting = st === "idle" && this.clip === "idle" && now < this.restUntil;
-      const idleish = st === "idle" && this.clip !== "talking";
+      const idleish = st !== "speaking" && this.clip !== "talking";   // (every calm state: own speed, holds)
       this.acc = (this.acc || 0) + (idleish ? this.speed || 1 : 1);   // (idle plays at this play's own speed)
       const step = this.acc >= 1 && !(idleish && now < (this.heldUntil || 0));
       if (step) this.acc -= 1;
@@ -288,10 +324,15 @@ const avatar = {
         if (idleish && this.holdFor && this.clip !== "idle") { this.heldUntil = now + this.holdFor; this.holdFor = 0; }
       }
       if (resting && this.dir < 0 && this.frame <= (this.restFrom || REST[0])) { this.frame = this.restFrom || REST[0]; this.dir = 1; }
-      if (this.frame <= 0) {   // forward and back: what next?
+      if (this.frame <= 0 && this.dir < 0) {   // forward and back (not just waiting there): what next?
         this.frame = 0; this.dir = 1;
         if (st === "idle") this.nextIdle(now);
-        else if (group.length > 1) this.clip = this.any(group, this.clip);   // another of the kind
+        else {   // another of the kind, after a calm moment
+          const roomy = group.filter((n) => (this.shutAt?.[n] ?? 99) >= 7);   // (not ones that shut her eyes at once)
+          if (group.length > 1) this.clip = this.any(roomy.length ? roomy : group, this.clip);
+          this.pickTurn(st);
+          if (st !== "speaking") this.heldUntil = now + 300 + Math.random() * 1400;
+        }
       }
     }
     this.glitchRow = Math.random() < 0.03 ? Math.floor(Math.random() * this.rows) : -1;

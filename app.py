@@ -95,6 +95,9 @@ class App:
         self.ready = {}            # window -> loaded
         self.tick = 0
         self.taskbar = None
+        if not self.settings.get("character"):   # once: who had her face on keeps her (Claudia); new installs get Claude
+            self.settings["character"] = "female" if self.settings.get("avatar") is True else "male"
+            self.settings.save()
         if not self.settings.get("face_off_v1"):   # once: the face is now off unless turned on; keep it for who had it
             if self.settings.get("avatar", True) and "avatar" in self.settings:
                 self.settings.setdefault("bar_avatar", True)
@@ -470,8 +473,8 @@ class App:
         self.bus.put(("open_training", {}))
 
     def name(self):
-        """With her face on she's Yo Claudia; otherwise (no face) it's Yo Claude."""
-        return "Yo Claudia" if self.settings.get("avatar") is True else "Yo Claude"
+        """Yo Claudia with the female character, Yo Claude with the male one (the default), face shown or not."""
+        return "Yo Claudia" if self.settings.get("character") == "female" else "Yo Claude"
 
     def update_tray(self):
         if self.tray:
@@ -627,7 +630,7 @@ class Api:
         a.commands.put("settings")
         a.update_bar_visibility()
         a.emit_settings()
-        if key == "avatar":
+        if key == "character":
             try:
                 a.main.set_title(a.name())
             except Exception as e:
