@@ -185,6 +185,8 @@ const avatar = {
   // expression, but mostly out to the calm end of her idle clip to rest there a few seconds (swaying among REST).
   nextIdle(now) {
     this.microClip = null; this.restUntil = 0;
+    // each play of a clip a little different: its own speed, and a pause at the turn now and then (an expression held)
+    this.speed = 0.6 + Math.random() * 0.55; this.holdFor = Math.random() < 0.45 ? 300 + Math.random() * 1400 : 0;
     if (this.idleExtra && this.clip === this.idleExtra && !this.extraPending) {   // just played: the next in a while
       this.idleExtra = null; this.nextIdleExtra = now + 14000 + Math.random() * 14000;   // (a whole one now and then)
     }
@@ -269,11 +271,18 @@ const avatar = {
     } else {
       const end = Math.min(frames.length - 1, this.turnAt || Infinity);   // a short play turns back early
       const resting = st === "idle" && this.clip === "idle" && now < this.restUntil;
-      if (!resting || this.frame < (this.restFrom || REST[0]) || Math.random() < 0.5) this.frame += this.dir;   // resting: slower sways
+      const idleish = st === "idle" && this.clip !== "talking";
+      this.acc = (this.acc || 0) + (idleish ? this.speed || 1 : 1);   // (idle plays at this play's own speed)
+      const step = this.acc >= 1 && !(idleish && now < (this.heldUntil || 0));
+      if (step) this.acc -= 1;
+      if (step && (!resting || this.frame < (this.restFrom || REST[0]) || Math.random() < 0.5)) this.frame += this.dir;   // resting: slower sways
       // blinks are stepped over (but in the blink mannerisms, and talking's lip sync), bar the odd one in her idle clip:
       // she blinks now and then, not constantly
       if (!this.clip.includes("blink") && !(this.blinkOk && this.clip === "idle")) this.frame = this.stepPast(this.frame, this.dir, frames);
-      if (this.frame >= end) { this.frame = end; this.dir = -1; }
+      if (this.frame >= end && this.dir > 0) {   // the turn: back again, maybe after holding the expression a moment
+        this.frame = end; this.dir = -1;
+        if (idleish && this.holdFor && this.clip !== "idle") { this.heldUntil = now + this.holdFor; this.holdFor = 0; }
+      }
       if (resting && this.dir < 0 && this.frame <= (this.restFrom || REST[0])) { this.frame = this.restFrom || REST[0]; this.dir = 1; }
       if (this.frame <= 0) {   // forward and back: what next?
         this.frame = 0; this.dir = 1;
