@@ -124,9 +124,10 @@ const MENUS = {
     ["Remember Queued Messages", () => toggleSetting("keep_queue"), { checked: setting("keep_queue") }],
     "-",
     ["sub:face & fun"],
-    ...[["female", "Assistant: Female 1"], ["female2", "Assistant: Female 2"], ["female3", "Assistant: Female 3"],
-      ["male", "Assistant: Male 1"], ["professor", "Assistant: Male 2"], ["male3", "Assistant: Male 3"]].map(([c, label]) =>
-      [label, () => api().set_setting("character", c), { checked: (S.settings.character || "male") === c }]),
+    // the assistant's look and voice: three of each (the keys are what settings already hold)
+    ...[["female", [["female", "1"], ["female2", "2"], ["female3", "3"]]], ["male", [["male", "1"], ["professor", "2"], ["male3", "3"]]]]
+      .flatMap(([head, list]) => [["sub:assistant · " + head],
+        ...list.map(([c, n]) => [`  ${n}`, () => api().set_setting("character", c), { checked: (S.settings.character || "male") === c }])]),
     ["Face in Sidebar", () => toggleSetting("avatar", false), { checked: setting("avatar", false) }],
     ["Face on Floating Bar", () => toggleSetting("bar_avatar", false), { checked: setting("bar_avatar", false) }],
     ["Activity on Floating Bar", () => toggleSetting("bar_feed"), { checked: setting("bar_feed") }],
