@@ -82,12 +82,10 @@ const avatar = {
     this.pre.style.lineHeight = (cw * 2) + "px";   // keep the cells about twice as tall as wide
     if (cols !== this.cols || rows !== this.rows) { this.cols = cols; this.rows = rows; this.lv = null; }
   },
+  // app.py display_state already ranks voice and work: Claude thinking beats a paused mic (asleep only when nothing's on)
   state() {
     const d = S.display || {};
-    if (d.state === "approval") return "approval";
-    if (d.state === "using_pc") return "using_pc";
-    if (["listening", "speaking", "paused", "error"].includes(d.voice)) return d.voice;
-    if (d.state === "thinking" || d.voice === "thinking") return "thinking";
+    if (["approval", "using_pc", "listening", "speaking", "thinking", "error"].includes(d.state)) return d.state;
     return d.state === "paused" ? "paused" : "idle";
   },
   // the clips that suit a state; she picks among them at random, a new one each time one ends
