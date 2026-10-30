@@ -256,6 +256,7 @@ class Session:
         self.baseline_kind = None           # "start" (made here) or "opened" (an older session opened now)
         self.touched = []                   # files Claude's tools changed (for folders that aren't git repos)
         self.stream_item = None
+        self.think_item = None              # the thought streaming in now (the thinking bubble)
         self.last_used = time.time()
         self.cost_seen = 0.0                # the CLI reports cost cumulatively per connection
         self.lock = None                    # asyncio.Lock, made on the loop
@@ -373,6 +374,7 @@ class Session:
             system_prompt={"type": "preset", "preset": "claude_code", "append": system},
             stderr=lambda line: log.debug("claude: %s", line.rstrip()),
             extra_args={"replay-user-messages": None},   # prompts come back with their message id (for rewind)
+            thinking={"type": "adaptive", "display": "summarized"},   # its thinking as readable text, for the bubble
         )
         if self.resumed:
             opts["resume"] = self.id
@@ -529,6 +531,10 @@ class Session:
 
     def after_turn(self):
         self.stream_item = None
+        if self.think_item is not None:   # a thought that never got its closing block (stopped mid-way)
+            self.think_item["streaming"] = False
+            self.changed(self.think_item)
+            self.think_item = None
         if self.router.meta.session(self.id).get("rewind"):
             self.router.meta.update(self.id, rewind=None)
         if self.client:
@@ -687,6 +693,12 @@ class Session:
             ev = m.event or {}
             if m.parent_tool_use_id:
                 return None
+            if ev.get("type") == "content_block_delta" and ev.get("delta", {}).get("type") == "thinking_delta":
+                if self.think_item is None:
+                    self.think_item = self.add({"kind": "thinking", "text": "", "streaming": True})
+                self.think_item["text"] += ev["delta"].get("thinking", "")
+                self.router.emit("delta", session=self.id, i=self.think_item["i"], text=ev["delta"].get("thinking", ""))
+                return None
             if ev.get("type") == "content_block_delta" and ev.get("delta", {}).get("type") == "text_delta":
                 if self.stream_item is None:
                     self.stream_item = self.add({"kind": "assistant", "text": "", "streaming": True})
@@ -704,8 +716,13 @@ class Session:
                         self.stream_item = None
                     elif b.text.strip():
                         self.add({"kind": "assistant", "text": b.text})
-                elif isinstance(b, sdk.ThinkingBlock) and b.thinking:
-                    self.add({"kind": "thinking", "text": b.thinking})
+                elif isinstance(b, sdk.ThinkingBlock):
+                    if self.think_item is not None:   # the streamed thought, now complete
+                        self.think_item.update(text=b.thinking or self.think_item["text"], streaming=False)
+                        self.changed(self.think_item)
+                        self.think_item = None
+                    elif b.thinking:
+                        self.add({"kind": "thinking", "text": b.thinking})
                 elif isinstance(b, sdk.ToolUseBlock):
                     self.stream_item = None
                     self.add({"kind": "tool", "id": b.id, "name": b.name, "input": b.input, "result": None,

@@ -521,7 +521,7 @@ Click to open` : "What Claude saw · click to enlarge";
   },
   renderInner(it) {
     const t = $("#transcript");
-    if (it.kind === "tool" || it.kind === "thinking") {
+    if (it.kind === "tool") {
       let g = this.groupOf.get(it.i);
       if (!g) {
         g = this.last && this.last.items ? this.last : this.newGroup();
@@ -636,6 +636,7 @@ function buildItem(it) {
     case "approval": return approvalCard(it);
     case "task": return taskCard(it);
     case "cancelled": return el("div", "hidden");   // a queued message you took back
+    case "thinking": return thoughtBubble(it);
     case "note": return el("div", "msg note", "⧗ " + esc(it.text));
     case "result": {
       const k = (n) => n >= 1e6 ? (n / 1e6).toFixed(1) + "M" : n >= 1000 ? (n / 1000).toFixed(1) + "k" : String(n || 0);
@@ -874,6 +875,23 @@ async function viewFile(path, cwd, opts = {}) {
   if (opts.attach) buttons.push(["attach to message", () => { composer.attach(path); closeModal(); }]);
   buttons.push(["close", closeModal, "primary"]);
   addButtons(d, buttons);
+}
+
+// Claude's thinking: the last two sentences while it thinks (and once done), all of it when you click
+function thoughtBubble(it) {
+  const n = el("div", "thought" + (it.streaming ? " live" : ""));
+  const text = (it.text || "").trim();
+  const sentences = text.match(/[^.!?\n]+[.!?]*\s*/g) || [];
+  const tail = sentences.slice(-2).join("").trim();
+  const cut = !it.expanded && tail.length < text.length;
+  n.innerHTML = `<span class="ttext">${esc(it.expanded || !cut ? text : "… " + tail) || (it.streaming ? "" : "(nothing to show)")}</span>` +
+    (cut ? '<span class="more">▸ all of it</span>' : it.expanded ? '<span class="more">▾ less</span>' : "");
+  n.dataset.tip = it.expanded ? "Click to show less" : "Claude's thinking · click to read all of it";
+  n.onclick = (e) => {
+    if (getSelection().toString()) return;   // selecting text to copy, not toggling
+    e.stopPropagation(); it.expanded = !it.expanded; renderItem(it);
+  };
+  return n;
 }
 
 function showPicture(src, title) {   // a screenshot or picture from a tool result, big
