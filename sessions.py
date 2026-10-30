@@ -281,6 +281,16 @@ async def suggest_next(title, asked, reply):
     return line
 
 
+ADVISOR_PROMPT = (
+    " When you consult the advisor (the advisor tool), Yo Claude shows it to the user as a third member of the chat, "
+    "but the advisor's reply itself never reaches their screen. So straight after each advisor reply, before "
+    "anything else, pass it on in a block of its own: <advisor>its advice, faithfully, in plain words and in its own "
+    "voice (\"Check X before you Y\"): a few short sentences or a short list, keeping its specific warnings and "
+    "recommendations</advisor>. Then carry on as usual, without repeating it."
+)
+ADVISOR_BLOCK = re.compile(r"<advisor>\s*(.*?)\s*</advisor>\s*", re.S)   # the advisor's reply, passed on by Claude
+
+
 TIDY_KEEP = re.compile(r"`[^`\n]+`|@\S+|https?://\S+|[A-Za-z]:[\\/]\S+")   # must come back exactly as they were
 
 
@@ -498,6 +508,25 @@ class Session:
     def changed(self, item):
         self.router.emit("item", session=self.id, item=item)
 
+    def advisor_said(self, text):
+        """Claude's text minus any <advisor> block: the advisor's reply, passed on (ADVISOR_PROMPT). That goes in the
+        advisor's bubble instead: the latest one since your last message still waiting for it, or a new one."""
+        if "<advisor>" not in text:
+            return text
+        for advice in ADVISOR_BLOCK.findall(text):
+            item = None
+            for x in reversed(self.items):
+                if x.get("kind") == "user":
+                    break
+                if x.get("kind") == "advisor" and not x.get("text"):
+                    item = x
+                    break
+            if item is None:
+                item = self.add({"kind": "advisor", "text": "", "status": "heard"})
+            item.update(text=advice, status="done")
+            self.changed(item)
+        return ADVISOR_BLOCK.sub("", text).strip()
+
     def tool_item(self, tool_id):
         for item in reversed(self.items):
             if item.get("kind") == "tool" and item.get("id") == tool_id:
@@ -538,8 +567,12 @@ class Session:
                 t = b.get("type")
                 if t == "text" and role == "user" and system_note(b.get("text", "")):
                     self.add({"kind": "note", "text": system_note(b["text"])})
+                elif t == "server_tool_use" and b.get("name") == "advisor":
+                    self.add({"kind": "advisor", "id": b.get("id"), "text": "", "status": "heard"})
                 elif t == "text" and b.get("text", "").strip() and not is_noise(b["text"]):
-                    text = b["text"]
+                    text = self.advisor_said(b["text"]) if role == "assistant" else b["text"]
+                    if not text.strip():
+                        continue
                     voice = role == "user" and text.startswith("[voice] ")
                     attachments = []
                     if role == "user":   # attached files go back to chips, as they were when sent
@@ -587,7 +620,7 @@ class Session:
         if PC_CONTROL_SERVER in servers:
             system += PC_CONTROL_PROMPT
         servers[UI_SERVER] = self.ui_tools()
-        system += UI_PROMPT
+        system += UI_PROMPT + ADVISOR_PROMPT
         opts = dict(
             cwd=self.cwd or CHAT_DIR,
             can_use_tool=self.can_use_tool,
@@ -1136,12 +1169,13 @@ class Session:
                 return None
             for b in m.content:
                 if isinstance(b, sdk.TextBlock):
-                    if self.stream_item is not None:
-                        self.stream_item.update(text=b.text, streaming=False)
+                    text = self.advisor_said(b.text)
+                    if self.stream_item is not None:   # (only the advisor's advice in it: gone from the chat)
+                        self.stream_item.update(text=text, streaming=False, **({} if text.strip() else {"kind": "cancelled"}))
                         self.changed(self.stream_item)
                         self.stream_item = None
-                    elif b.text.strip():
-                        self.add({"kind": "assistant", "text": b.text})
+                    elif text.strip():
+                        self.add({"kind": "assistant", "text": text})
                 elif isinstance(b, sdk.ThinkingBlock):
                     if self.think_item is not None:   # the streamed thought, now complete
                         self.think_item.update(text=b.thinking or self.think_item["text"], streaming=False)
@@ -1155,6 +1189,15 @@ class Session:
                               "status": "running"})
                     if b.name.startswith(f"mcp__{PC_CONTROL_SERVER}__"):
                         self.router.set_work(self, "using_pc")
+                elif isinstance(b, sdk.ServerToolUseBlock) and b.name == "advisor":   # a third member of the chat
+                    self.stream_item = None
+                    self.add({"kind": "advisor", "id": b.id, "text": "", "status": "asking", "asked": time.time()})
+                elif isinstance(b, sdk.ServerToolResultBlock):   # the advisor's reply (encrypted: Claude passes it on)
+                    item = next((x for x in reversed(self.items)
+                                 if x.get("kind") == "advisor" and x.get("id") == b.tool_use_id), None)
+                    if item and item["status"] == "asking":
+                        item.update(status="heard", took=round(time.time() - item.get("asked", time.time()), 1))
+                        self.changed(item)
             return None
         if isinstance(m, sdk.UserMessage):
             if getattr(m, "uuid", None) and not m.parent_tool_use_id and not (
@@ -1224,7 +1267,7 @@ class Session:
             log.info("Turn done in %.1fs: %d tokens processed (%d cached), %s api-equivalent",
                      (m.duration_ms or 0) / 1000, tokens, u.get("cache_read_input_tokens", 0) or 0,
                      f"${cost:.4f}" if cost is not None else "cost unknown")
-            return m.result or ""
+            return ADVISOR_BLOCK.sub("", m.result or "").strip()
         return None
 
 

@@ -588,7 +588,7 @@ Click to open` : "What Claude saw · click to enlarge";
       this.els.set(it.i, node);
       node.querySelectorAll("pre code").forEach((c) => { try { hljs.highlightElement(c); } catch (_) {} });
       addCopyButtons(node, it);
-      if (it.ts && (it.kind === "user" || it.kind === "assistant")) node.insertAdjacentHTML("beforeend", whenHtml(it.ts, "bubble-when"));
+      if (it.ts && ["user", "assistant", "advisor"].includes(it.kind)) node.insertAdjacentHTML("beforeend", whenHtml(it.ts, "bubble-when"));
       else if (it.ts && (it.kind === "note" || it.kind === "error")) node.insertAdjacentHTML("beforeend", " " + whenHtml(it.ts, "inline-when"));
       if (it.kind === "assistant" && !it.streaming) mediaUnder(node, it);
     }
@@ -707,7 +707,17 @@ function buildItem(it) {
       }
       return n;
     }
-    case "assistant": return el("div", "msg assistant" + (it.streaming ? " cursor" : ""), md(it.text));
+    case "assistant": {   // (while it streams, the advisor's advice Claude is passing on stays out: it gets its own bubble)
+      const text = it.streaming ? (it.text || "").replace(/<advisor>[\s\S]*?(<\/advisor>\s*|$)/g, "") : it.text;
+      return el("div", "msg assistant" + (it.streaming ? " cursor" : ""), md(text));
+    }
+    case "advisor": {   // Claude's advisor: a third member of the chat. Its reply is encrypted, so this is Claude passing it on
+      const wait = it.status === "asking" ? "reading the conversation…"
+        : S.active?.busy ? "advice given · Claude is passing it on…" : "consulted · its advice wasn't passed on";
+      const n = el("div", "msg advisor" + (it.text ? "" : " pending"), it.text ? md(it.text) : `<span class="ahint">${wait}</span>`);
+      if (it.took) n.dataset.tip = `answered in ${it.took}s`;
+      return n;
+    }
     case "approval": return approvalCard(it);
     case "question": return questionCard(it);
     case "task": return taskCard(it);
