@@ -15,6 +15,8 @@ const STATE_LABEL = { starting: "booting…", idle: "● ready", paused: "○ wa
                       approval: "! needs your ok", error: "✗ mic unavailable" };
 const SPIN = "·✢✳✶✻✽✻✶✳✢";
 const SESSIONS_SHOWN = 12;   // per folder, before "show more"
+const RECENT_SHOWN = 8;      // in the Recent section at the top of the tree
+const RECENT_CLOSED = "__recent_closed__";   // in S.open (saved) when Recent is collapsed; open by default
 
 // ---------- safety: Claude's text is rendered as markdown, never as raw HTML ----------
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -169,6 +171,18 @@ function renderTree() {
   const scroll = tree.scrollTop;
   tree.innerHTML = "";
   const f = S.filter.toLowerCase();
+  if (!f) {   // the latest sessions from every folder, so nothing recent hides in a collapsed folder
+    const open = !S.open.has(RECENT_CLOSED);
+    const recent = allSessions().slice().sort((a, b) => (b.modified || 0) - (a.modified || 0)).slice(0, RECENT_SHOWN);
+    const head = el("div", "fnode recent");
+    head.innerHTML = `<span class="tw">${open ? "▾" : "▸"}</span><span class="fname">◷ RECENT</span>` +
+      `${recent.some((s) => S.busy.has(s.id)) ? '<span class="spin busy">✻</span>' : ""}` +
+      `${recent.some((s) => s.unseen) ? '<span class="dot"></span>' : ""}`;
+    head.title = "The latest sessions from every folder";
+    head.onclick = () => { open ? S.open.add(RECENT_CLOSED) : S.open.delete(RECENT_CLOSED); saveOpen(); renderTree(); };
+    tree.appendChild(head);
+    if (open) for (const s of recent) tree.appendChild(sessionRow(s, true));
+  }
   const nodes = [{ key: "", cwd: null, label: "CHATS", title: "Conversations without a folder" },
                  ...S.workspaces.map((w) => ({ key: keyOf(w), cwd: w, label: base(w), title: w }))];
   for (const n of nodes) {
@@ -204,13 +218,14 @@ function renderTree() {
   }
   tree.scrollTop = scroll;
 }
-function sessionRow(s) {
+function sessionRow(s, withFolder = false) {
   const row = el("div", "session" + (S.active && S.active.id === s.id ? " active" : "") + (s.unseen ? " unseen" : ""));
   const src = s.source && s.source !== "yoclaude" ? ` <span class="src">cli</span>` : "";
   const mark = S.busy.has(s.id) ? '<span class="spin busy" title="Working">✻</span>'
              : s.unseen ? '<span class="dot" title="New reply you haven\'t seen"></span>' : "";
+  const where = withFolder ? ` · ${s.cwd ? "▤ " + esc(base(s.cwd)) : "◇ chat"}` : "";
   row.innerHTML = `<div class="t">${mark}${s.pinned ? "▴ " : ""}${esc(s.title)}</div>
-    <div class="m">${esc(ago(s.modified))}${s.branch ? " · ⎇ " + esc(s.branch) : ""}${src}</div>`;
+    <div class="m">${esc(ago(s.modified))}${where}${s.branch ? " · ⎇ " + esc(s.branch) : ""}${src}</div>`;
   row.title = s.first || s.title;
   row.onclick = () => api().open_session(s.id, s.cwd);
   row.oncontextmenu = (e) => { e.preventDefault(); sessionMenu(e, s); };

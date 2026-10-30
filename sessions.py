@@ -23,6 +23,7 @@ import warnings
 
 import anyio
 import claude_agent_sdk as sdk
+from claude_agent_sdk._internal import sessions as sdk_sessions
 
 import workspace
 
@@ -71,6 +72,21 @@ async def _open_process_no_window(*args, **kwargs):
 
 
 anyio.open_process = _open_process_no_window
+
+
+class _SubprocessNoWindow:
+    """The SDK's session listing runs `git worktree list` per folder; without this each one flashes a console."""
+
+    def __getattr__(self, name):
+        return getattr(subprocess, name)
+
+    @staticmethod
+    def run(*args, **kwargs):
+        kwargs.setdefault("creationflags", subprocess.CREATE_NO_WINDOW)
+        return subprocess.run(*args, **kwargs)
+
+
+sdk_sessions.subprocess = _SubprocessNoWindow()
 # Chats pre-approve the web tools on purpose; the SDK warns that those then skip can_use_tool.
 warnings.filterwarnings("ignore", category=sdk.CanUseToolShadowedWarning)
 

@@ -165,6 +165,7 @@ select:focus, input:focus, textarea:focus { border-color: var(--orange); }
 .fnode .fname { overflow: hidden; text-overflow: ellipsis; letter-spacing: .5px; }
 .fnode .fadd { padding: 0 6px; font-size: 11px; visibility: hidden; } .fnode:hover .fadd { visibility: visible; }
 #tree .session { padding-left: 24px; }
+.fnode.recent { border-top: 0; } .fnode.recent .fname { color: var(--amber); }
 .session.unseen .t { color: var(--orange2); }
 .sgroup { padding: 4px 10px 0 24px; font-size: 10px; letter-spacing: 1px; color: var(--dim); text-transform: uppercase; }
 .smore { padding: 3px 10px 6px 24px; font-size: 11px; color: var(--dim); cursor: pointer; } .smore:hover { color: var(--orange); }
