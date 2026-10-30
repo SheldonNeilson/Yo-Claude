@@ -564,11 +564,19 @@ class Session:
                    for t in self.running_tasks()]
         self.router.meta.update(self.id, tasks=running, tasks_pid=self.pid, cwd=self.cwd)
 
-    async def turn(self, prompt, voice):
-        """Send one message and stream the reply into the transcript. Returns Claude's final text."""
+    async def turn(self, prompt, voice, item=None):
+        """Send one message and stream the reply into the transcript. Returns Claude's final text. `item` is your
+        message in the transcript: it's marked queued while an earlier reply runs, and skipped if you cancel it."""
         if self.lock is None:
             self.lock = asyncio.Lock()
+        if item is not None and (self.busy or self.lock.locked()):
+            item["queued"] = True
+            self.changed(item)
         async with self.lock:
+            if item is not None and item.get("cancelled"):
+                return None
+            if item is not None and item.pop("queued", None):
+                self.changed(item)
             self.last_used = time.time()
             self.voice_turn = voice
             self.busy = True
@@ -1333,9 +1341,10 @@ class Router:
         s = self.live.get(sid) if sid else self.active
         if s is None:
             s = self.new_session()
+        item = None
         if origin == "user":
-            s.add({"kind": "user", "text": text, "voice": voice, "attachments": list(attachments),
-                   "image_paths": [save_image(s.id, mt, data) for mt, data in images]})
+            item = s.add({"kind": "user", "text": text, "voice": voice, "attachments": list(attachments),
+                          "image_paths": [save_image(s.id, mt, data) for mt, data in images]})
         prompt = (f"[voice] {text}" if voice else text) + (f"\n\n{context}" if context else "")
         if origin == "system":
             prompt = f"[Yo Claude] {text}"
@@ -1347,7 +1356,17 @@ class Router:
                 yield {"type": "user", "message": {"role": "user", "content": content}, "parent_tool_use_id": None,
                        "session_id": s.id}
             prompt = message()
-        return self.run(s.turn(prompt, voice))
+        return self.run(s.turn(prompt, voice, item))
+
+    def cancel_queued(self, sid, i):
+        """Take back a message that's still waiting its turn. Returns its text and attachments for the box."""
+        s = self.live.get(sid)
+        item = s.items[i] if s and 0 <= i < len(s.items) else None
+        if not item or item.get("kind") != "user" or not item.get("queued"):
+            return {"error": "That message has already been sent."}
+        item.update(cancelled=True, queued=False, kind="cancelled")
+        s.changed(item)
+        return {"text": item.get("text", ""), "attachments": item.get("attachments", [])}
 
     def interrupt(self, sid=None):
         s = self.live.get(sid) if sid else self.active

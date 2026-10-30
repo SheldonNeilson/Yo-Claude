@@ -539,6 +539,11 @@ class Api:
                 "active": r.describe(active) if active else None, "items": active.items if active else [],
                 "display": {"state": a.display, "voice": a.voice_state, "work": a.work_state, "text": a.voice_text}}
 
+    def cancel_queued(self, i):
+        """Take back a queued message in the open session (it goes back in the box)."""
+        r = self._app.router
+        return r.cancel_queued(r.active.id, i) if r.active else {"error": "Open a session first."}
+
     def rewind(self, uuid, mode="both", export=False):
         """Rewind the open session to before one of your messages (see Router.rewind)."""
         r = self._app.router

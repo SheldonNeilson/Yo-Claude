@@ -462,7 +462,8 @@ const transcript = {
   newGroup() {
     const g = { items: [], open: false, el: el("div", "group"), stepEls: new Map() };
     g.head = el("div", "ghead"); g.live = el("img", "glive hidden"); g.steps = el("div", "gsteps hidden");
-    g.el.append(g.head, g.live, g.steps);
+    g.pics = el("div", "gpics hidden");   // pictures Claude looked at in these steps, shown even while folded
+    g.el.append(g.head, g.pics, g.live, g.steps);
     g.head.onclick = () => { g.open = !g.open; g.steps.classList.toggle("hidden", !g.open); this.renderHead(g); };
     $("#transcript").appendChild(g.el);
     this.groups.push(g);
@@ -480,6 +481,21 @@ const transcript = {
       `${sum.errors ? ` · <span class="del">${sum.errors} failed</span>` : ""}</span>` +
       `${now ? `<span class="gnow">now: ${esc(now)}</span>` : ""}<span class="spacer"></span>${whenHtml(items[0]?.ts, "gwhen")}` +
       `<span class="gtog">${g.open ? "▾ hide" : "▸ steps"}</span>`;
+    const pics = items.filter((i) => i.image).slice(-6);
+    if (g.pics.childElementCount !== pics.length || g.pics.dataset.last !== String(pics.at(-1)?.i)) {
+      g.pics.innerHTML = "";
+      g.pics.dataset.last = String(pics.at(-1)?.i);
+      for (const it of pics) {
+        const img = el("img", "gpic");
+        img.src = it.image;
+        const file = it.input?.file_path;
+        img.dataset.tip = file ? `${file}
+Click to open` : "What Claude saw · click to enlarge";
+        img.onclick = (e) => { e.stopPropagation(); file ? viewFile(file) : showPicture(it.image, toolArg(it.name, it.input) || it.name); };
+        g.pics.appendChild(img);
+      }
+    }
+    g.pics.classList.toggle("hidden", !pics.length);
     const showLive = run && sum.pc && this.liveImage && g === this.last;
     g.live.classList.toggle("hidden", !showLive);
     if (showLive && g.live.src !== this.liveImage) g.live.src = this.liveImage;
@@ -593,6 +609,21 @@ function buildItem(it) {
         for (const p of it.image_paths) strip.appendChild(mediaThumb(p, cwd));
         n.appendChild(strip);
       } else if (it.images) n.appendChild(el("span", "chip small", `🖼 ${it.images} image${it.images > 1 ? "s" : ""}`));
+      if (it.queued) {   // waiting for the reply before it: it can still be taken back
+        n.classList.add("queued");
+        const q = el("span", "queuedtag", "⧗ queued ");
+        const x = el("button", "", "✕ cancel");
+        x.dataset.tip = "Don't send this: it goes back in the message box";
+        x.onclick = async (e) => {
+          e.stopPropagation();
+          const r = await api().cancel_queued(it.i);
+          if (r?.error) return toast(r.error, "error");
+          const b = $("#input");
+          b.value = r.text + (b.value ? "\n" + b.value : ""); autosize(); b.focus();
+          for (const p of r.attachments || []) composer.attach(p);
+        };
+        q.appendChild(x); n.appendChild(q);
+      }
       if (it.uuid) {
         const rw = el("button", "rewindbtn", "⟲ rewind");
         rw.dataset.tip = "Go back to before this message: undo the conversation from here, the files, or both";
@@ -604,6 +635,7 @@ function buildItem(it) {
     case "assistant": return el("div", "msg assistant" + (it.streaming ? " cursor" : ""), md(it.text));
     case "approval": return approvalCard(it);
     case "task": return taskCard(it);
+    case "cancelled": return el("div", "hidden");   // a queued message you took back
     case "note": return el("div", "msg note", "⧗ " + esc(it.text));
     case "result": {
       const k = (n) => n >= 1e6 ? (n / 1e6).toFixed(1) + "M" : n >= 1000 ? (n / 1000).toFixed(1) + "k" : String(n || 0);
@@ -828,6 +860,13 @@ async function viewFile(path, cwd, opts = {}) {
   if (opts.attach) buttons.push(["attach to message", () => { composer.attach(path); closeModal(); }]);
   buttons.push(["close", closeModal, "primary"]);
   addButtons(d, buttons);
+}
+
+function showPicture(src, title) {   // a screenshot or picture from a tool result, big
+  const d = dialog(title || "Picture");
+  d.classList.add("wide");
+  const img = el("img", "viewer-media"); img.src = src; d.appendChild(img);
+  addButtons(d, [["close", closeModal, "primary"]]);
 }
 
 // ---------- rewind: back to before one of your messages (conversation, files or both), optionally copying it first ----------
