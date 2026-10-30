@@ -104,6 +104,14 @@
   "idle_turn_left": {
    "frames": 61,
    "stamp": "249370-1793382236"
+  },
+  "idle_turn_right": {
+   "frames": 61,
+   "stamp": "197820-1793382419"
+  },
+  "idle_breath": {
+   "frames": 61,
+   "stamp": "180617-1793382562"
   }
  }
 }

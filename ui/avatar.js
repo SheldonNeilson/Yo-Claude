@@ -52,7 +52,7 @@ const avatar = {
     const count = typeof v === "number" ? v : v.frames;
     try { into[name] = await this.decode(`avatar/${name}.mp4?${v.stamp || ""}`, count); } catch (e) { console.warn("avatar clip", name, e); return; }
     this.stamps[name] = v.stamp || "";
-    (this.blinks ||= {})[name] = firstBlink(into[name], this.AH);
+    (this.blinks ||= {})[name] = blinkRuns(into[name], this.AH);
     if (name === "talking" && into === this.clips) { this.mouth = mouthOpenness(this.clips.talking, this.AH); this.closedFrames = null; }
   },
   // New clips are recorded while she runs (scripts/make_avatar_clips.py adds each to clips.json as it's made): every
@@ -143,31 +143,31 @@ const avatar = {
   // the start of an expression, played only part way and back: a glance, a moment's thought. Not the big-smile ones.
   microClips() {
     return Object.keys(this.clips).filter((n) => !["idle", "talking", "hair", "idle_tuck", "laughing", "looking"].includes(n)
-      && !n.includes("blink") && !(this.blinks?.[n]?.[0] < 6));   // (not if it opens with a blink straight away)
+      && !n.includes("blink") && !(this.blinks?.[n]?.[0]?.[0] < 4));   // (not if it opens with a blink straight away)
   },
   // idle, back at the start frame: a mannerism if one's due (or a mood to show), else now and then a small change of
   // expression, but mostly out to the calm end of her idle clip to rest there a few seconds (swaying among REST).
   nextIdle(now) {
     this.microClip = null; this.restUntil = 0;
     if (this.idleExtra && this.clip === this.idleExtra && !this.extraPending) {   // just played: the next in a while
-      this.idleExtra = null; this.nextIdleExtra = now + 7000 + Math.random() * 9000;
+      this.idleExtra = null; this.nextIdleExtra = now + 14000 + Math.random() * 14000;   // (a whole one now and then)
     }
     this.extraPending = false;
     const extras = this.idleExtras();
     if (!this.idleExtra && extras.length && now > this.nextIdleExtra) {
       this.idleExtra = this.any(extras, this.lastExtra); this.lastExtra = this.idleExtra;
     }
-    if (this.idleExtra) { this.clip = this.idleExtra; this.turnAt = 0; return; }   // the whole thing
+    if (this.idleExtra) { this.clip = this.idleExtra; this.turnAt = 0; this.blinkOk = Math.random() < 0.06; return; }   // the whole thing
     const micro = this.microClips();
-    if (micro.length && Math.random() < 0.25) {
+    if (micro.length && Math.random() < 0.65) {   // mostly small, subtle changes of expression
       this.clip = this.microClip = this.any(micro, this.lastMicro); this.lastMicro = this.clip;
-      this.turnAt = 5 + Math.floor(Math.random() * 12);   // 0.4 to 1.4 s out, the same back
-      const b = this.blinks?.[this.clip];
+      this.turnAt = 3 + Math.floor(Math.random() * 7);   // a hint of it: 0.25 to 0.75 s out, the same back
+      const b = this.blinks?.[this.clip]?.[0];
       if (b) this.turnAt = Math.min(this.turnAt, b[0] - 1);   // turning back before its blink
     } else {
       this.clip = "idle"; this.turnAt = Math.min(this.clips.idle.length - 1, REST[1]);
-      this.blinkOk = Math.random() < 0.15;   // her idle clip's own blink: on the odd pass, else skipped over
-      this.restUntil = now + 4000 + Math.random() * 6000;
+      this.blinkOk = Math.random() < 0.06;   // her idle clip's own blink: on the odd pass, else skipped over
+      this.restUntil = now + 1500 + Math.random() * 3500;
     }
   },
   any(list, not) { const l = list.length > 1 ? list.filter((n) => n !== not) : list; return l[Math.floor(Math.random() * l.length)]; },
@@ -231,8 +231,10 @@ const avatar = {
       const end = Math.min(frames.length - 1, this.turnAt || Infinity);   // a short play turns back early
       const resting = st === "idle" && this.clip === "idle" && now < this.restUntil;
       if (!resting || this.frame < REST[0] || Math.random() < 0.5) this.frame += this.dir;   // resting: slower sways
-      const b = this.clip === "idle" && !this.blinkOk && this.blinks?.idle;
-      if (b && this.frame >= b[0] && this.frame <= b[1]) this.frame = this.dir > 0 ? b[1] + 1 : b[0] - 1;
+      // blinks are skipped over (any clip but the blink ones), bar the odd one: she blinks now and then, not constantly
+      if (!this.blinkOk && !this.clip.includes("blink"))
+        for (const [a, z] of this.blinks?.[this.clip] || [])
+          if (this.frame >= a && this.frame <= z) { this.frame = Math.max(0, Math.min(frames.length - 1, this.dir > 0 ? z + 1 : a - 1)); break; }
       if (this.frame >= end) { this.frame = end; this.dir = -1; }
       if (resting && this.dir < 0 && this.frame <= REST[0]) { this.frame = REST[0]; this.dir = 1; }
       if (this.frame <= 0) {   // forward and back: what next?
@@ -312,19 +314,21 @@ function boxBlur(a, W, H, r) {   // two passes of a running-sum box blur
   return out;
 }
 
-// The frames of a clip's first blink, if it has one in its first two seconds: [first, last], else null. Her eyes are
-// in a band about 39% down the frame; closed, the dark of her pupils and lashes there mostly goes.
-function firstBlink(frames, AH) {
+// A clip's blinks: [[first, last], ...] frames with her eyes shut. Her eyes are in a band about 39% down the frame;
+// shut, the dark of her pupils and lashes there mostly goes. Only short runs count (a long one is her looking away).
+function blinkRuns(frames, AH) {
   const y0 = Math.floor(AH * 0.37), y1 = Math.floor(AH * 0.43), x0 = Math.floor(AW * 0.3), x1 = Math.floor(AW * 0.7);
-  const dark = frames.slice(0, 26).map((g) => {
+  const dark = frames.map((g) => {
     let n = 0;
     for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) if (g[y * AW + x] < 70) n++;
     return n;
   });
-  const open = Math.max(dark[0], dark[1] || 0);
-  let a = -1, b = -1;
-  for (let i = 1; i < dark.length; i++) {
-    if (dark[i] < open * 0.5) { if (a < 0) a = i; b = i; } else if (a >= 0) break;
+  const open = Math.max(dark[0], dark[1] || 0), runs = [];
+  let a = -1;
+  for (let i = 1; i <= dark.length; i++) {
+    const shut = i < dark.length && dark[i] < open * 0.5;
+    if (shut && a < 0) a = i;
+    if (!shut && a >= 0) { if (i - a <= 7 && i < dark.length) runs.push([a, i - 1]); a = -1; }
   }
-  return a >= 0 && b - a <= 10 ? [a, b] : null;   // (a long run is her looking away, not a blink)
+  return runs;
 }
