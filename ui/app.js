@@ -159,7 +159,7 @@ function renderFolder() {
   $("#modeBadge").className = "badge " + (cwd ? "code" : "chat");
 }
 // Yo Claudia with the female character, Yo Claude with the male one (the default), whether the face shows or not
-const appName = () => (S.settings?.character === "female" ? "Yo Claudia" : "Yo Claude");
+const appName = () => (isHer() ? "Yo Claudia" : "Yo Claude");
 function renderName() {
   $("#top .brand").textContent = appName().toUpperCase();
   document.title = appName();
@@ -1221,13 +1221,15 @@ function dictation(e) {
   box.classList.toggle("dictating", e.stage === "heard");   // grey while it's being fixed
   autosize();
 }
-function tidySoon() {
+function tidySoon() {   // at a short pause, or at once when you've just finished a sentence
   clearTimeout(tidy.timer);
-  if (S.settings.fix_text !== false) tidy.timer = setTimeout(tidyNow, 1600);
+  if (S.settings.fix_text === false) return;
+  const v = $("#input").value, ended = /[.!?]\s$/.test(v) || /\n$/.test(v);
+  tidy.timer = setTimeout(tidyNow, ended ? 150 : 800);
 }
 async function tidyNow() {
   const box = $("#input"), text = box.value, t = text.trim();
-  if (tidy.busy || tidy.dictating || tidy.seen.has(text) || t.split(/\s+/).length < 3 || t.startsWith("/")
+  if (tidy.busy || tidy.dictating || tidy.seen.has(text) || t.split(/\s+/).length < 2 || t.startsWith("/")
       || !$("#atlist").classList.contains("hidden")) return;
   tidy.busy = true;
   let fixed = text;

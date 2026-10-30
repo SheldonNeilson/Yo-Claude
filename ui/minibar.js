@@ -50,7 +50,7 @@ class MiniBar {
   label(t) {
     const cur = Math.floor(t * 2) % 2 ? "█" : " ";
     return {
-      starting: "> booting" + cur, idle: `> say "${(typeof S !== "undefined" && S.settings?.character === "female") ? "yo claudia" : "yo claude"}"` + cur, paused: "> wake word off · click to talk",
+      starting: "> booting" + cur, idle: `> say "yo ${who()}"` + cur, paused: "> wake word off · click to talk",
       listening: (this.text ? "> follow-up? " : "> listening ") + cur,
       thinking: MiniBar.SPIN[Math.floor(t * 8) % MiniBar.SPIN.length] + " thinking…", speaking: "● " + who(),
       using_pc: "⌖ using your pc…", approval: "! " + who() + " needs your ok", error: "! microphone unavailable",

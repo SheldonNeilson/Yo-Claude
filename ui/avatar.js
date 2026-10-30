@@ -79,7 +79,7 @@ const avatar = {
     return f;
   },
   // the character's clips: Claudia's (female) in avatar/, Claude's (male, the default) in avatar/male/
-  base() { return S.settings?.character === "female" ? "avatar/" : "avatar/male/"; },
+  base() { const c = S.settings?.character || "male"; return c === "female" ? "avatar/" : `avatar/${c}/`; },
   async manifest() {   // avatar/clips.json: {fps, clips: {name: {frames, stamp}}} (or just a frame count, as it was)
     try { const m = await (await fetch(this.base() + "clips.json", { cache: "no-store" })).json(); return m?.clips ? m : null; } catch (_) { return null; }
   },

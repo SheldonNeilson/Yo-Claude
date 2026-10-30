@@ -123,8 +123,9 @@ const MENUS = {
     ["Remember Queued Messages", () => toggleSetting("keep_queue"), { checked: setting("keep_queue") }],
     "-",
     ["sub:face & fun"],
-    ["Assistant: Claude (male)", () => api().set_setting("character", "male"), { checked: S.settings.character !== "female" }],
-    ["Assistant: Claudia (female)", () => api().set_setting("character", "female"), { checked: S.settings.character === "female" }],
+    ...[["male", "Assistant: Claude"], ["professor", "Assistant: Claude, the Professor"], ["female", "Assistant: Claudia"],
+      ["female2", "Assistant: Claudia (2)"]].map(([c, label]) =>
+      [label, () => api().set_setting("character", c), { checked: (S.settings.character || "male") === c }]),
     ["Face in Sidebar", () => toggleSetting("avatar", false), { checked: setting("avatar", false) }],
     ["Face on Floating Bar", () => toggleSetting("bar_avatar", false), { checked: setting("bar_avatar", false) }],
     ["Activity on Floating Bar", () => toggleSetting("bar_feed"), { checked: setting("bar_feed") }],
