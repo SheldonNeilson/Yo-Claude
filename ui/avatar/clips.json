@@ -1,25 +1,85 @@
 {
  "fps": 12,
  "clips": {
-  "hair": 61,
-  "idle": 61,
-  "idle_blink": 61,
-  "idle_blinks": 61,
-  "idle_brows": 61,
-  "idle_glance": 61,
-  "idle_scrunch": 61,
-  "idle_smirk": 61,
-  "idle_tilt": 61,
-  "idle_tuck": 61,
-  "laughing": 61,
-  "listening": 61,
-  "looking": 61,
-  "talking": 61,
-  "think_nod": 61,
-  "think_purse": 61,
-  "think_read": 61,
-  "think_side": 61,
-  "think_up": 61,
-  "thinking": 61
+  "hair": {
+   "frames": 61,
+   "stamp": "211510-1793381125"
+  },
+  "idle": {
+   "frames": 61,
+   "stamp": "118347-1793381127"
+  },
+  "idle_blink": {
+   "frames": 61,
+   "stamp": "129828-1793381128"
+  },
+  "idle_blinks": {
+   "frames": 61,
+   "stamp": "115319-1793381129"
+  },
+  "idle_brows": {
+   "frames": 61,
+   "stamp": "144519-1793381129"
+  },
+  "idle_glance": {
+   "frames": 61,
+   "stamp": "141095-1793381129"
+  },
+  "idle_scrunch": {
+   "frames": 61,
+   "stamp": "153107-1793381130"
+  },
+  "idle_smirk": {
+   "frames": 61,
+   "stamp": "121378-1793381131"
+  },
+  "idle_tilt": {
+   "frames": 61,
+   "stamp": "161643-1793381132"
+  },
+  "idle_tuck": {
+   "frames": 61,
+   "stamp": "221617-1793381132"
+  },
+  "laughing": {
+   "frames": 61,
+   "stamp": "187418-1793381133"
+  },
+  "listening": {
+   "frames": 61,
+   "stamp": "159516-1793381134"
+  },
+  "looking": {
+   "frames": 61,
+   "stamp": "185072-1793381134"
+  },
+  "talking": {
+   "frames": 61,
+   "stamp": "152503-1793381135"
+  },
+  "think_nod": {
+   "frames": 61,
+   "stamp": "179456-1793381136"
+  },
+  "think_purse": {
+   "frames": 61,
+   "stamp": "177131-1793381137"
+  },
+  "think_read": {
+   "frames": 61,
+   "stamp": "157704-1793381137"
+  },
+  "think_side": {
+   "frames": 61,
+   "stamp": "183204-1793381138"
+  },
+  "think_up": {
+   "frames": 61,
+   "stamp": "165867-1793381138"
+  },
+  "thinking": {
+   "frames": 61,
+   "stamp": "195670-1793381139"
+  }
  }
 }
