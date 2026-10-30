@@ -7,7 +7,7 @@
 // mannerism ends she does another.
 "use strict";
 const RAMP = " .:-=+o/*#0@";   // sparse to dense: white on the dark window, so bright = dense
-const AW = 200;                // the analysis grid frames are decoded to (columns); more than any panel needs
+const AW = 128;                // the analysis grid frames are decoded to (columns): 2 per character across
 const COLS = 64;               // characters across, whatever the panel's width
 const VIEW = [0, 0, 1, 1];     // the part of the clip shown: left, top, right, bottom (fractions)
 const REST = [44, 60];         // idle frames with a soft, closed-mouth smile: where she rests
@@ -36,15 +36,21 @@ const avatar = {
     const manifest = await this.manifest();
     if (!manifest) return;
     this.fps = manifest.fps || 12;
-    for (const [name, v] of Object.entries(manifest.clips)) {
+    // idle first, and she starts as soon as it's in; talking next; the rest join her pool as they're decoded
+    const order = Object.entries(manifest.clips).sort(([a], [b]) => (b === "idle") - (a === "idle") || (b === "talking") - (a === "talking"));
+    for (const [name, v] of order) {
       await this.load(name, v);
-      if (name === "idle" && this.clips.idle) { this.ready = true; this.fit(); }   // start as soon as idle is in
+      if (name === "idle" && this.clips.idle && !this.ready) this.start();
     }
-    if (!this.ready) return;
+    this.loaded = true;   // (only now: before this, refresh would decode the ones still to come a second time)
+    setInterval(() => this.refresh(), 60000);
+  },
+  start() {
+    this.ready = true;
+    this.fit();
     new ResizeObserver(() => this.fit()).observe(this.host);
     this.nextIdleExtra = Date.now() + 8000;
     setInterval(() => this.tick(), 500 / this.fps);   // twice the clips' rate: lip sync uses every beat, the rest every other
-    setInterval(() => this.refresh(), 60000);
   },
   // What to keep out of the calm moments, per clip, from its measured blinks (clips.json, made by
   // scripts/make_avatar_clips.py with a face landmarker; the generated clips blink far more than people do):
@@ -84,7 +90,7 @@ const avatar = {
   // minute, any new or re-made one is decoded and joins her pool. A new idle clip means a new set (another start
   // frame): then all of it is decoded first and swapped in at once, so she never mixes two sets.
   async refresh() {
-    if (this.refreshing || document.hidden) return;
+    if (this.refreshing || !this.loaded || document.hidden) return;
     this.refreshing = true;
     try {
       const m = await this.manifest();
