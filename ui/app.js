@@ -2,7 +2,7 @@
 "use strict";
 const $ = (s) => document.querySelector(s);
 const api = () => window.pywebview.api;
-const S = { settings: {}, folder: null, workspaces: [], groups: [], lists: {}, busy: new Set(), active: null,
+const S = { settings: {}, folder: null, workspaces: [], groups: [], lists: {}, busy: new Set(), bg: new Set(), active: null,
             items: [], display: { state: "starting" }, filter: "", manual: {}, more: new Set() };
 
 const MODELS = [["", "model: default"], ["claude-fable-5-1", "Fable 5.1"], ["claude-opus-5-5", "Opus 5.5"],
@@ -12,7 +12,7 @@ const EFFORTS = [["", "effort: default"], ["low", "effort: low"], ["medium", "ef
 const PERMS = [["auto", "auto mode"], ["default", "ask before changes"], ["acceptEdits", "auto-accept edits"], ["plan", "plan mode"]];
 const STATE_LABEL = { starting: "booting…", idle: "● ready", paused: "○ wake word off", listening: "◉ listening",
                       thinking: "✻ thinking…", speaking: "▶ speaking", using_pc: "⌖ using your pc",
-                      approval: "! needs your ok", error: "✗ mic unavailable" };
+                      approval: "! needs your ok", error: "✗ mic unavailable", background: "⧗ background task" };
 const SPIN = "·✢✳✶✻✽✻✶✳✢";
 const SESSIONS_SHOWN = 12;   // per folder, before "show more"
 const RECENT_SHOWN = 8;      // in the Recent section at the top of the tree
@@ -93,8 +93,14 @@ function handle(e) {
     case "live": if (S.active && e.session === S.active.id) transcript.live(e.image); break;
     case "settings": S.settings = e.settings; renderToggles(); break;
     case "folder": S.folder = e.folder; renderHead(); break;
+    case "confirm_quit":
+      confirmBox(`Claude is in the middle of a reply in ${e.busy.map((b) => `“${b.title}”`).join(", ")}. ` +
+                 "Quitting now cuts it off (background tasks keep running and are picked up after a restart).",
+                 () => api().quit(true));
+      break;
     case "work":
       if (e.session_state === "idle") S.busy.delete(e.session); else S.busy.add(e.session);
+      if (e.session_state === "background") S.bg.add(e.session); else S.bg.delete(e.session);
       renderTree();
       if (S.active && e.session === S.active.id) {
         S.active.busy = e.session_state !== "idle"; renderBusy(); transcript.refreshGroups();
@@ -134,6 +140,10 @@ function animate() {   // spinners: header state, busy sessions in the tree, run
   if (S.display.state === "thinking") renderState();
   const glyph = SPIN[Math.floor(t / 120) % SPIN.length];
   document.querySelectorAll(".spin").forEach((n) => { n.textContent = glyph; });
+  if (Math.floor(t / 1000) !== animate.sec) {   // background-task timers, once a second
+    animate.sec = Math.floor(t / 1000);
+    document.querySelectorAll(".elapsed").forEach((n) => { n.textContent = fmtElapsed(Date.now() - +n.dataset.start); });
+  }
   requestAnimationFrame(animate);
 }
 const inbar = new MiniBar($("#inbar"));
@@ -163,7 +173,10 @@ async function loadLists() {
   const keys = [null, ...S.workspaces];
   const lists = await Promise.all(keys.map((cwd) => api().list_sessions(cwd)));
   keys.forEach((cwd, i) => { S.lists[keyOf(cwd)] = lists[i] || []; });
-  for (const s of allSessions()) if (s.busy) S.busy.add(s.id);
+  for (const s of allSessions()) {
+    if (s.busy) S.busy.add(s.id);
+    if (s.background) { S.busy.add(s.id); S.bg.add(s.id); }
+  }
 }
 // A folder is open when it has recent activity (busy, unseen reply, changed in the last day, or holds the session
 // you're in), closed otherwise. Opening or closing one yourself wins until something new happens in it.
@@ -239,7 +252,8 @@ function renderTree() {
 function sessionRow(s, withFolder = false) {
   const row = el("div", "session" + (S.active && S.active.id === s.id ? " active" : "") + (s.unseen ? " unseen" : ""));
   const src = s.source && s.source !== "yoclaude" ? ` <span class="src">cli</span>` : "";
-  const mark = S.busy.has(s.id) ? '<span class="spin busy" title="Working">✻</span>'
+  const mark = S.bg.has(s.id) ? '<span class="spin busy bgtask" title="Background task running">✻</span>'
+             : S.busy.has(s.id) ? '<span class="spin busy" title="Working">✻</span>'
              : s.unseen ? '<span class="dot" title="New reply you haven\'t seen"></span>' : "";
   const where = withFolder ? ` · ${s.cwd ? "▤ " + esc(base(s.cwd)) : "◇ chat"}` : "";
   row.innerHTML = `<div class="t">${mark}${s.pinned ? "▴ " : ""}${esc(s.title)}</div>
@@ -505,6 +519,8 @@ function buildItem(it) {
     }
     case "assistant": return el("div", "msg assistant" + (it.streaming ? " cursor" : ""), md(it.text));
     case "approval": return approvalCard(it);
+    case "task": return taskCard(it);
+    case "note": return el("div", "msg note", "⧗ " + esc(it.text));
     case "result": {
       const k = (n) => n >= 1e6 ? (n / 1e6).toFixed(1) + "M" : n >= 1000 ? (n / 1000).toFixed(1) + "k" : String(n || 0);
       return el("div", "msg result", esc(`— ${k(it.tokens)} tokens processed (${k(it.cached)} cached) · ` +
@@ -580,6 +596,33 @@ function approvalCard(it) {
     n.appendChild(b);
   }
   return n;
+}
+function taskCard(it) {   // a background task: running timer, stop, its output
+  const running = it.status === "running" || it.status === "pending";
+  const icon = running ? '<span class="spin">✻</span>' : { completed: "✓", failed: "✗", stopped: "⊘", killed: "⊘" }[it.status] || "●";
+  const n = el("div", `taskcard ${running ? "running" : it.status}`);
+  n.innerHTML = `<span class="ticon">${icon}</span><span class="tlabel">background task</span>` +
+    `<span class="tdesc">${esc(it.description || "")}</span>` +
+    (running ? `<span class="elapsed" data-start="${(it.started || 0) * 1000}"></span>` : `<span class="tstat">${esc(it.status)}</span>`) +
+    (it.last_tool ? `<span class="dim">· ${esc(it.last_tool)}</span>` : "") + `<span class="spacer"></span>`;
+  if (running && !it.detached) {
+    const b = el("button", "danger", "[stop]");
+    b.onclick = async () => { const err = await api().stop_task(S.active.id, it.task_id); if (err) alertBox(err); };
+    n.appendChild(b);
+  }
+  if (it.output_file) {
+    const b = el("button", "", "[output]");
+    b.onclick = () => viewFile(it.output_file);
+    n.appendChild(b);
+  }
+  const wrap = el("div", "taskwrap"); wrap.appendChild(n);
+  if (it.detached) wrap.appendChild(el("div", "dim small", "Started before Yo Claude restarted. It's still running; Claude will be told when it finishes."));
+  if (it.summary && !running) wrap.appendChild(el("div", "dim small", esc(it.summary)));
+  return wrap;
+}
+function fmtElapsed(ms) {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  return s < 60 ? `${s}s` : s < 3600 ? `${Math.floor(s / 60)}m ${s % 60}s` : `${Math.floor(s / 3600)}h ${Math.floor(s / 60) % 60}m`;
 }
 function renderBusy() {
   $("#input").placeholder = S.active?.busy

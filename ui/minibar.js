@@ -34,7 +34,8 @@ class MiniBar {
       starting: "> booting" + cur, idle: '> say "yo claude"' + cur, paused: "> wake word off · click to talk",
       listening: (this.text ? "> follow-up? " : "> listening ") + cur,
       thinking: MiniBar.SPIN[Math.floor(t * 8) % MiniBar.SPIN.length] + " thinking…", speaking: "● claude",
-      using_pc: "⌖ using your pc…", approval: "! claude needs your ok", error: "! error",
+      using_pc: "⌖ using your pc…", approval: "! claude needs your ok", error: "! microphone unavailable",
+      background: MiniBar.SPIN[Math.floor(t * 4) % MiniBar.SPIN.length] + " background task running",
     }[this.state] || this.state;
   }
   shownText() {

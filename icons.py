@@ -22,7 +22,7 @@ ORANGE = (217, 119, 87)
 STATE_COLORS = {
     "starting": (150, 144, 134), "idle": ORANGE, "paused": (110, 108, 104), "listening": (255, 140, 96),
     "thinking": (232, 176, 75), "speaking": (159, 209, 127), "using_pc": (90, 176, 255),
-    "approval": (255, 196, 0), "error": (255, 90, 90),
+    "approval": (255, 196, 0), "error": (255, 90, 90), "background": (185, 163, 255),
 }
 DATA_DIR = os.path.join(os.path.expanduser("~"), ".yoclaude")
 ICO_PATH = os.path.join(DATA_DIR, "yo-claude.ico")

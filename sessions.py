@@ -8,6 +8,7 @@ items for the UI, and routes tool approvals to the UI and to voice.
 
 import asyncio
 import base64
+import ctypes
 import hashlib
 import io
 import json
@@ -236,6 +237,12 @@ class Session:
         self.last_used = time.time()
         self.cost_seen = 0.0                # the CLI reports cost cumulatively per connection
         self.lock = None                    # asyncio.Lock, made on the loop
+        self.reader = None                  # the task reading everything Claude sends
+        self.turn_future = None             # resolved with Claude's reply to the message being sent
+        self.unsolicited = False            # Claude is replying by itself (a background task finished)
+        self.tasks = {}                     # background task id -> its transcript item
+        self.task_outputs = {}              # tool_use_id -> output file (named in the tool result)
+        self.pid = None                     # this session's claude.exe
 
     @property
     def mode(self):
@@ -373,10 +380,18 @@ class Session:
             self.client = sdk.ClaudeSDKClient(options=self.options())
             self.cost_seen = 0.0
             await self.client.connect()
+            try:   # remembered with background tasks, so a restart can tell whether they're still going
+                self.pid = self.client._transport._process.pid
+            except Exception:
+                self.pid = None
+            self.reader = asyncio.ensure_future(self.read_loop(self.client))
             self.router.evict(keep=self)
 
     async def disconnect(self):
         client, self.client = self.client, None
+        if self.reader:
+            self.reader.cancel()
+            self.reader = None
         if client:
             try:
                 await client.disconnect()
@@ -384,6 +399,89 @@ class Session:
                 log.debug("disconnect %s: %s", self.id, e)
         if self.items:
             self.resumed = True   # reconnecting must resume, not start over
+
+    async def read_loop(self, client):
+        """Everything Claude sends, for as long as the connection lives: replies to your messages, and replies it
+        starts by itself (a background task finished), plus background-task progress in between."""
+        try:
+            async for m in client.receive_messages():
+                try:
+                    self.dispatch(m)
+                except Exception:
+                    log.exception("Couldn't handle a message from Claude")
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            log.warning("Session %s stopped listening: %s", self.id, e)
+        finally:
+            if self.turn_future and not self.turn_future.done():
+                self.turn_future.set_exception(RuntimeError("Claude stopped responding"))
+            if self.client is client:   # Claude's process ended on its own
+                self.client = None
+                self.reader = None
+                self.resumed = True
+
+    def dispatch(self, m):
+        if isinstance(m, (sdk.TaskStartedMessage, sdk.TaskProgressMessage, sdk.TaskUpdatedMessage,
+                          sdk.TaskNotificationMessage)):
+            return self.on_task(m)
+        in_turn = self.turn_future is not None and not self.turn_future.done()
+        if not in_turn and not self.unsolicited and isinstance(m, (sdk.AssistantMessage, sdk.StreamEvent)):
+            self.unsolicited = True          # Claude picked up again by itself, e.g. a background task finished
+            self.busy = True
+            self.router.set_work(self, "thinking")
+        result = self.handle(m)
+        if isinstance(m, sdk.ResultMessage):
+            if in_turn:
+                self.turn_future.set_result(result)
+            elif self.unsolicited:
+                self.unsolicited = False
+                self.busy = False
+                self.after_turn()
+
+    def after_turn(self):
+        self.stream_item = None
+        if self.router.active is not self:   # finished while you were looking at another session
+            self.router.meta.update(self.id, unseen=True)
+        self.router.set_work(self, "background" if self.running_tasks() else "idle")
+        self.router.sessions_changed(self.cwd)
+
+    # --- background tasks ---
+    def running_tasks(self):
+        return [t for t in self.tasks.values() if t["status"] in ("pending", "running")]
+
+    def on_task(self, m):
+        t = self.tasks.get(m.task_id)
+        if t is None:
+            t = self.tasks[m.task_id] = {"kind": "task", "task_id": m.task_id, "status": "running",
+                                         "description": "", "started": time.time(), "output_file": None}
+            t["tool_use_id"] = getattr(m, "tool_use_id", None)
+            t["output_file"] = self.task_outputs.get(t["tool_use_id"])
+            self.add(t)
+        if getattr(m, "description", None):
+            t["description"] = m.description
+        if isinstance(m, sdk.TaskStartedMessage):
+            t["type"] = m.task_type
+        elif isinstance(m, sdk.TaskProgressMessage):
+            t["last_tool"] = m.last_tool_name
+        elif isinstance(m, sdk.TaskUpdatedMessage) and m.status:
+            t["status"] = m.status
+        elif isinstance(m, sdk.TaskNotificationMessage):
+            t["status"] = m.status or t["status"]
+            t["summary"] = m.summary
+            t["output_file"] = m.output_file or t["output_file"]
+        if t["status"] not in ("pending", "running"):
+            t["ended"] = time.time()
+        self.changed(t)
+        self.save_tasks()
+        if not self.busy:
+            self.router.set_work(self, "background" if self.running_tasks() else "idle")
+
+    def save_tasks(self):
+        """Running tasks, with this session's Claude process id: after a restart Yo Claude can follow them."""
+        running = [{k: t.get(k) for k in ("task_id", "description", "output_file", "started", "type")}
+                   for t in self.running_tasks()]
+        self.router.meta.update(self.id, tasks=running, tasks_pid=self.pid, cwd=self.cwd)
 
     async def turn(self, prompt, voice):
         """Send one message and stream the reply into the transcript. Returns Claude's final text."""
@@ -398,24 +496,19 @@ class Session:
                 if self.cwd and not self.baseline:   # the changes panel needs "before" captured before any edit
                     await asyncio.to_thread(self.router.take_baseline, self, "opened" if self.resumed else "start")
                 await self.connect()
+                self.turn_future = asyncio.get_running_loop().create_future()
                 await self.client.query(prompt)
-                final = ""
-                async for m in self.client.receive_response():
-                    final = self.handle(m) or final
-                return final
+                return await self.turn_future or ""
             except Exception as e:
                 log.exception("Turn failed")
                 self.add({"kind": "error", "text": f"{type(e).__name__}: {e}"})
                 await self.disconnect()
                 return None
             finally:
+                self.turn_future = None
                 self.busy = False
                 self.voice_turn = False
-                self.stream_item = None
-                if self.router.active is not self:   # finished while you were looking at another session
-                    self.router.meta.update(self.id, unseen=True)
-                self.router.set_work(self, "idle")
-                self.router.sessions_changed(self.cwd)
+                self.after_turn()
 
     def handle(self, m):
         if isinstance(m, sdk.StreamEvent):
@@ -460,6 +553,14 @@ class Session:
                             if pics:   # what Claude saw (screenshots), as a small thumbnail
                                 item["image"] = thumbnail(pics[-1][1])
                             self.changed(item)
+                            out = re.search(r"Output is being written to: (.+?\.output)", item["result"] or "")
+                            if out:   # a background task: where its output goes (kept for after a restart)
+                                self.task_outputs[b.tool_use_id] = out.group(1)
+                                for t in self.tasks.values():
+                                    if t.get("tool_use_id") == b.tool_use_id:
+                                        t["output_file"] = out.group(1)
+                                        self.changed(t)
+                                        self.save_tasks()
                             path = (item["input"] or {}).get("file_path")
                             if path and item["name"] in ("Edit", "MultiEdit", "Write", "NotebookEdit") \
                                     and path not in self.touched:
@@ -497,12 +598,14 @@ class Router:
         self.live = {}                      # session id -> Session (open in the app this run)
         self.active = None                  # the session voice and the input box talk to
         self.folder = None                  # folder new sessions use; None = chat
-        self.work = {}                      # session id -> "thinking" | "using_pc" | "awaiting_approval"
+        self.work = {}                      # session id -> "thinking" | "using_pc" | "awaiting_approval" | "background"
+        self.detached = {}                  # session id -> background tasks still running from before a restart
         self.on_voice_approval = None       # set by the voice assistant
         os.makedirs(CHAT_DIR, exist_ok=True)
         os.makedirs(TRASH_DIR, exist_ok=True)
         self.loop = asyncio.new_event_loop()
         threading.Thread(target=self.loop.run_forever, name="sessions", daemon=True).start()
+        self.restore_detached()
 
     def emit(self, kind, **data):
         self._emit(kind, data)
@@ -512,21 +615,115 @@ class Router:
 
     # --- state for the icons ---
     def set_work(self, session, state):
+        sid = session if isinstance(session, str) else session.id
         if state == "idle":
-            self.work.pop(session.id, None)
+            self.work.pop(sid, None)
         else:
-            self.work[session.id] = state
-        self.emit("work", state=self.work_summary(), session=session.id, session_state=state)
+            self.work[sid] = state
+        self.emit("work", state=self.work_summary(), session=sid, session_state=state)
 
     def work_state(self, session):
         return self.work.get(session.id, "idle")
 
     def work_summary(self):
         states = set(self.work.values())
-        for s in ("awaiting_approval", "using_pc", "thinking"):
+        for s in ("awaiting_approval", "using_pc", "thinking", "background"):
             if s in states:
                 return s
         return "idle"
+
+    def busy_report(self):
+        """What would be lost by quitting now: sessions mid-reply, and background tasks (those survive a restart)."""
+        out = []
+        for sid, state in self.work.items():
+            s = self.live.get(sid)
+            title = (self.meta.session(sid).get("title") or (s.items[0].get("text", "")[:60] if s and s.items else "")
+                     or sid[:8])
+            tasks = [t["description"] for t in s.running_tasks()] if s else \
+                    [t.get("description") for t in self.detached.get(sid, [])]
+            out.append({"id": sid, "title": title, "state": state, "tasks": tasks})
+        return out
+
+    def shutdown(self):
+        """Quitting: close sessions, except ones with background tasks running. Those keep going on their own and
+        Yo Claude picks them up again at its next start (restore_detached)."""
+        for s in list(self.live.values()):
+            if s.running_tasks():
+                s.save_tasks()
+                log.info("Leaving %s running: %d background task(s)", s.id, len(s.running_tasks()))
+                continue
+            try:
+                self.run(s.disconnect()).result(5)
+            except Exception:
+                pass
+
+    # --- background tasks that outlived a restart ---
+    def restore_detached(self):
+        """Background tasks still recorded from before Yo Claude last quit (or was killed)."""
+        for sid, m in list(self.meta.data["sessions"].items()):
+            if m.get("tasks") and not m.get("deleted"):
+                self.detached[sid] = m["tasks"]
+                self.work[sid] = "background"
+                log.info("Following %d background task(s) of %s from before the restart", len(m["tasks"]), sid)
+        if self.detached:
+            threading.Thread(target=self.watch_detached, daemon=True, name="detached-tasks").start()
+
+    def detached_alive(self, sid):
+        """Finished when every task's output ends with Claude Code's "[exited with code N]" marker. Tasks without one
+        (agents) count as running while their Claude process lives or their output changed in the last minute."""
+        m = self.meta.session(sid)
+        unknown = False
+        for t in self.detached.get(sid, []):
+            out = t.get("output_file")
+            if out and os.path.exists(out):
+                if exit_marker(out):
+                    continue
+                if time.time() - os.path.getmtime(out) < 60:
+                    return True
+            unknown = True
+        return unknown and pid_alive(m.get("tasks_pid"))
+
+    def watch_detached(self):
+        while self.detached:
+            for sid in list(self.detached):
+                if not self.detached_alive(sid):
+                    self.detached_finished(sid)
+            time.sleep(10)
+
+    def detached_finished(self, sid):
+        """A task from before the restart is done: let its session know, so Claude checks it and reports back."""
+        tasks = self.detached.pop(sid, [])
+        m = self.meta.session(sid)
+        cwd = m.get("cwd")
+        self.meta.update(sid, tasks=[], tasks_pid=None)
+        self.work.pop(sid, None)
+        names = "; ".join(f"\"{t.get('description') or 'background task'}\"" +
+                          (f" (output: {t['output_file']})" if t.get("output_file") else "") for t in tasks)
+        log.info("Background task(s) of %s finished after the restart: %s", sid, names)
+        s = self.live.get(sid)
+        if s is None:
+            s = Session(self, cwd, sid, resumed=True)
+            s.load_history()
+            self.live[sid] = s
+        s.add({"kind": "note", "text": f"Background task finished while Yo Claude was restarting: {names}"})
+        self.send("Yo Claude restarted while your background task kept running, so its completion notice didn't "
+                  f"reach you. It has now finished: {names}. Check the result and carry on with what you said you'd "
+                  "do when it was done.", sid=sid, origin="system")
+
+    def stop_task(self, sid, task_id):
+        s = self.live.get(sid)
+        if s and s.client and task_id in s.tasks:
+            self.run(s.client.stop_task(task_id))
+            return None
+        return "That task isn't connected to this window (it started before Yo Claude restarted)."
+
+    def evict(self, keep):
+        """Keep at most MAX_LIVE sessions connected (never one whose background tasks are still running)."""
+        connected = sorted((s for s in self.live.values()
+                            if s.client and s is not keep and not s.busy and not s.running_tasks()),
+                           key=lambda s: s.last_used)
+        while len(connected) >= MAX_LIVE:
+            asyncio.ensure_future(connected.pop(0).disconnect())
 
     # --- MCP servers ---
     def mcp_servers(self, cwd):
@@ -569,6 +766,8 @@ class Router:
             seen.add(s.session_id)
             out.append({"id": s.session_id, "title": m.get("title") or s.custom_title or s.summary or s.first_prompt
                         or "(empty)", "first": s.first_prompt, "modified": s.last_modified, "created": s.created_at,
+                        "background": s.session_id in self.detached or bool(
+                            s.session_id in self.live and self.live[s.session_id].running_tasks()),
                         "branch": s.git_branch, "cwd": cwd, "tag": s.tag, "source": m.get("source", "claude code"),
                         "pinned": bool(m.get("pinned")), "group": m.get("group"), "unseen": bool(m.get("unseen")),
                         "live": s.session_id in self.live, "busy": s.session_id in self.work})
@@ -619,6 +818,8 @@ class Router:
         if s is None:
             s = Session(self, cwd, sid, resumed=True)
             s.load_history()
+            for t in self.detached.get(sid, []):   # still running from before a restart
+                s.add({"kind": "task", "status": "running", "detached": True, **t})
             self.live[sid] = s
         s.picked = True
         self.active = s
@@ -657,23 +858,20 @@ class Router:
         return {"id": s.id, "cwd": s.cwd, "mode": s.mode, "permission_mode": s.permission_mode, "busy": s.busy,
                 "model": s.model or "", "effort": s.effort or ""}
 
-    def evict(self, keep):
-        """Keep at most MAX_LIVE sessions connected."""
-        connected = sorted((s for s in self.live.values() if s.client and s is not keep and not s.busy),
-                           key=lambda s: s.last_used)
-        while len(connected) >= MAX_LIVE:
-            asyncio.ensure_future(connected.pop(0).disconnect())
-
     # --- talking ---
-    def send(self, text, voice=False, sid=None, context="", attachments=(), images=()):
+    def send(self, text, voice=False, sid=None, context="", attachments=(), images=(), origin="user"):
         """Send a message to a session (default: the active one). Returns a concurrent Future with the reply.
-        `context` is extra prompt text (attached files); `images` are (media_type, base64) pairs."""
+        `context` is extra prompt text (attached files); `images` are (media_type, base64) pairs. origin="system" is
+        Yo Claude itself writing (shown as a note, not as you)."""
         s = self.live.get(sid) if sid else self.active
         if s is None:
             s = self.new_session()
-        s.add({"kind": "user", "text": text, "voice": voice, "attachments": list(attachments),
-               "image_paths": [save_image(s.id, mt, data) for mt, data in images]})
+        if origin == "user":
+            s.add({"kind": "user", "text": text, "voice": voice, "attachments": list(attachments),
+                   "image_paths": [save_image(s.id, mt, data) for mt, data in images]})
         prompt = (f"[voice] {text}" if voice else text) + (f"\n\n{context}" if context else "")
+        if origin == "system":
+            prompt = f"[Yo Claude] {text}"
         if images:
             content = [{"type": "text", "text": prompt}] + [
                 {"type": "image", "source": {"type": "base64", "media_type": mt, "data": data}} for mt, data in images]
@@ -877,6 +1075,28 @@ def pc_control_server():
             "env": {"SCREEN_CONTROL_LOG": os.path.join(PC_CONTROL_DATA, "screen-control.log"),
                     "SCREEN_CONTROL_MACROS": os.path.join(PC_CONTROL_DATA, "macros"),
                     "SCREEN_CONTROL_KILL_FILE": os.path.join(PC_CONTROL_DATA, "DISABLED")}}
+
+
+def exit_marker(path):
+    """Claude Code ends a background command's output file with "[exited with code N]"."""
+    try:
+        with open(path, "rb") as f:
+            f.seek(max(0, os.path.getsize(path) - 200))
+            return b"[exited with code" in f.read()
+    except OSError:
+        return False
+
+
+def pid_alive(pid):
+    if not pid:
+        return False
+    handle = ctypes.windll.kernel32.OpenProcess(0x1000, False, int(pid))   # PROCESS_QUERY_LIMITED_INFORMATION
+    if not handle:
+        return False
+    code = ctypes.c_ulong()
+    ctypes.windll.kernel32.GetExitCodeProcess(handle, ctypes.byref(code))
+    ctypes.windll.kernel32.CloseHandle(handle)
+    return code.value == 259   # STILL_ACTIVE
 
 
 def same_folder(a, b):

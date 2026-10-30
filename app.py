@@ -65,6 +65,8 @@ def display_state(voice, work):
         return voice
     if work == "thinking" or voice == "thinking":
         return "thinking"
+    if work == "background" and voice in ("idle", "paused", None):
+        return "background"
     return voice or "starting"
 
 
@@ -177,7 +179,11 @@ class App:
             self.notify(f"An update is available ({behind} change{'s' if behind != '1' else ''}). "
                         "Tray menu → Check for updates to install it.")
             return
-        self.notify("Updating Yo Claude… it restarts in a moment.")
+        if self.replying():
+            self.notify("An update is ready, but Claude is in the middle of a reply. "
+                        "Check for updates again when it's done.")
+            return
+        self.notify("Updating Yo Claude… it restarts in a moment. Background tasks keep running.")
         subprocess.Popen(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
                           os.path.join(HERE, "install.ps1"), "-Update"], cwd=HERE,
                          creationflags=subprocess.CREATE_NEW_CONSOLE)
@@ -222,6 +228,7 @@ class App:
                     self.voice_hold = d.get("hold", 0.0)
                 elif kind == "work":
                     self.work_state = d["state"]
+                    self.write_status()
                 main_events.append({"kind": kind, **d})
             new_display = display_state(self.voice_state, self.work_state)
             if new_display != self.display or any(e["kind"] in ("state", "work") for e in main_events):
@@ -393,7 +400,7 @@ class App:
             pystray.MenuItem("Check for updates…",
                              lambda: threading.Thread(target=self.check_updates, daemon=True).start()),
             pystray.MenuItem("Open log", lambda: os.startfile(LOG_PATH)),
-            pystray.MenuItem("Quit", lambda: self.quit()),
+            pystray.MenuItem("Quit", lambda: self.request_quit()),
         )
         icon = pystray.Icon("YoClaude", icons.tray_frame("starting", 0), "Yo Claude – starting", menu)
         icon.run_detached()
@@ -415,14 +422,34 @@ class App:
             if icons.animated(self.display) or self.tick % 20 in (0, 1):
                 self.update_tray()
 
+    def replying(self):
+        """Sessions in the middle of a reply (quitting would cut those off; background tasks survive a restart)."""
+        return [b for b in self.router.busy_report() if b["state"] != "background"]
+
+    def write_status(self):
+        """~/.yoclaude/status.json: what's busy right now, for anything (or anyone) about to restart Yo Claude."""
+        try:
+            with open(os.path.join(DATA_DIR, "status.json"), "w", encoding="utf-8") as f:
+                json.dump({"updated": time.time(), "pid": os.getpid(), "busy": self.router.busy_report()}, f, indent=1)
+        except Exception as e:
+            log.debug("status.json: %s", e)
+
+    def request_quit(self):
+        """From the tray: ask first if a reply is in progress."""
+        busy = self.replying()
+        if not busy:
+            return self.quit()
+        self.show_main()
+        self.bus.put(("confirm_quit", {"busy": busy}))
+
     def quit(self):
         self.quitting = True
         self.commands.put("quit")
-        for s in list(self.router.live.values()):
-            try:
-                self.router.run(s.disconnect()).result(5)
-            except Exception:
-                pass
+        self.router.shutdown()   # leaves sessions with background tasks running; picked up again next start
+        try:
+            os.remove(os.path.join(DATA_DIR, "status.json"))
+        except OSError:
+            pass
         if self.tray:
             self.tray.stop()
         for w in (self.bar, self.main):
@@ -719,6 +746,14 @@ class Api:
         self._app.settings.save()
         self._app.commands.put(("alternates", phrases))
         self._app.emit_settings()
+
+    def quit(self, force=False):
+        a = self._app
+        if force or not a.replying():
+            threading.Thread(target=a.quit, daemon=True).start()
+
+    def stop_task(self, sid, task_id):
+        return self._app.router.stop_task(sid, task_id)
 
     def ui_loaded(self, info):
         log.info("Window loaded: %s", str(info)[:300])

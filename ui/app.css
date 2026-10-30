@@ -208,6 +208,19 @@ select:focus, input:focus, textarea:focus { border-color: var(--orange); }
 .viewer-media { display: block; max-width: 100%; max-height: 68vh; margin: 8px auto; background: #000; }
 .viewer-pdf { width: 100%; height: 68vh; border: 1px solid var(--line); background: #fff; }
 
+/* background tasks and Yo Claude's own notes */
+.taskwrap { margin: 6px 0; max-width: 980px; }
+.taskcard { display: flex; align-items: center; gap: 8px; border: 1px dashed #6f5fb0; background: #15131d; padding: 4px 8px; }
+.taskcard.running { border-style: solid; border-color: #b9a3ff; }
+.taskcard.failed, .taskcard.killed { border-color: var(--red); }
+.taskcard .ticon { width: 1.1em; color: #b9a3ff; } .taskcard.completed .ticon { color: var(--green); }
+.taskcard .tlabel { color: #b9a3ff; font-weight: bold; flex: none; }
+.taskcard .tdesc { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.taskcard .elapsed, .taskcard .tstat { color: var(--amber); flex: none; }
+.taskcard button { padding: 0 6px; font-size: 11px; }
+.msg.note { color: #b9a3ff; font-size: 12px; }
+.spin.bgtask { color: #b9a3ff; }
+
 /* clean up */
 .cleanlist { border: 1px solid var(--line); background: var(--bg); max-height: 55vh; overflow-y: auto; margin-top: 10px; padding: 4px 0; }
 .cleanfolder { padding: 6px 10px 2px; color: var(--dim); font-size: 11px; letter-spacing: .5px; }

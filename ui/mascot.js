@@ -10,7 +10,7 @@ const MASCOT = {
   lookL: ["..############..", "..#.######.###..", "################", "..############..", "...#.#....#.#..."],
   lookR: ["..############..", "..###.######.#..", "################", "..############..", "...#.#....#.#..."],
   colors: { starting: "#968f86", idle: "#d97757", paused: "#6e6c68", listening: "#ff8c60", thinking: "#e8b04b",
-            speaking: "#9fd17f", using_pc: "#5ab0ff", approval: "#ffc400", error: "#ff5a5a" },
+            speaking: "#9fd17f", using_pc: "#5ab0ff", approval: "#ffc400", error: "#ff5a5a", background: "#b9a3ff" },
   // level: 0..1 mic loudness (bounce while listening)
   draw(canvas, state, level = 0, t = performance.now() / 1000) {
     const g = canvas.getContext("2d"), W = canvas.width, H = canvas.height;

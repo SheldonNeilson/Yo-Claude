@@ -48,7 +48,10 @@ TEXT_HOLD_S = 12             # how long a reply stays on the bar when voice repl
 DEFAULT_SETTINGS = {"listening": True, "voice_replies": True, "pc_control": True, "bar_when_idle": True,
                     "launch_at_login": True, "show_bar": True, "show_window": True, "onboarded": False}
 
-GREETINGS = ["Hey, how can I help?", "Yo! What do you need?", "How can I help?", "What's up?", "I'm listening."]
+GREETINGS = ["Yeah?", "Yo!", "Go ahead.", "What's up?", "Mm-hm?"]   # short: you can start talking sooner
+PREROLL_S = 1.0      # audio kept from before speech is detected (soft first words)
+START_ON = 0.4       # speech probability that starts a request (a little more sensitive than the wake word's)
+TARGET_RMS = 3000    # quiet requests are brought up to about this loudness before transcribing
 DIDNT_HEAR = "I didn't hear anything."
 DIDNT_CATCH = "Sorry, I didn't catch that."
 OKAY = "Okay."
@@ -142,6 +145,7 @@ class VoskWake:
         self.phrase = phrase
         self.speech = self.quiet = 0
         self.last_text = None   # text of the utterance that just finished, if one did on this frame
+        self.after = []         # words straight after the wake word in that utterance
         self.set_alternates(alternates)
 
     def set_alternates(self, alternates):
@@ -169,7 +173,11 @@ class VoskWake:
         if text:
             log.debug("Wake engine heard: %s", text)
         self.last_text = text
-        return any(p in text for p in self.phrases)
+        for p in self.phrases:
+            if p in text:
+                self.after = text.split(p, 1)[1].split()   # words said straight after the wake word
+                return True
+        return False
 
     def reset(self):
         self.rec.Reset()
@@ -177,19 +185,21 @@ class VoskWake:
 
 
 class Utterance:
-    """Collects one spoken request: starts when the VAD hears speech, ends after END_SILENCE_S of non-speech."""
+    """Collects one spoken request: starts when the VAD hears speech, ends after END_SILENCE_S of non-speech.
+    It keeps a second from before speech was detected, so a soft first word isn't clipped."""
 
     def __init__(self, start_timeout_s, followup):
         self.start_timeout_s, self.followup = start_timeout_s, followup
-        self.pre = deque(maxlen=int(FPS * 0.5))
+        self.pre = deque(maxlen=int(FPS * PREROLL_S))
         self.audio, self.on, self.off, self.waited = [], 0, 0, 0
+        self.strip_wake = False   # began with the wake word ("yo claude, what's ...") in the same breath
 
     def feed(self, frame, p):
         """None while still listening, ("timeout", None) if nobody spoke, ("done", pcm) when finished."""
         if not self.audio:
             self.pre.append(frame)
-            self.on = self.on + 1 if p > VAD_ON else 0
-            if self.on >= 3:
+            self.on = self.on + 1 if p > START_ON else 0
+            if self.on >= 2:
                 self.audio = list(self.pre)
             else:
                 self.waited += 1
@@ -215,11 +225,26 @@ class Transcriber:
         log.info("Whisper %s loaded in %.1fs", WHISPER_MODEL, time.time() - t)
 
     def __call__(self, pcm):
+        # Tested on real recordings: beam search dropped first words and a priming prompt made Whisper invent
+        # sentences, so it's greedy decoding with no prompt; only the quiet-speech boost helps.
         t = time.time()
-        segments, _ = self.model.transcribe(pcm.astype(np.float32) / 32768.0, language="en", beam_size=1)
+        audio = pcm.astype(np.float32) / 32768.0
+        frames = [rms(pcm[i:i + FRAME_LENGTH]) for i in range(0, len(pcm) - FRAME_LENGTH, FRAME_LENGTH)] or [1]
+        loud = float(np.percentile(frames, 90))
+        if 0 < loud < TARGET_RMS:   # quiet speech: bring it up (at most 8x) so it's recognised as well as loud
+            audio = np.clip(audio * min(8.0, TARGET_RMS / loud), -1, 1)
+        segments, _ = self.model.transcribe(audio, language="en", beam_size=1, condition_on_previous_text=False)
         text = " ".join(s.text.strip() for s in segments if s.no_speech_prob < 0.6).strip()
         log.info("Heard (%.1fs): %r", time.time() - t, text)
         return text
+
+
+def strip_wake_words(text, alternates=()):
+    """ "Yo Claude, what's the weather" -> "what's the weather" (however the wake words were transcribed)."""
+    names = "|".join(["claude", "cloud", "clod", "claud", "clawed", "clyde", "clode", "clued"] +
+                     [re.escape(a.split()[-1]) for a in alternates if a])
+    return re.sub(rf"^\W*(?:(?:hey|okay|ok)\W+)?(?:yo|yeah|you|your|yoh|yow|hello)?\W*(?:{names})\b\W*", "", text,
+                  count=1, flags=re.I).strip()
 
 
 # --- audio out ----------------------------------------------------------------
@@ -559,6 +584,13 @@ class Assistant:
                                      f"woke {self.hits} of {self.tries} times", hold=30)
         if woke and self.collect:
             winsound.MessageBeep(winsound.MB_OK)
+        elif woke and self.wake.after:
+            # "yo claude, what's the weather...": you kept talking, so no greeting; keep recording to the pause
+            log.info("Wake word heard, with a request in the same breath")
+            self.mic.start()
+            self.listen()
+            self.utterance.audio = list(self.recent)
+            self.utterance.strip_wake = True
         elif woke:
             log.info("Wake word heard")
             self.start_conversation()
@@ -590,12 +622,16 @@ class Assistant:
                 self.say(DIDNT_HEAR, lambda _: self.go_idle())
             return
         self.set_state(THINKING, "")
-        self.job = (self.generation, self.worker.submit(self.think, pcm, self.generation))
+        self.job = (self.generation, self.worker.submit(self.think, pcm, self.generation, self.utterance.strip_wake))
 
-    def think(self, pcm, generation):
+    def think(self, pcm, generation, strip_wake=False):
         """Worker thread: transcribe, run voice commands or ask Claude, render the voice.
         Returns (reply, next step, pcm)."""
         heard = self.stt(pcm)
+        if strip_wake:
+            heard = strip_wake_words(heard, self.settings.get("wake_alternates", []))
+            if len(heard.split()) < 2:   # it was only the wake word after all: greet and listen as usual
+                return None, "greet", None
         if not heard:
             return DIDNT_CATCH, "idle", None
         if is_stop(heard):
@@ -656,7 +692,9 @@ class Assistant:
         if result is None:
             return self.go_idle()
         reply, step, pcm = result
-        if step == "idle":
+        if step == "greet":
+            self.start_conversation()
+        elif step == "idle":
             self.say(reply, lambda _: self.go_idle())
         else:   # after an answer, keep the reply on screen and listen briefly for a follow-up
             self.say(reply, lambda text: self.listen(FOLLOWUP_LISTEN_S, followup=True, text=text), pcm)
