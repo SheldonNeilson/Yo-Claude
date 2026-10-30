@@ -211,7 +211,7 @@ avatar.lipFrame = function (now) {
 // How open her mouth is in each talking frame (0 closed to 1 widest), ranked. The mouth is found as the part of the
 // lower face that changes most across the clip; open = darker there (the inside of the mouth).
 function mouthOpenness(frames, AH) {
-  const n = frames.length, x0 = Math.floor(AW * 0.3), x1 = Math.floor(AW * 0.7), y0 = Math.floor(AH * 0.35), y1 = Math.floor(AH * 0.75);
+  const n = frames.length, x0 = Math.floor(AW * 0.3), x1 = Math.floor(AW * 0.7), y0 = Math.floor(AH * 0.47), y1 = Math.floor(AH * 0.78);   // below the eyes (blinks change a lot too)
   const W = x1 - x0, H = y1 - y0, sd = new Float32Array(W * H);
   for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
     let s = 0, s2 = 0;
