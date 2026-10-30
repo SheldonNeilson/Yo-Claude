@@ -43,6 +43,12 @@ body.resizing iframe, body.resizing video { pointer-events: none; }
 #menubar { grid-column: 1 / -1; display: flex; align-items: stretch; background: #0b0b0a; border-bottom: 1px solid var(--line); padding: 0 4px; }
 #menubar button { border: 0; padding: 0 10px; color: var(--dim); font-size: 12px; }
 #menubar button:hover, #menubar button.open { color: var(--bg); background: var(--orange); }
+/* the pane toggles, at the right of the menu bar: lit when that pane shows */
+#paneBtns { display: flex; flex: none; white-space: nowrap; align-items: stretch; margin-right: 10px; border-left: 1px solid var(--line); border-right: 1px solid var(--line); }
+#menubar #paneBtns .panebtn { padding: 0 8px; font-size: 12px; color: var(--faint); }
+#menubar #paneBtns .panebtn b { font-size: 14px; font-weight: normal; }
+#menubar #paneBtns .panebtn.on { color: var(--orange); }
+#menubar #paneBtns .panebtn:hover { color: var(--bg); background: var(--orange); }
 #versionTag { color: var(--faint); font-size: 11px; align-self: center; padding: 0 8px; cursor: default; }
 #updateBadge { color: var(--green) !important; font-weight: bold; }
 #updateBadge:hover { background: var(--green) !important; color: var(--bg) !important; }

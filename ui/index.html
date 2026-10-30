@@ -13,6 +13,9 @@
     <button data-menu="session">Session</button><button data-menu="voice">Voice</button><button data-menu="tools">Tools</button>
     <button data-menu="help">Help</button>
     <span class="spacer"></span>
+    <span id="paneBtns" title="Which panes show beside the chat">
+      <button id="sideBtn" class="panebtn" title="Sessions list (Ctrl+Shift+B)"><b>◧</b> sessions</button><button id="focusBtn" class="panebtn" title="Just the chat: hide both panes, or bring them back"><b>▣</b> focus</button><button id="panelBtn" class="panebtn" title="Files, changes and git (Ctrl+B)"><b>◨</b> files</button>
+    </span>
     <span id="limitsMeter" class="hidden"></span>
     <button id="updateBadge" class="hidden" title="A newer version is on GitHub: click to update"></button>
     <span id="versionTag" title="Yo Claude version (Help → About)"></span>
@@ -32,9 +35,6 @@
     <button id="tListen" class="toggle" title="Listen for “Yo Claude”">[mic]</button>
     <button id="tVoice" class="toggle" title="Read replies aloud">[voice]</button>
     <button id="tPc" class="toggle pc" title="Let Claude use your screen, keyboard and mouse. Adds ~11k tokens to every question, and screenshots add more.">[pc control]</button>
-    <button id="sideBtn" class="toggle" title="Show or hide the sessions list (Ctrl+Shift+B)">[sessions]</button>
-    <button id="panelBtn" class="toggle" title="Files, changes and git (Ctrl+B)">[files]</button>
-    <button id="focusBtn" class="toggle" title="Just the chat: hide the side panes, or bring them back">[focus]</button>
     <button id="compactBtn" title="Compact mode: hide this window, keep the bar">[compact]</button>
     <button id="helpBtn" title="How to use Yo Claude, and tune the wake word to your voice">[?]</button>
   </header>
