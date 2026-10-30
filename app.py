@@ -776,6 +776,11 @@ class Api:
     def files(self):
         return self._ws(workspace.all_files)
 
+    def commands(self):
+        """Claude Code's slash commands for the active session's folder (or any folder's, before one has connected)."""
+        known = self._app.router.meta.data.get("commands") or {}
+        return known.get(self._cwd() or "") or next(iter(known.values()), [])
+
     def read_file(self, rel):
         return self._ws(workspace.read_file, rel)
 

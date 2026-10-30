@@ -97,6 +97,7 @@ function handle(e) {
       const s = findSession(S.active.id); if (s) s.unseen = false;
       renderTranscript(); renderHead(); renderTree();   // its folder opens by itself (it holds the active session)
       planBox.collapsed = null; planBox.update();
+      composer.preload();
       panel.refresh(true);
       break;
     }
@@ -116,7 +117,7 @@ function handle(e) {
       renderTree();
       if (S.active && e.session === S.active.id) {
         S.active.busy = e.session_state !== "idle"; renderBusy(); transcript.refreshGroups();
-        if (e.session_state === "idle") panel.refresh(true);
+        if (e.session_state === "idle") { panel.refresh(true); composer.preload(true); }
       }
       break;
     case "update": renderUpdate(e); break;
@@ -824,45 +825,75 @@ window.composer = {
   async knownFiles() {
     const cwd = S.active ? S.active.cwd : S.folder;
     if (!cwd) return [];
-    if (this.fileListFor !== cwd) { this.fileListFor = cwd; const r = await api().files(); this.fileList = Array.isArray(r) ? r : []; }
-    return this.fileList;
+    if (this.fileListFor !== cwd || !this.fileList) {
+      this.fileListFor = cwd;
+      this.fileLoad = api().files().then((r) => (this.fileList = Array.isArray(r) ? r : []));
+    }
+    return this.fileList || this.fileLoad;
+  },
+  // Load the folder's file list and the slash commands in the background, so @ and / pop up at once.
+  preload(fresh = false) {
+    if (fresh) this.fileList = null;
+    this.knownFiles();
+    api().commands().then((c) => { this.serverCommands = Array.isArray(c) ? c : []; });
+  },
+  commandList() {
+    const local = LOCAL_COMMANDS.map(([name, hint, description]) => ({ name, hint, description, local: true }));
+    const names = new Set(local.map((c) => c.name));
+    return [...local, ...(this.serverCommands || []).filter((c) => !names.has(c.name))];
   },
   async autocomplete() {
-    const box = $("#input");
-    const m = box.value.slice(0, box.selectionStart).match(/@([^\s@]*)$/);
-    const list = $("#atlist");
-    if (!m) { list.classList.add("hidden"); this.matches = []; return; }
-    const q = m[1].toLowerCase();
+    const box = $("#input"), before = box.value.slice(0, box.selectionStart);
+    const at = before.match(/@([^\s@]*)$/), slash = before.match(/^\/(\S*)$/);
+    if (!at && !slash) return this.closeList();
+    const q = (at || slash)[1].toLowerCase();
     const seq = this.seq = (this.seq || 0) + 1;
-    const files = await this.knownFiles();
-    if (seq !== this.seq) return;   // a later keystroke already took over
-    this.matches = files.filter((f) => f.toLowerCase().includes(q))
-      .sort((a, b) => (base(a).toLowerCase().startsWith(q) ? 0 : 1) - (base(b).toLowerCase().startsWith(q) ? 0 : 1) || a.length - b.length)
-      .slice(0, 12);
-    if (!this.matches.length) { list.classList.add("hidden"); return; }
+    if (slash) {
+      this.mode = "/";
+      const cmds = this.commandList();
+      this.matches = cmds.filter((c) => c.name.toLowerCase().includes(q))
+        .sort((a, b) => (a.name.toLowerCase().startsWith(q) ? 0 : 1) - (b.name.toLowerCase().startsWith(q) ? 0 : 1))
+        .slice(0, 14).map((c) => ({ value: c.name, html: `<b>/${esc(c.name)}</b>${c.hint ? ` <span class="dim">${esc(c.hint)}</span>` : ""}` +
+          `<span class="adesc">${esc(c.description)}</span>`, cmd: c }));
+    } else {
+      this.mode = "@";
+      const files = await this.knownFiles();
+      if (seq !== this.seq) return;   // a later keystroke already took over
+      this.matches = files.filter((f) => f.toLowerCase().includes(q))
+        .sort((a, b) => (base(a).toLowerCase().startsWith(q) ? 0 : 1) - (base(b).toLowerCase().startsWith(q) ? 0 : 1) || a.length - b.length)
+        .slice(0, 12).map((f) => ({ value: f, html: esc(f) }));
+    }
+    if (!this.matches.length) return this.closeList();
     this.pick = 0;
-    list.innerHTML = this.matches.map((f, i) => `<div data-i="${i}" class="${i === 0 ? "on" : ""}">${esc(f)}</div>`).join("");
-    list.querySelectorAll("div").forEach((d) => d.onmousedown = (e) => { e.preventDefault(); this.choose(+d.dataset.i); });
+    const list = $("#atlist");
+    list.innerHTML = this.matches.map((m, i) => `<div data-i="${i}" class="${i === 0 ? "on" : ""}">${m.html}</div>`).join("") +
+      `<div class="ahint">↑↓ choose · Enter/Tab pick · Esc close</div>`;
+    list.querySelectorAll("div[data-i]").forEach((d) => d.onmousedown = (e) => { e.preventDefault(); this.choose(+d.dataset.i); });
     list.classList.remove("hidden");
   },
+  closeList() { $("#atlist").classList.add("hidden"); this.matches = []; },
   choose(i) {
-    const box = $("#input"), path = this.matches[i];
-    if (!path) return;
-    const before = box.value.slice(0, box.selectionStart).replace(/@([^\s@]*)$/, "@" + path + " ");
-    box.value = before + box.value.slice(box.selectionStart);
+    const box = $("#input"), m = this.matches[i];
+    if (!m) return;
+    const rest = box.value.slice(box.selectionStart);
+    const before = this.mode === "/" ? "/" + m.value + " "
+      : box.value.slice(0, box.selectionStart).replace(/@([^\s@]*)$/, "@" + m.value + " ");
+    box.value = before + rest.replace(/^\S*/, "");
     box.selectionStart = box.selectionEnd = before.length;
-    $("#atlist").classList.add("hidden"); this.matches = [];
+    this.closeList();
+    box.focus();
   },
   key(e) {
     if (!this.matches.length) return false;
-    const list = [...$("#atlist").children];
+    const list = [...$("#atlist").querySelectorAll("div[data-i]")];
     if (e.key === "ArrowDown" || e.key === "ArrowUp") {
       this.pick = (this.pick + (e.key === "ArrowDown" ? 1 : -1) + list.length) % list.length;
       list.forEach((d, i) => d.classList.toggle("on", i === this.pick));
+      list[this.pick]?.scrollIntoView({ block: "nearest" });
       return true;
     }
     if (e.key === "Enter" || e.key === "Tab") { this.choose(this.pick); return true; }
-    if (e.key === "Escape") { $("#atlist").classList.add("hidden"); this.matches = []; return true; }
+    if (e.key === "Escape") { this.closeList(); return true; }
     return false;
   },
   async mentions(text) {
@@ -876,6 +907,42 @@ window.composer = {
     r.readAsDataURL(file);
   },
 };
+const LOCAL_COMMANDS = [
+  ["new", "", "Start a new session in this folder"],
+  ["chat", "", "Start a new chat without a folder"],
+  ["model", "<fable|opus|sonnet|haiku|default>", "Switch this session's model"],
+  ["effort", "<low|medium|high|xhigh|max|default>", "Switch this session's effort"],
+  ["context", "", "What's using this conversation's context window"],
+  ["usage", "", "Your plan's 5-hour and weekly limits"],
+  ["tasks", "", "Background tasks and subagents"],
+  ["files", "", "The folder's files"],
+  ["changes", "", "What this session changed"],
+  ["git", "", "Branch and commits"],
+  ["stop", "", "Stop Claude"],
+];
+function runLocalCommand(text) {
+  const [, name, arg = ""] = text.match(/^\/(\S+)\s*(.*)$/) || [];
+  if (!LOCAL_COMMANDS.some(([n]) => n === name)) return false;
+  const pick = (sel, wanted, list) => {
+    const w = wanted.trim().toLowerCase();
+    const hit = list.find(([v, label]) => (w === "default" && !v) || (v && (v.toLowerCase() === w || label.toLowerCase().includes(w))));
+    if (!w || !hit) { toast(`Try /${name} ${list.filter(([v]) => v).map(([v, l]) => l.replace(/^effort: /, "").split(" ")[0].toLowerCase()).join(", ")}`, "error"); return; }
+    $(sel).value = hit[0]; $(sel).dispatchEvent(new Event("change"));
+    toast(`${name}: ${hit[1].replace(/^(model|effort): /, "")}`);
+  };
+  const tab = (t) => { $("#app").classList.add("with-panel"); panel.tab = t; panel.load(); if (t === "tasks") tasks.poll(); };
+  ({
+    new: () => api().new_session(S.active ? S.active.cwd : S.folder),
+    chat: () => api().new_session(null),
+    model: () => pick("#modelSel", arg, MODELS),
+    effort: () => pick("#effortSel", arg, EFFORTS),
+    context: () => showContext(),
+    usage: () => showLimits(),
+    tasks: () => tab("tasks"), files: () => tab("files"), changes: () => tab("changes"), git: () => tab("git"),
+    stop: () => api().stop(),
+  })[name]();
+  return true;
+}
 let sending = false;
 async function send() {
   // Take the message and clear the box straight away: a second Enter while @mentions are looked up used to send
@@ -884,6 +951,10 @@ async function send() {
   const box = $("#input");
   const text = box.value.trim(), chips = composer.files.slice(), images = composer.images.slice();
   if (!text && !chips.length && !images.length) return;
+  if (text.startsWith("/") && !chips.length && !images.length && runLocalCommand(text)) {
+    box.value = ""; autosize(); composer.closeList();
+    return;
+  }
   sending = true;
   box.value = ""; autosize();
   composer.files = []; composer.images = []; composer.renderChips();
@@ -910,13 +981,19 @@ document.addEventListener("drop", (e) => {
 });
 function autosize() { const b = $("#input"); b.style.height = "auto"; b.style.height = Math.min(200, b.scrollHeight + 2) + "px"; }
 $("#input").addEventListener("keydown", (e) => {
-  if (composer.key(e)) { e.preventDefault(); return; }
+  if (composer.key(e)) { e.preventDefault(); e.stopPropagation(); return; }
   if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
 });
 $("#input").addEventListener("input", () => { autosize(); composer.autocomplete(); });
 $("#sendBtn").onclick = send;
 $("#talkBtn").onclick = () => api().talk();
-document.addEventListener("keydown", (e) => { if (e.key === "Escape" && $("#modal").classList.contains("hidden") && inbar.active()) api().stop(); });
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape" || !$("#modal").classList.contains("hidden")) return;
+  if (!$("#atlist").classList.contains("hidden")) return composer.closeList();   // close what's open first
+  if (!$("#menu").classList.contains("hidden")) return hideMenu();
+  if (inbar.active()) api().stop();
+});
+$("#input").addEventListener("blur", () => setTimeout(() => { if (document.activeElement !== $("#input")) composer.closeList(); }, 150));
 
 // ---------- menus & dialogs ----------
 function showMenu(anchor, items) {
@@ -987,6 +1064,7 @@ window.addEventListener("pywebviewready", async () => {
   if (s.settings.zoom) document.body.style.zoom = s.settings.zoom;
   await loadLists();
   renderToggles(); renderTree(); renderHead(); renderTranscript(); renderState(); planBox.update();
+  setTimeout(() => composer.preload(), 1500);
   if (S.settings.panel_open) $("#app").classList.add("with-panel");
   panel.load();
   MASCOT.draw($("#logo"), "idle", 0, 1);

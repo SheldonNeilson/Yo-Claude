@@ -397,6 +397,21 @@ class Session:
                 self.pid = None
             self.reader = asyncio.ensure_future(self.read_loop(self.client))
             self.router.evict(keep=self)
+            asyncio.ensure_future(self.learn_commands())
+
+    async def learn_commands(self):
+        """The slash commands Claude Code offers here (built-in, skills, the folder's and your custom commands), for
+        the / list in the message box. Remembered per folder, so the list is there before a session connects."""
+        try:
+            info = await self.client.get_server_info() if self.client else None
+        except Exception as e:
+            log.debug("server info %s: %s", self.id, e)
+            return
+        cmds = [{"name": c.get("name"), "description": c.get("description") or "", "hint": c.get("argumentHint") or ""}
+                for c in (info or {}).get("commands") or [] if isinstance(c, dict) and c.get("name")]
+        if cmds:
+            self.router.meta.data.setdefault("commands", {})[self.cwd or ""] = cmds
+            self.router.meta.save()
 
     async def disconnect(self):
         client, self.client = self.client, None

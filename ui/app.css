@@ -308,6 +308,14 @@ code.pathlink:hover { color: var(--orange2); background: var(--bg3); }
 .msg .copybtn { top: -1.5em; right: 1ch; }
 .msg.user .copybtn { right: auto; left: 1ch; }
 
+/* @ files and / commands list */
+#atlist { max-height: 46vh; overflow-y: auto; }
+#atlist div[data-i] b { color: var(--orange); font-weight: normal; }
+#atlist .adesc { color: var(--faint); margin-left: 12px; }
+#atlist div.on .adesc { color: var(--dim); }
+#atlist .ahint { color: var(--faint); font-size: 11px; border-top: 1px solid var(--line); cursor: default; }
+#atlist .ahint:hover { background: none; color: var(--faint); }
+
 /* Claude's plan, above the message box */
 #planBox { border-top: 2px solid var(--line2); background: var(--bg2); font-size: 12px; max-height: 32vh; display: flex; flex-direction: column; }
 .planhead { display: flex; align-items: center; gap: 8px; padding: 5px 12px; cursor: pointer; white-space: nowrap; }
