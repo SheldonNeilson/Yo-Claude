@@ -9,7 +9,7 @@
 const RAMP = " .:-=+o/*#0@";   // sparse to dense: white on the dark window, so bright = dense
 const AW = 128;                // the analysis grid frames are decoded to (columns): 2 per character across
 const COLS = 64;               // characters across, whatever the panel's width
-const VIEW = [0, 0, 1, 1];     // the part of the clip shown: left, top, right, bottom (fractions)
+const VIEW = [0, 0, 1, 1];     // the part of the clip shown: left, top, right, bottom (fractions; see frameView)
 const REST = [44, 60];         // idle frames with a soft, closed-mouth smile: where she rests
 const GENTLE = /look|gaze|glance|brow|tilt|turn|drift|eyes|head|attentive|chin|lean|thought|soften|nod/;   // the calm moves
 const SPEECH_DELAY = 0.06;     // s from starting the sound to hearing it (Windows' output latency): her mouth waits too
@@ -48,6 +48,7 @@ const avatar = {
     setInterval(() => this.refresh(), 60000);
   },
   start() {
+    this.baseView = frameView(this.clips.idle[0], this.AH);
     this.ready = true;
     this.fit();
     new ResizeObserver(() => this.fit()).observe(this.host);
@@ -136,6 +137,7 @@ const avatar = {
           this.clips = fresh; this.clip = "idle"; this.frame = 0; this.rewinding = false; this.idleExtra = this.moodClip = null;
           if (fresh.talking) { this.mouth = mouthOpenness(fresh.talking, this.AH); this.closedFrames = null; }
           this.lv = null; this.analyse();
+          this.baseView = frameView(fresh.idle[0], this.AH); this.cols = 0; this.fit();
           if (!this.ready) this.start();
         }
       }
@@ -176,8 +178,14 @@ const avatar = {
     if (!probe.isConnected) this.pre.appendChild(probe);
     const em = probe.getBoundingClientRect().width / 5000 || 0.6;   // a character's width, per px of font size
     probe.remove();
-    const rows = Math.round(cols * ((VIEW[3] - VIEW[1]) * this.AH) / ((VIEW[2] - VIEW[0]) * AW) / 2);
-    const cw = Math.min(width / cols, maxH / (rows * 2));
+    // the person's part of the frame (frameView); with height to spare at this width, zoom in to fill it: narrow the
+    // view around the middle (to 60% of the width at most, so the shoulders stay)
+    const base = this.baseView || VIEW, vh = (base[3] - base[1]) * this.AH, cwW = width / cols;
+    const fullRows = cols * vh / AW / 2, fillRows = maxH / (2 * cwW);
+    const share = Math.max(0.6, Math.min(1, fullRows / fillRows));
+    const V = this.view = [0.5 - share / 2, base[1], 0.5 + share / 2, base[3]];
+    const rows = Math.round(cols * ((V[3] - V[1]) * this.AH) / ((V[2] - V[0]) * AW) / 2);
+    const cw = Math.min(cwW, maxH / (rows * 2));
     this.pre.style.fontSize = (cw / em) + "px";
     this.pre.style.lineHeight = (cw * 2) + "px";   // keep the cells about twice as tall as wide
     if (cols !== this.cols || rows !== this.rows) { this.cols = cols; this.rows = rows; this.lv = null; }
@@ -255,7 +263,8 @@ const avatar = {
   // one frame of greyscale -> ASCII: down to the character grid, local contrast, her tones spread, the ramp
   toAscii(grey) {
     const C = this.cols, R = this.rows, cell = new Float32Array(C * R);
-    const ox = VIEW[0] * AW, oy = VIEW[1] * this.AH, sx = (VIEW[2] - VIEW[0]) * AW / C, sy = (VIEW[3] - VIEW[1]) * this.AH / R;
+    const V = this.view || VIEW;
+    const ox = V[0] * AW, oy = V[1] * this.AH, sx = (V[2] - V[0]) * AW / C, sy = (V[3] - V[1]) * this.AH / R;
     for (let r = 0; r < R; r++) for (let c = 0; c < C; c++) {   // average of the source pixels under the cell
       const x0 = Math.floor(ox + c * sx), x1 = Math.max(x0 + 1, Math.floor(ox + (c + 1) * sx));
       const y0 = Math.floor(oy + r * sy), y1 = Math.max(y0 + 1, Math.floor(oy + (r + 1) * sy));
@@ -407,4 +416,16 @@ function boxBlur(a, W, H, r) {   // two passes of a running-sum box blur
     }
   }
   return out;
+}
+
+// The part of the clip worth showing: from a little above the person's head down (the dark backdrop above them would
+// only be blank rows), the full width. Found in her (or his) first idle frame: the first rows with enough light in them.
+function frameView(grey, AH) {
+  let top = 0;
+  for (let y = 0; y < AH; y++) {
+    let n = 0;
+    for (let x = 0; x < AW; x++) if (grey[y * AW + x] > 70) n++;
+    if (n > AW * 0.04) { top = y; break; }
+  }
+  return [0, Math.max(0, top - AH * 0.03) / AH, 1, 1];
 }
