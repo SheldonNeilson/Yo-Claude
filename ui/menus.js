@@ -12,7 +12,7 @@ function copyText(text, what = "copied") {
 function toast(text) {
   const t = $("#toast");
   t.textContent = text; t.classList.remove("hidden");
-  clearTimeout(toast.timer); toast.timer = setTimeout(() => t.classList.add("hidden"), 1200);
+  clearTimeout(toast.timer); toast.timer = setTimeout(() => t.classList.add("hidden"), 1200 + 45 * text.length);
 }
 function conversationText() {
   return S.items.filter((it) => it && ["user", "assistant", "note"].includes(it.kind))
@@ -90,6 +90,7 @@ const MENUS = {
     "-",
     ["Listen for “Yo Claude”", () => toggleSetting("listening"), { checked: setting("listening") }],
     ["Read replies aloud", () => toggleSetting("voice_replies"), { checked: setting("voice_replies") }],
+    ["More accurate speech recognition (slower)", () => toggleSetting("accurate_speech", false), { checked: setting("accurate_speech", false) }],
     ["PC control (screen, keyboard, mouse)", () => toggleSetting("pc_control", false), { checked: setting("pc_control", false) }],
     "-",
     ["Training mode…", () => training.open()],

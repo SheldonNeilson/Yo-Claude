@@ -108,6 +108,7 @@ function handle(e) {
       }
       break;
     case "update": renderUpdate(e); break;
+    case "notice": toast(e.text); break;
     case "train": training.onJudgement(e); break;
     case "open_training": training.open(); break;
     case "tool_done": case "baseline":

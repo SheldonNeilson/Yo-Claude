@@ -32,7 +32,10 @@ DATA_DIR = os.path.join(os.path.expanduser("~"), ".yoclaude")
 # --- settings -----------------------------------------------------------------
 WAKE_PHRASE = "yo claude"
 VOSK_MODEL = os.path.join(DATA_DIR, "models", "vosk-model-small-en-us-0.15")
-WHISPER_MODEL = "small.en"   # tiny.en / base.en / small.en / medium.en
+WHISPER_MODEL = "small.en"   # standard speech recognition
+# "More accurate speech recognition": bigger and ~2x slower (1.5 GB). On clear speech small.en did as well in tests;
+# the bigger model is for mumbled speech, accents and noisy rooms. (distil-large-v3 was slower still, no better.)
+ACCURATE_MODEL = "medium.en"
 VOICE_TURN_TIMEOUT_S = 1800  # coding tasks can take a while
 CONVERSATION_WINDOW_S = 300  # a voice conversation older than this starts a new session (unless picked in the app)
 FOLLOWUP_LISTEN_S = 6        # after answering, listen this long for a follow-up without the wake word
@@ -46,7 +49,8 @@ NEURAL_RATE = "+5%"
 TEXT_HOLD_S = 12             # how long a reply stays on the bar when voice replies are off
 
 DEFAULT_SETTINGS = {"listening": True, "voice_replies": True, "pc_control": True, "bar_when_idle": True,
-                    "launch_at_login": True, "show_bar": True, "show_window": True, "onboarded": False}
+                    "launch_at_login": True, "show_bar": True, "show_window": True, "onboarded": False,
+                    "accurate_speech": False}
 
 GREETINGS = ["Yeah?", "Yo!", "Go ahead.", "What's up?", "Mm-hm?"]   # short: you can start talking sooner
 PREROLL_S = 1.0      # audio kept from before speech is detected (soft first words)
@@ -214,15 +218,19 @@ class Utterance:
 
 
 class Transcriber:
-    def __init__(self):
+    def __init__(self, name=WHISPER_MODEL, download=True):
+        """download=False: only if it's already on this PC (raises otherwise)."""
         from faster_whisper import WhisperModel
         t = time.time()
+        self.name = name
         try:   # no network check on every start once the model is downloaded
-            self.model = WhisperModel(WHISPER_MODEL, device="cpu", compute_type="int8", local_files_only=True)
+            self.model = WhisperModel(name, device="cpu", compute_type="int8", local_files_only=True)
         except Exception:
-            self.model = WhisperModel(WHISPER_MODEL, device="cpu", compute_type="int8")
+            if not download:
+                raise
+            self.model = WhisperModel(name, device="cpu", compute_type="int8")
         list(self.model.transcribe(np.zeros(SAMPLE_RATE, np.float32), language="en")[0])   # first run is ~5x slower
-        log.info("Whisper %s loaded in %.1fs", WHISPER_MODEL, time.time() - t)
+        log.info("Whisper %s loaded in %.1fs", name, time.time() - t)
 
     def __call__(self, pcm):
         # Tested on real recordings: beam search dropped first words and a priming prompt made Whisper invent
@@ -397,7 +405,13 @@ class Assistant:
         self.train_mute_until = 0.0
         self.peak = 0.0              # loudest frame of the speech being judged
         self.noise = deque(maxlen=int(FPS * 5))
-        self.stt = Transcriber()
+        self.stt = None
+        if settings.get("accurate_speech"):
+            try:
+                self.stt = Transcriber(ACCURATE_MODEL, download=False)
+            except Exception:   # not downloaded yet: start with the standard one, fetch it in the background
+                threading.Thread(target=self.switch_speech, args=(True,), daemon=True).start()
+        self.stt = self.stt or Transcriber()
         self.speaker = Speaker()
         self.worker = ThreadPoolExecutor(2)   # one for the Claude turn, one to transcribe approvals meanwhile
         self.job = self.utterance = None
@@ -491,6 +505,30 @@ class Assistant:
             except Exception:
                 pass
 
+    def switch_speech(self, accurate):
+        """Swap the speech model while running: the current one keeps working until the new one is loaded
+        (the accurate one downloads about 1.5 GB the first time)."""
+        name = ACCURATE_MODEL if accurate else WHISPER_MODEL
+        if self.stt is not None and self.stt.name == name:
+            return
+        if accurate:
+            try:
+                new = Transcriber(name, download=False)
+            except Exception:
+                self.emit("notice", text="Downloading the more accurate speech model (about 1.5 GB, first time "
+                                         "only). The standard one keeps working meanwhile.")
+                try:
+                    new = Transcriber(name)
+                except Exception as e:
+                    log.warning("Couldn't load %s: %s", name, e)
+                    self.emit("notice", text=f"Couldn't get the more accurate speech model: {e}")
+                    return
+        else:
+            new = Transcriber(name)
+        self.stt = new
+        self.emit("notice", text="More accurate speech recognition is on." if accurate
+                  else "Standard speech recognition is on.")
+
     def reset_voice(self):
         """Drop the voice conversation (not Claude's work: a reply still lands in the window)."""
         self.generation += 1
@@ -546,6 +584,8 @@ class Assistant:
                     self.go_idle()
             elif isinstance(cmd, tuple) and cmd[0] == "alternates":
                 self.wake.set_alternates(cmd[1])
+            elif isinstance(cmd, tuple) and cmd[0] == "accurate_speech":
+                threading.Thread(target=self.switch_speech, args=(cmd[1],), daemon=True).start()
             elif isinstance(cmd, tuple) and cmd[0] == "approval" and self.job and self.state == THINKING:
                 self.approval = cmd[1:]
                 self.say(f"Claude wants to {cmd[3]}. Say yes, go ahead, or no.",

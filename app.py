@@ -249,6 +249,8 @@ class App:
                 elif kind == "work":
                     self.work_state = d["state"]
                     self.write_status()
+                elif kind == "notice":
+                    self.notify(d["text"])
                 main_events.append({"kind": kind, **d})
             new_display = display_state(self.voice_state, self.work_state)
             if new_display != self.display or any(e["kind"] in ("state", "work") for e in main_events):
@@ -407,6 +409,9 @@ class App:
             pystray.Menu.SEPARATOR,
             pystray.MenuItem("Listen for “Yo Claude”", toggle("listening"), checked=checked("listening")),
             pystray.MenuItem("Voice replies", toggle("voice_replies"), checked=checked("voice_replies")),
+            pystray.MenuItem("More accurate speech recognition (slower)",
+                             toggle("accurate_speech", lambda on: self.commands.put(("accurate_speech", on))),
+                             checked=lambda item: bool(s.get("accurate_speech", False))),
             pystray.MenuItem("PC control (screen, keyboard, mouse)", toggle("pc_control", lambda on: self.router.reconnect_all()),
                              checked=checked("pc_control")),
             pystray.Menu.SEPARATOR,
@@ -504,6 +509,8 @@ class Api:
             set_launch_at_login(bool(value))
         if key == "pc_control":
             a.router.reconnect_all()
+        if key == "accurate_speech":
+            a.commands.put(("accurate_speech", bool(value)))
         a.commands.put("settings")
         a.update_bar_visibility()
         a.emit_settings()
