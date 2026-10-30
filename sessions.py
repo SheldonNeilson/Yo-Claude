@@ -509,6 +509,7 @@ class Session:
         self.reader = None                  # the task reading everything Claude sends
         self.turn_future = None             # resolved with Claude's reply to the message being sent
         self.waiting = {}                   # queued message index -> (prompt, its text): what "send now" sends
+        self.order = []                     # queued messages (indexes), in the order they go: you can drag them
         self.injected = []                  # [(item, text)] sent now into the reply in progress, not yet taken up
         self.joined = {}                    # sent-now message index -> the turn future of the reply it joined
         self.holding = False                # that reply ended, but Claude still has a sent-now message to answer
@@ -1104,10 +1105,17 @@ class Session:
         `text` is the prompt's text when `prompt` isn't a plain string (with images): "send now" matches it."""
         if self.lock is None:
             self.lock = asyncio.Lock()
-        if item is not None and (self.busy or self.lock.locked()):
+        if item is not None and (self.busy or self.lock.locked() or self.order):
             item["queued"] = True
             self.waiting[item["i"]] = (prompt, text if text is not None else prompt)
             self.changed(item)
+            self.order.append(item["i"])
+            try:   # in line: it goes when it's first (you can reorder the line) and the reply before it is done
+                while not (item.get("cancelled") or item.get("sent_now")
+                           or (self.order[0] == item["i"] and not self.lock.locked())):
+                    await asyncio.sleep(0.15)
+            finally:
+                self.order.remove(item["i"])
         async with self.lock:
             if item is not None:
                 self.waiting.pop(item["i"], None)
@@ -2021,7 +2029,7 @@ class Router:
             self.remember_last(s)
             item = s.add({"kind": "user", "text": text, "voice": voice, "attachments": list(attachments),
                           "image_paths": [save_image(s.id, mt, data) for mt, data in images],
-                          **({"queued": True} if s.busy or (s.lock and s.lock.locked()) else {})})
+                          **({"queued": True} if s.busy or (s.lock and s.lock.locked()) or s.order else {})})
         prompt = (f"[voice] {text}" if voice else text) + (f"\n\n{context}" if context else "")
         if origin == "system":
             prompt = f"[Yo Claude] {text}"
@@ -2174,6 +2182,22 @@ class Router:
         if s.busy:
             return {"error": "Claude is already working in this session."}
         self.run(s.turn(("[voice] " if last.get("voice") else "") + last.get("text", ""), bool(last.get("voice"))))
+        return {}
+
+    def reorder_queue(self, sid, order):
+        """You dragged the queued messages into a new order: `order` is their indexes, first to go first."""
+        s = self.live.get(sid)
+        if not s:
+            return {"error": "That session isn't open."}
+        order = [int(i) for i in order or [] if str(i).lstrip("-").isdigit()]
+
+        def apply():
+            want = [i for i in order if i in s.order]
+            s.order[:] = want + [i for i in s.order if i not in want]
+            for k, i in enumerate(s.order):   # (the window shows them in this order)
+                s.items[i]["qpos"] = k
+                s.changed(s.items[i])
+        self.loop.call_soon_threadsafe(apply)
         return {}
 
     def cancel_queued(self, sid, i):

@@ -793,6 +793,11 @@ class Api:
     def approve(self, sid, aid, allow, always=False):
         self._app.router.approve(sid, aid, bool(allow), bool(always))
 
+    def reorder_queue(self, order):
+        """Queued messages dragged into a new order (their indexes, first to go first) in the open session."""
+        r = self._app.router
+        return r.reorder_queue(r.active.id, order) if r.active else {"error": "Open a session first."}
+
     def checklist_answer(self, sid, cid, picks, note=""):
         """[submit] on Claude's checklist card: your yes/no (and why) per item go to Claude as your next message."""
         return self._app.router.checklist_answer(sid, cid, picks, note)

@@ -451,6 +451,8 @@ code.pathlink:hover { color: var(--orange2); background: var(--bg3); }
 .queuedtag button:hover { color: var(--red); border-color: var(--red); }
 .queuedtag button.sendnow:hover { color: var(--orange); border-color: var(--orange); }
 .queuebox:empty { display: none; }   /* queued messages, pinned below everything else until Claude takes them up */
+.queuebox .msg.draggable { cursor: grab; } .queuebox .msg.dragging { opacity: .45; cursor: grabbing; }
+.queuebox .qgrip { color: var(--faint); margin-right: 6px; cursor: grab; user-select: none; } .queuebox .msg:hover .qgrip { color: var(--orange); }
 
 /* rewind */
 .msg.user .rewindbtn { position: absolute; top: -1.5em; left: 9ch; padding: 0 5px; font-size: 11px; opacity: 0; background: var(--bg2); }

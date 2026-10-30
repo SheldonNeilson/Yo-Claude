@@ -509,8 +509,27 @@ const transcript = {
   queue() {
     const t = $("#transcript");
     let q = t.querySelector(":scope > .queuebox");
-    if (!q) { q = el("div", "queuebox"); t.appendChild(q); }
+    if (!q) {
+      q = el("div", "queuebox"); t.appendChild(q);
+      q.addEventListener("dragover", (e) => {   // the dragged message moves between the others as you go
+        const drag = q.querySelector(".dragging");
+        if (!drag) return;
+        e.preventDefault();
+        const after = [...q.children].find((c) => c !== drag && e.clientY < c.getBoundingClientRect().top + c.offsetHeight / 2);
+        if (after !== drag.nextElementSibling) q.insertBefore(drag, after || null);
+      });
+      q.addEventListener("drop", (e) => {
+        if (!q.querySelector(".dragging")) return;
+        e.preventDefault(); e.stopPropagation();
+        api().reorder_queue([...q.children].map((c) => +c.dataset.i).filter((i) => !isNaN(i)));
+      });
+    }
     return q;
+  },
+  // queued messages are in the order they'll go (qpos, from dragging them; new ones last)
+  sortQueue() {
+    const q = this.queue(), kids = [...q.children], sorted = kids.slice().sort((a, b) => a.dataset.qpos - b.dataset.qpos);
+    if (sorted.some((c, k) => c !== kids[k])) sorted.forEach((c) => q.appendChild(c));
   },
   put(node) { $("#transcript").insertBefore(node, this.queue()); },   // into the flow, above the queue box
   running(g) {
@@ -603,6 +622,16 @@ Click to open` : "What Claude saw · click to enlarge";
         if (!after.nextElementSibling || after === this.queue().previousElementSibling) this.last = { item: it.i };
       } else { this.put(node); this.last = { item: it.i }; }
       this.els.set(it.i, node);
+      if (waiting) {   // drag it up or down the queue to change when it goes
+        node.dataset.i = it.i; node.dataset.qpos = it.qpos ?? 1e6 + it.i;
+        if (!it.sent_now) {
+          node.draggable = true; node.classList.add("draggable");
+          const grip = el("span", "qgrip", "⠿"); grip.dataset.tip = "Drag to change when it goes"; node.prepend(grip);
+          node.ondragstart = (e) => { node.classList.add("dragging"); e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", String(it.i)); };
+          node.ondragend = () => node.classList.remove("dragging");
+        }
+        this.sortQueue();
+      }
       node.querySelectorAll("pre code").forEach((c) => { try { hljs.highlightElement(c); } catch (_) {} });
       addCopyButtons(node, it);
       if (it.ts && ["user", "assistant", "advisor"].includes(it.kind)) node.insertAdjacentHTML("beforeend", whenHtml(it.ts, "bubble-when"));
