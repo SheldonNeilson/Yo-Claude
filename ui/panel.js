@@ -363,7 +363,7 @@ ${elsewhere} running in other sessions` : ""}">` +
   },
   async addContext(path) {   // the open session may also read and write this folder (from your next message)
     const err = await api().add_context_dir(path);
-    if (err) alertBox(err); else toast("Added: Claude can use that folder from your next message");
+    if (err) alertBox(err); else toast(`Added: ${Who()} can use that folder from your next message`);
   },
   rootMenu(ev) {
     if (this.cwd === "::pc") return;

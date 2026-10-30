@@ -22,7 +22,7 @@ window.training = {
   },
 
   render() {
-    const d = dialog(["Welcome to Yo Claude", "Step 1 of 2 · your wake word", "Step 2 of 2 · ordinary speech", "Results"][this.step]);
+    const d = dialog([`Welcome to Yo ${Who()}`, "Step 1 of 2 · your wake word", "Step 2 of 2 · ordinary speech", "Results"][this.step]);
     d.classList.add("wide", "training");
     $("#modal").onclick = (e) => { if (e.target === $("#modal")) this.close(); };
     [this.intro, this.wakeStep, this.normalStep, this.results][this.step].call(this, d);
@@ -30,7 +30,7 @@ window.training = {
 
   intro(d) {
     d.appendChild(el("div", "", `
-      <p><b>Talk to Claude by saying “yo claude”.</b> It answers “how can I help?”; then just say what you want. Pause for a
+      <p><b>Talk to ${Who()} by saying “yo ${who()}”.</b> It answers “how can I help?”; then just say what you want. Pause for a
       moment when you're done, and it sends it. Your audio stays on this PC: only the words it transcribes go to Claude.</p>
       <p><b>Follow-ups:</b> after it answers, it listens for about 6 seconds, so you can carry on without the wake word. Say
       <i>“never mind”</i> to stop. It keeps talking to the session open in this window.</p>
@@ -60,7 +60,7 @@ window.training = {
 
   wakeStep(d) {
     const hits = this.wake.filter((r) => r.woke).length;
-    d.appendChild(el("div", "", `<p>Say <b>“yo claude”</b> five times, in your normal voice, pausing for a second between
+    d.appendChild(el("div", "", `<p>Say <b>“yo ${who()}”</b> five times, in your normal voice, pausing for a second between
       each. It beeps when it hears it.</p><p class="big">${hits} of ${this.wake.length} heard</p>`));
     d.appendChild(this.list(this.wake, true));
     addButtons(d, [["cancel", () => this.close()],
@@ -83,7 +83,7 @@ window.training = {
     const peak = median(this.wake.map((r) => r.peak)), noise = median([...this.wake, ...this.normal].map((r) => r.noise));
     const snr = noise > 0 ? 20 * Math.log10(peak / noise) : 60;
     const tips = [];
-    if (n && hits / n < 0.8) tips.push("It missed some. Try saying it a little more clearly, with a short pause after “claude”.");
+    if (n && hits / n < 0.8) tips.push(`It missed some. Try saying it a little more clearly, with a short pause after “${who()}”.`);
     if (peak && peak < 600) tips.push("You're quiet for the mic: sit closer, or raise the microphone level in Windows sound settings.");
     if (snr < 15) tips.push("The room is noisy compared to your voice; fans, music or calls nearby make it miss more.");
     if (falses) tips.push("Something ordinary woke it. If that keeps happening, avoid extra accepted phrases below.");
@@ -101,7 +101,7 @@ window.training = {
       <ul>${tips.map((t) => `<li>${esc(t)}</li>`).join("")}</ul>`));
     const picks = [];
     if (suggest.length || current.length) {
-      d.appendChild(el("div", "", "<p><b>Also accept these as “yo claude” for you</b> (how it hears your voice):</p>"));
+      d.appendChild(el("div", "", `<p><b>Also accept these as “yo ${who()}” for you</b> (how it hears your voice):</p>`));
       for (const t of [...new Set([...current, ...suggest])]) {
         const row = el("label", "pick");
         const cb = el("input"); cb.type = "checkbox"; cb.checked = current.includes(t) || suggest.includes(t);

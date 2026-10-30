@@ -80,7 +80,7 @@ function readPalette() {
 // ---------- the cabinet ----------
 const root = document.createElement("div");
 root.id = "invaders"; root.tabIndex = 0;
-root.setAttribute("aria-label", "Bug Invaders: a game to play while Claude works. Click to play, Esc hides it.");
+root.setAttribute("aria-label", `Bug Invaders: a game to play while ${Who()} works. Click to play, Esc hides it.`);
 root.innerHTML = '<span class="inv-tag inv-title">[ bug invaders<span class="inv-wait"> · while you wait...</span> ]</span>' +
   '<span class="inv-tag inv-ctl"><button data-act="peek"></button><button data-act="sound"></button><button data-act="auto"></button>' +
   '<button data-act="close" title="Hide until Claude\'s next reply (Esc)">[✕]</button></span>' +
@@ -710,7 +710,7 @@ function drawTitle() {
     y += 22;
   }
   y += drawPixelText("BUG INVADERS", cx, y, W * 0.75, 5, C.amber, C.orange) + 8;
-  txt("something to shoot at while Claude thinks", cx, y, C.dim, 12, "center"); y += 26;
+  txt(`something to shoot at while ${Who()} thinks`, cx, y, C.dim, 12, "center"); y += 26;
   const legend = [["conflict", "merge conflict", "30  · takes two hits"], ["fail", "failing test", "20"], ["nan", "NaN", "20  · wobbly shots"],
     ["todo", "TODO", "10"], ["bug", "bug", "10"]];
   const lx = cx - 150;
@@ -746,8 +746,8 @@ function drawBanner() {
   ctx.fillStyle = "rgba(11,11,10,.78)"; ctx.fillRect(0, 0, W, H);
   const y = H * 0.32, glitch = p < 0.18 ? 0.5 : Math.random() < 0.04 ? 0.15 : 0;
   const h = drawPixelText("REPLY'S IN", W / 2, y, W * 0.8, 9, C.amber, C.orange, glitch);
-  txt("claude has answered", W / 2, y + h + 18, C.text, 14, "center", 5);
-  const run = G.state === "play" ? `run saved · wave ${G.wave} · ${G.score} pts · back next time claude thinks` : "back next time claude thinks";
+  txt(who() + " has answered", W / 2, y + h + 18, C.text, 14, "center", 5);
+  const run = G.state === "play" ? `run saved · wave ${G.wave} · ${G.score} pts · back next time ${who()} thinks` : "back next time ${who()} thinks";
   txt(run, W / 2, y + h + 40, C.dim, 12, "center");
 }
 
@@ -774,20 +774,20 @@ function stopLoop() { if (raf) cancelAnimationFrame(raf); raf = 0; }
 function paintStatus() {
   const a = app()?.active, busy = !!a?.busy;
   const t = V.bannerUntil ? "✓ reply's in"
-    : busy ? `${SPINNER[Math.floor(G.rt * 8) % SPINNER.length]} claude is working · ${Math.floor((performance.now() - V.busySince) / 1000)}s`
-    : "claude is idle";
+    : busy ? `${SPINNER[Math.floor(G.rt * 8) % SPINNER.length]} ${who()} is working · ${Math.floor((performance.now() - V.busySince) / 1000)}s`
+    : who() + " is idle";
   statusEl.textContent = `[ ${t} ]`;
 }
 const autoOn = () => app()?.settings?.invaders !== false;
 const peekOn = () => app()?.settings?.invaders_peek !== false;
 function paintCtl() {
   btn("peek").textContent = peekOn() ? "[▤ chat]" : "[  chat]";
-  btn("peek").title = peekOn() ? "A strip of the chat shows under the game (Claude's latest). Click to hide it." : "Click to show a strip of the chat under the game.";
+  btn("peek").title = peekOn() ? `A strip of the chat shows under the game (${Who()}'s latest). Click to hide it.` : "Click to show a strip of the chat under the game.";
   btn("sound").textContent = soundOn ? "[♪ on]" : "[♪ off]";
   btn("sound").title = "Sound (M): quiet beeps";
   btn("auto").textContent = autoOn() ? "[✓ auto-pop]" : "[  auto-pop]";
-  btn("auto").title = autoOn() ? "Pops up by itself while Claude works on a reply. Click so it doesn't."
-    : "Only opens when you ask for it. Click to let it pop up while Claude works.";
+  btn("auto").title = autoOn() ? `Pops up by itself while ${Who()} works on a reply. Click so it doesn't.`
+    : `Only opens when you ask for it. Click to let it pop up while ${Who()} works.`;
 }
 
 // ---------- keys: only while the game has focus; game keys never reach the app (Esc there would stop Claude) ----------
@@ -924,7 +924,7 @@ if (openBtn) {
 window.invaders = {
   // A menu item, say: open it now (and take the keyboard, since you asked for it). Not over a card waiting on you.
   show() {
-    if (pendingCard()) { if (typeof toast === "function") toast("Claude is waiting on you first."); return false; }
+    if (pendingCard()) { if (typeof toast === "function") toast(`${Who()} is waiting on you first.`); return false; }
     V.resume = false;
     return V.visible ? (root.focus({ preventScroll: true }), true) : showNow(true, true);
   },

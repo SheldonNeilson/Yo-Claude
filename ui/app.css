@@ -375,7 +375,7 @@ code.pathlink:hover { color: var(--orange2); background: var(--bg3); }
 .msg.user::before, .msg.assistant::before { position: absolute; top: -1.5em; background: var(--bg); padding: 0 1ch;
   white-space: pre; }
 .msg.user::before { content: "[ you ]"; right: 2ch; color: var(--orange); }
-.msg.assistant::before { content: "[ claude ]"; left: 2ch; color: var(--orange); }
+.msg.assistant::before { content: var(--who-tag, "[ claude ]"); left: 2ch; color: var(--orange); }
 /* the tail points up from the top corner, towards the speaker's side; the time sits next to it */
 .msg.user::after, .msg.assistant::after { position: absolute; top: -3em; height: 1.5em; width: 2ch; white-space: pre;
   line-height: 1.5em; pointer-events: none; }

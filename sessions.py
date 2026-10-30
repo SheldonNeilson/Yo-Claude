@@ -699,6 +699,9 @@ class Session:
             stderr=lambda line: log.debug("claude: %s", line.rstrip()),
             extra_args={"replay-user-messages": None},   # prompts come back with their message id (for rewind)
             thinking={"type": "adaptive", "display": "summarized"},   # its thinking as readable text, for the bubble
+            # one message can be big (a screenshot Claude read, a long tool result): past the default 1 MB the
+            # reader gave up, and the session went deaf and unstoppable
+            max_buffer_size=64 * 1024 * 1024,
         )
         if self.resumed:
             opts["resume"] = self.id
@@ -1041,6 +1044,7 @@ class Session:
     async def read_loop(self, client):
         """Everything Claude sends, for as long as the connection lives: replies to your messages, and replies it
         starts by itself (a background task finished), plus background-task progress in between."""
+        lost = None   # (why we stopped hearing it, if it wasn't us closing it)
         try:
             async for m in client.receive_messages():
                 try:
@@ -1051,13 +1055,29 @@ class Session:
             raise
         except Exception as e:
             log.warning("Session %s stopped listening: %s", self.id, e)
+            lost = e
         finally:
             if self.turn_future and not self.turn_future.done():
                 self.turn_future.set_exception(RuntimeError("Claude stopped responding"))
-            if self.client is client:   # Claude's process ended on its own
+            if self.client is client:   # Claude's process ended on its own, or we can't hear it any more
                 self.client = None
                 self.reader = None
                 self.resumed = True
+                if lost is not None:   # its process may still be working, unseen and unstoppable: end it
+                    asyncio.ensure_future(self.end_lost(client, lost))
+
+    async def end_lost(self, client, err):
+        """The connection to Claude Code broke mid-way (see listen): stop its process, clear "thinking", say so."""
+        try:
+            await client.disconnect()
+        except Exception as e:
+            log.debug("end_lost %s: %s", self.id, e)
+        if self.unsolicited or self.busy:
+            self.unsolicited = False
+            self.busy = False
+            self.router.set_work(self, "idle")
+        self.add({"kind": "error", "text": f"Lost the connection to Claude Code ({str(err)[:120]}). It's stopped; "
+                                           "send your message again (or ↻ retry) to carry on."})
 
     def dispatch(self, m):
         if isinstance(m, (sdk.TaskStartedMessage, sdk.TaskProgressMessage, sdk.TaskUpdatedMessage,

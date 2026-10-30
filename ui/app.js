@@ -113,7 +113,7 @@ function handle(e) {
     case "settings": S.settings = e.settings; renderToggles(); avatar.apply(); renderBusy(); renderName(); renderAwake(); break;
     case "folder": S.folder = e.folder; renderHead(); break;
     case "confirm_quit":
-      confirmBox(`Claude is in the middle of a reply in ${e.busy.map((b) => `“${b.title}”`).join(", ")}. ` +
+      confirmBox(`${Who()} is in the middle of a reply in ${e.busy.map((b) => `“${b.title}”`).join(", ")}. ` +
                  "Quitting now cuts it off (background tasks keep running and are picked up after a restart).",
                  () => api().quit(true));
       break;
@@ -163,13 +163,15 @@ const appName = () => (S.settings?.character === "female" ? "Yo Claudia" : "Yo C
 function renderName() {
   $("#top .brand").textContent = appName().toUpperCase();
   document.title = appName();
+  $("#transcript").style.setProperty("--who-tag", `"[ ${who()} ]"`);   // (Claude's bubbles: [ claude ] or [ claudia ])
+  renderBusy?.();
   if (avatar.el) avatar.el.dataset.tip = `${appName()} · click to talk`;
 }
 function renderAwake() {   // ☕ in the menu bar: lit while the PC is kept awake always
   const b = $("#awakeBtn"), on = S.settings?.keep_awake === true;
   b.classList.toggle("on", on);
   b.title = on ? "The PC is kept awake (it won't go to sleep while Yo Claude runs). Click to let it sleep when idle."
-    : "Click to keep the PC awake always. (While Claude works it's kept awake anyway"
+    : `Click to keep the PC awake always. (While ${Who()} works it's kept awake anyway`
       + (S.settings?.awake_while_working === false ? ": that's off too, in Options)" : ")");
 }
 function renderToggles() {
@@ -580,7 +582,7 @@ const transcript = {
         img.src = it.image;
         const file = it.input?.file_path;
         img.dataset.tip = file ? `${file}
-Click to open` : "What Claude saw · click to enlarge";
+Click to open` : `What ${Who()} saw · click to enlarge`;
         img.onclick = (e) => { e.stopPropagation(); file ? viewFile(file) : showPicture(it.image, toolArg(it.name, it.input) || it.name); };
         g.pics.appendChild(img);
       }
@@ -663,7 +665,7 @@ function checkRow(label, st, k, done, onChange) {
   const box = el("input"); box.type = "checkbox"; box.checked = st.yes[k]; box.disabled = done;
   const text = el("span", "clabel"); text.textContent = label;
   const whyBtn = el("button", "cwhybtn", st.why[k] ? "why ✎" : "+ why");
-  whyBtn.dataset.tip = "Say why (optional): it goes to Claude with your answer";
+  whyBtn.dataset.tip = `Say why (optional): it goes to ${Who()} with your answer`;
   const why = el("input", "cwhy");
   why.value = st.why[k];
   const sync = () => {
@@ -705,7 +707,7 @@ function checklistCard(it) {
     return n;
   }
   const sid = S.active.id, st = checkStateFor(`${sid}:${it.id}`, items.length, items.map((x) => (it.checked || []).includes(x)));
-  n.appendChild(el("div", "q", "☑ Claude asks you to pick"));
+  n.appendChild(el("div", "q", `☑ ${Who()} asks you to pick`));
   n.appendChild(el("div", "ctitle", esc(it.title || "")));
   const count = el("span", "dim"), upd = () => { count.textContent = `${st.yes.filter(Boolean).length} of ${items.length} ticked`; };
   const list = el("div", "clist");
@@ -716,7 +718,7 @@ function checklistCard(it) {
   note.oninput = () => { st.note = note.value; };
   n.appendChild(note);
   const bar = el("div", "checkbar"), go = el("button", "primary", "[submit]");
-  go.dataset.tip = "Send your answers to Claude: ticked = yes, the rest = no";
+  go.dataset.tip = `Send your answers to ${Who()}: ticked = yes, the rest = no`;
   go.onclick = async () => {
     go.disabled = true;
     const r = await api().checklist_answer(sid, it.id, st.yes.map((y, k) => ({ yes: y, why: st.why[k] })), st.note);
@@ -749,7 +751,7 @@ function checklistUnder(node, it) {
   });
   const bar = el("div", "checkbar"), go = el("button", "primary", done ? "[sent]" : "[submit]");
   go.disabled = done;
-  go.dataset.tip = "Send your answers to Claude: ticked = yes, the rest = no";
+  go.dataset.tip = `Send your answers to ${Who()}: ticked = yes, the rest = no`;
   go.onclick = async (e) => {
     e.stopPropagation();
     const lines = labels.map((x, k) => (st.yes[k] ? "✓ yes: " : "✗ no: ") + x + (st.why[k].trim() ? `  (why: ${st.why[k].trim()})` : ""));
@@ -836,7 +838,7 @@ function buildItem(it) {
     case "user": {
       const n = el("div", "msg user"); n.appendChild(document.createTextNode(it.text || ""));
       if (it.voice) n.appendChild(el("span", "mic", "🎤 voice"));
-      if (it.queued_by === "claude") n.appendChild(el("span", "mic", "↻ queued by claude"));
+      if (it.queued_by === "claude") n.appendChild(el("span", "mic", `↻ queued by ${who()}`));
       const cwd = S.active?.cwd;
       for (const p of it.attachments || []) n.appendChild(fileChip("📎 " + p, p, cwd));
       if (it.image_paths?.length) {
@@ -846,7 +848,7 @@ function buildItem(it) {
       } else if (it.images) n.appendChild(el("span", "chip small", `🖼 ${it.images} image${it.images > 1 ? "s" : ""}`));
       if (it.queued && it.sent_now) {   // sent now: Claude Code has it, and reads it at its next step
         n.classList.add("queued");
-        n.appendChild(el("span", "queuedtag", "➤ sent: Claude reads it at its next step"));
+        n.appendChild(el("span", "queuedtag", `➤ sent: ${Who()} reads it at the next step`));
       } else if (it.queued) {   // waiting for the reply before it: it can still be taken back
         n.classList.add("queued");
         const q = el("span", "queuedtag", "⧗ queued ");
@@ -862,7 +864,7 @@ function buildItem(it) {
         };
         if (!(it.text || "").trimStart().startsWith("/")) {   // commands only run between replies
           const now = el("button", "sendnow", "➤ send now");
-          now.dataset.tip = "Give this to Claude now: it reads it at its next step instead of after this reply";
+          now.dataset.tip = `Give this to ${Who()} now: read at the next step instead of after this reply`;
           now.onclick = async (e) => {
             e.stopPropagation(); now.disabled = true;
             const r = await api().send_now(it.i);
@@ -886,7 +888,7 @@ function buildItem(it) {
     }
     case "advisor": {   // Claude's advisor: a third member of the chat. Its reply is encrypted, so this is Claude passing it on
       const wait = it.status === "asking" ? "reading the conversation…"
-        : S.active?.busy ? "advice given · Claude is passing it on…" : "consulted · its advice wasn't passed on";
+        : S.active?.busy ? `advice given · ${Who()} is passing it on…` : "consulted · its advice wasn't passed on";
       const n = el("div", "msg advisor" + (it.text ? "" : " pending"), it.text ? md(it.text) : `<span class="ahint">${wait}</span>`);
       if (it.took) n.dataset.tip = `answered in ${it.took}s`;
       return n;
@@ -964,7 +966,7 @@ function toolCard(it) {
   const body = el("div", "body", "");
   d.addEventListener("toggle", () => {
     if (d.open && !body.innerHTML) {
-      body.innerHTML = (it.image ? `<img class="shot" src="${it.image}" title="What Claude saw">` : "") + toolBody(it.name, it.input, it.result);
+      body.innerHTML = (it.image ? `<img class="shot" src="${it.image}" title="What ${Who()} saw">` : "") + toolBody(it.name, it.input, it.result);
       const path = (it.input || {}).file_path;
       if (path && MEDIA_RE_ONE.test(path)) body.prepend(mediaThumb(path, S.active?.cwd));
     }
@@ -980,7 +982,7 @@ function thinkingCard(it) {
 }
 function approvalCard(it) {
   const n = el("div", "approval " + it.status);
-  const head = it.status === "pending" ? "Claude wants to " : it.status === "allowed" ? "✓ allowed: " : "⊘ denied: ";
+  const head = it.status === "pending" ? `${Who()} wants to ` : it.status === "allowed" ? "✓ allowed: " : "⊘ denied: ";
   n.innerHTML = `<div class="q">${esc(head + it.summary)}</div>`;
   const d = el("details", "card"); d.innerHTML = `<summary><span class="name">${esc(it.tool)}</span><span class="arg">${esc(toolArg(it.tool, it.input))}</span></summary>`;
   d.appendChild(el("div", "body", toolBody(it.tool, it.input)));
@@ -1008,7 +1010,7 @@ function questionCard(it) {
   const qs = it.questions || [];
   const n = el("div", "question " + it.status);
   if (it.status !== "pending") {   // answered or skipped: what was chosen, read-only
-    n.appendChild(el("div", "q", it.status === "answered" ? "✓ you answered" : "⊘ skipped: Claude carries on without an answer"));
+    n.appendChild(el("div", "q", it.status === "answered" ? "✓ you answered" : `⊘ skipped: ${Who()} carries on without an answer`));
     for (const q of qs) {
       const a = (it.answers || {})[q.question], b = el("div", "qblock");
       b.appendChild(questionHead(q));
@@ -1021,7 +1023,7 @@ function questionCard(it) {
   if (!questionPicks.has(key)) questionPicks.set(key, qs.map(() => ({ picked: [], other: "" })));
   const st = questionPicks.get(key);
   const quick = qs.length === 1 && !qs[0].multiSelect;   // a single one-choice question: clicking an option answers it
-  n.appendChild(el("div", "q", "? Claude asks" + (qs.length > 1 ? ` ${qs.length} questions` : "")));
+  n.appendChild(el("div", "q", `? ${Who()} asks` + (qs.length > 1 ? ` ${qs.length} questions` : "")));
   const answers = () => {   // {question: label or typed text}, a list for multi-select (the shape Claude Code takes)
     const r = {};
     qs.forEach((q, k) => {
@@ -1073,10 +1075,10 @@ function questionCard(it) {
     sync();
   });
   const btns = el("div", "btns");
-  sendBtn.dataset.tip = "Send your answers to Claude";
+  sendBtn.dataset.tip = `Send your answers to ${Who()}`;
   sendBtn.onclick = () => send(answers());
   const skip = el("button", "danger", "[skip]");
-  skip.dataset.tip = "Don't answer: Claude carries on without it";
+  skip.dataset.tip = `Don't answer: ${Who()} carries on without it`;
   skip.onclick = () => send(null);
   btns.append(sendBtn, skip);
   n.appendChild(btns);
@@ -1198,8 +1200,8 @@ function renderBusy() {
   box.classList.toggle("suggesting", !!hint);   // a suggested next message, grey in the empty box: Tab takes it
   box.placeholder = hint ? `${hint}   Tab ↹`
     : S.active?.busy
-    ? "> claude is working — you can queue another message"
-    : "> message claude…  (Enter sends · Shift+Enter new line · @ attaches a file · paste images)";
+    ? `> ${who()} is working — you can queue another message`
+    : `> message ${who()}…  (Enter sends · Shift+Enter new line · @ attaches a file · paste images)`;
 }
 function setSuggest(text) { if ((S.suggest || "") !== (text || "")) { S.suggest = text || ""; renderBusy(); } }
 
@@ -1367,7 +1369,7 @@ function thoughtBubble(it) {
   const cut = !it.expanded && tail.length < text.length;
   n.innerHTML = `<span class="ttext">${esc(it.expanded || !cut ? text : "… " + tail) || (it.streaming ? "" : "(nothing to show)")}</span>` +
     (cut ? '<span class="more">▸ all of it</span>' : it.expanded ? '<span class="more">▾ less</span>' : "");
-  n.dataset.tip = it.expanded ? "Click to show less" : "Claude's thinking · click to read all of it";
+  n.dataset.tip = it.expanded ? "Click to show less" : `${Who()}'s thinking · click to read all of it`;
   n.onclick = (e) => {
     if (getSelection().toString()) return;   // selecting text to copy, not toggling
     e.stopPropagation(); it.expanded = !it.expanded; renderItem(it);
@@ -1416,9 +1418,9 @@ function showRewind(it) {
   d.appendChild(el("div", "", `<p>Go back to just before this message. It and everything after it are taken out.</p>` +
     `<div class="rwq">&gt; ${esc(short)}</div>`));
   const opts = [
-    ["both", "Conversation and files", "Undo the conversation from here, and put back the files Claude changed since.", code],
+    ["both", "Conversation and files", `Undo the conversation from here, and put back the files ${Who()} changed since.`, code],
     ["conversation", "Conversation only", "Keep the files as they are now.", true],
-    ["files", "Files only", "Keep the conversation; put back the files Claude changed since this message.", code],
+    ["files", "Files only", `Keep the conversation; put back the files ${Who()} changed since this message.`, code],
   ];
   let mode = code ? "both" : "conversation";
   const box = el("div", "rwopts");
@@ -1585,7 +1587,7 @@ const LOCAL_COMMANDS = [
   ["files", "", "The folder's files"],
   ["changes", "", "What this session changed"],
   ["git", "", "Branch and commits"],
-  ["stop", "", "Stop Claude"],
+  ["stop", "", `Stop ${Who()}`],
   ["btw", "<question>", "Ask a side question without adding it to the conversation"],
 ];
 function runLocalCommand(text) {

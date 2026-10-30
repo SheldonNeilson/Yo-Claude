@@ -52,8 +52,8 @@ class MiniBar {
     return {
       starting: "> booting" + cur, idle: `> say "${(typeof S !== "undefined" && S.settings?.character === "female") ? "yo claudia" : "yo claude"}"` + cur, paused: "> wake word off · click to talk",
       listening: (this.text ? "> follow-up? " : "> listening ") + cur,
-      thinking: MiniBar.SPIN[Math.floor(t * 8) % MiniBar.SPIN.length] + " thinking…", speaking: "● claude",
-      using_pc: "⌖ using your pc…", approval: "! claude needs your ok", error: "! microphone unavailable",
+      thinking: MiniBar.SPIN[Math.floor(t * 8) % MiniBar.SPIN.length] + " thinking…", speaking: "● " + who(),
+      using_pc: "⌖ using your pc…", approval: "! " + who() + " needs your ok", error: "! microphone unavailable",
       background: MiniBar.SPIN[Math.floor(t * 4) % MiniBar.SPIN.length] + " background task running",
     }[this.state] || this.state;
   }

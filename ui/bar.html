@@ -37,6 +37,7 @@
 </div>
 <div id="more" class="hidden"><div id="face" class="hidden"></div><div id="feed" class="hidden"></div></div>
 </div>
+<script src="name.js"></script>
 <script src="mascot.js"></script>
 <script src="minibar.js"></script>
 <script src="avatar.js"></script>
@@ -92,7 +93,7 @@ function renderFeed() {
     const f = $("#feed"), lines = feedLines();
     f.replaceChildren(...(lines.length ? lines.map(([who, what]) => {
       const n = el("div", "fl " + who);
-      n.append(el("span", "who", who === "doing" ? "doing" : who), Object.assign(el("span", "what"), { textContent: what, title: what }));
+      n.append(el("span", "who", who === "claude" ? window.who() : who), Object.assign(el("span", "what"), { textContent: what, title: what }));
       return n;
     }) : [el("div", "empty", "nothing yet in this session")]));
   });
