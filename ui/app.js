@@ -266,9 +266,9 @@ new MutationObserver(() => panes.render()).observe($("#app"), { attributes: true
 // ---------- sidebar: folders and their sessions ----------
 async function loadLists() {
   const keys = [null, ...S.workspaces];
-  const lists = await Promise.all(keys.map((cwd) => api().list_sessions(cwd)));
-  keys.forEach((cwd, i) => { S.lists[keyOf(cwd)] = lists[i] || []; });
-  const gi = await api().group_info();   // (listing made each folder's group)
+  const lists = await Promise.all(keys.map((cwd) => api().list_sessions(cwd).catch(() => null)));
+  keys.forEach((cwd, i) => { S.lists[keyOf(cwd)] = lists[i] || S.lists[keyOf(cwd)] || []; });
+  const gi = (await api().group_info().catch(() => null)) || { groups: S.groups, cwds: S.groupCwd };   // (listing made each folder's group)
   S.groups = gi.groups; S.groupCwd = gi.cwds || {};
   for (const s of allSessions()) {
     if (s.busy) S.busy.add(s.id);
@@ -1960,7 +1960,10 @@ function alertBox(text) { const d = dialog(appName()); d.appendChild(el("div", "
 
 // ---------- start ----------
 window.addEventListener("pywebviewready", async () => {
-  const s = await api().init();
+  let s;
+  for (let i = 0; !s; i++) {   // (a failed start, a file in use for a moment, tries again rather than leaving the window empty)
+    try { s = await api().init(); } catch (e) { if (i >= 4) throw e; await new Promise((r) => setTimeout(r, 700)); }
+  }
   Object.assign(S, { settings: s.settings, folder: s.folder, workspaces: s.workspaces || [], groups: s.groups,
                      active: s.active, items: s.items || [], display: s.display });
   S.manual = s.settings.tree_manual || {};

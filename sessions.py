@@ -194,7 +194,15 @@ class Meta:
             tmp = META_PATH + ".tmp"
             with open(tmp, "w", encoding="utf-8") as f:
                 json.dump(self.data, f, indent=1)
-            os.replace(tmp, META_PATH)
+            for attempt in range(12):   # (Windows refuses the swap while anything, a scanner say, has the file open for a moment)
+                try:
+                    os.replace(tmp, META_PATH)
+                    return
+                except PermissionError:
+                    if attempt == 11:
+                        log.warning("Couldn't save sessions.json (in use); the change is kept in memory and saved with the next one")
+                        return
+                    time.sleep(0.15)
 
     def session(self, sid):
         return self.data["sessions"].setdefault(sid, {})

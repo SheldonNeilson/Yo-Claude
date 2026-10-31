@@ -619,6 +619,15 @@ class Api:
         self._app = app
 
     # --- state ---
+    @staticmethod
+    def safe_list(r, folder):
+        """The first list of sessions: if it fails the window still opens (its own lists load afterwards), instead of blank."""
+        try:
+            return r.list(folder)
+        except Exception:
+            log.exception("Listing sessions at start failed")
+            return []
+
     def init(self):
         a = self._app
         r = a.router
@@ -628,7 +637,7 @@ class Api:
         active = r.active
         return {"version": VERSION, "update": getattr(a, "update_info", None), "limits": r.limits,
                 "settings": dict(a.settings), "folder": r.folder, "folders": r.meta.data["recent_folders"],
-                "workspaces": r.workspaces(), "groups": r.meta.data["groups"], "sessions": r.list(r.folder),
+                "workspaces": r.workspaces(), "groups": r.meta.data["groups"], "sessions": self.safe_list(r, r.folder),
                 "active": r.describe(active) if active else None, "items": active.items if active else [],
                 "display": {"state": a.display, "voice": a.voice_state, "work": a.work_state, "text": a.voice_text}}
 
