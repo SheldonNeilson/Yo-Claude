@@ -471,6 +471,7 @@ class App:
             pystray.MenuItem("Keep PC awake while Claude works", toggle("awake_while_working"),
                              checked=checked("awake_while_working")),
             pystray.MenuItem("Keep PC awake (always)", toggle("keep_awake"), checked=checked("keep_awake")),
+            pystray.MenuItem("Keep the screen on too", toggle("keep_screen_on"), checked=checked("keep_screen_on")),
             pystray.MenuItem("Launch with Windows", toggle("launch_at_login", set_launch_at_login),
                              checked=checked("launch_at_login")),
             pystray.Menu.SEPARATOR,
@@ -494,18 +495,22 @@ class App:
 
     def keep_awake(self):
         """Keeps the PC from going to sleep (the screen may still turn off): while Claude works in any session, of
-        any project, including background tasks, or always, as long as Yo Claude runs (both on by default).
-        [☕ awake] at the top of the window, Options or the tray menu switch them."""
-        es_continuous, es_system = 0x80000000, 0x00000001
+        any project, including background tasks, or always, as long as Yo Claude runs (both on by default). While it is
+        keeping the PC awake it also keeps the screen on (Options > Power > Keep Screen On Too, on by default): without
+        that Windows still turns the display off after a few minutes, and the lock screen follows.
+        [stay awake] at the top of the window, Options or the tray menu switch them."""
+        es_continuous, es_system, es_display = 0x80000000, 0x00000001, 0x00000002
         awake = None
         while True:
             s = self.settings
             want = bool(s.get("keep_awake", True)) or (
                 s.get("awake_while_working", True) and bool(self.router.busy_report()))
-            if want != awake:
-                ctypes.windll.kernel32.SetThreadExecutionState(es_continuous | (es_system if want else 0))
-                awake = want
-                log.info("Keeping the PC awake: %s", "yes" if want else "no")
+            state = (want, want and bool(s.get("keep_screen_on", True)))
+            if state != awake:
+                flags = es_continuous | (es_system if want else 0) | (es_display if state[1] else 0)
+                ctypes.windll.kernel32.SetThreadExecutionState(flags)
+                awake = state
+                log.info("Keeping the PC awake: %s, screen on: %s", "yes" if want else "no", "yes" if state[1] else "no")
             time.sleep(10)
 
     def update_tray(self):

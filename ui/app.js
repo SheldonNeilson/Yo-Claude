@@ -176,7 +176,7 @@ function renderAwake() {
   const b = $("#awakeBtn"), on = S.settings?.keep_awake !== false;
   b.classList.toggle("on", on);
   b.textContent = on ? "[staying awake]" : "[stay awake]";   // (text only, like the other buttons up there)
-  b.title = on ? "The PC is kept awake (it won't go to sleep while Yo Claude runs). Click to let it sleep when idle."
+  b.title = on ? "The PC is kept awake (it won't sleep, and the screen stays on, while Yo Claude runs; Options > Power). Click to let it sleep when idle."
     : `Click to keep the PC awake always. (While ${Who()} works it's kept awake anyway`
       + (S.settings?.awake_while_working === false ? ": that's off too, in Options)" : ")");
 }

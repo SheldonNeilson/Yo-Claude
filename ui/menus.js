@@ -162,6 +162,7 @@ const MENUS = {
       ["Power", null, { sub: [
         tog("Keep PC Awake While Claude Works", "awake_while_working"),
         tog("Keep PC Awake (Always)", "keep_awake"),
+        tog("Keep Screen On Too (no dimming or lock screen)", "keep_screen_on"),
       ] }],
     ];
   },
