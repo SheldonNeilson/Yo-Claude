@@ -100,11 +100,9 @@ window.gallery = {
     const rf = el("button", "", "⟳"); rf.title = "Look through the chat again (and re-read the files' dates)"; rf.onclick = () => this.refresh(true);
     head.appendChild(rf);
     body.appendChild(head);
-    const find = el("div", "phead");
-    const q = el("input"); q.placeholder = "find by name…"; q.value = this.query;
-    q.oninput = () => { this.query = q.value; this.paintList(); };
-    find.appendChild(q);
-    body.appendChild(find);
+    panel.rememberFocus();
+    body.appendChild(panel.filterBar("media", "search the media…  (Ctrl+Shift+F)", () => { this.query = panel.q.media; this.paintList(); }));
+    this.query = panel.q.media;
     const cols = el("div", "fcols gcols");   // click to sort; again to reverse (the same columns as the rows below)
     for (const [key, label, tip] of [["order", "chat", "In the order they came up in the chat"], ["name", "name", "Sort by name"],
       ["mtime", "modified", "Sort by when the file last changed"], ["ctime", "created", "Sort by when the file was made"]]) {

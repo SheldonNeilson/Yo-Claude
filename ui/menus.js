@@ -256,6 +256,12 @@ document.addEventListener("keydown", (e) => {
     if (k === "f") { e.preventDefault(); return $("#search").focus(); }
     if (k === "l") { e.preventDefault(); $("#folderPath").focus(); return $("#folderPath").select(); }
     if (k === "b") { e.preventDefault(); return $(e.shiftKey ? "#sideBtn" : "#panelBtn").click(); }
+    if (k === "f" && e.shiftKey) {   // search in the right-hand panel (files, changes, git, tasks or media: whichever tab is open)
+      e.preventDefault();
+      $("#app").classList.add("with-panel"); api().set_setting("panel_open", true);
+      const go = () => { const f = document.querySelector("#panel .pfilter"); if (f) { f.focus(); f.select(); } };
+      return panel.shown() ? go() : setTimeout(go, 150);
+    }
     if (k === " ") { e.preventDefault(); return api().talk(); }
     if (k === "=" || k === "+") { e.preventDefault(); return zoom(0.1); }
     if (k === "-") { e.preventDefault(); return zoom(-0.1); }

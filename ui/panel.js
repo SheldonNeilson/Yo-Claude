@@ -8,6 +8,7 @@ window.panel = {
   // browsing: root is the folder the files tab shows (null: the session's own), "::pc" the drives; sorted by name or
   // by modified time
   root: null, session: null, sortKey: "name", sortDir: 1,
+  q: { files: "", changes: "", git: "", tasks: "", media: "" }, content: false, searchEls: null, found: null, refocus: null,
 
   shown() { return $("#app").classList.contains("with-panel"); },
   refresh(soon = false) {
@@ -65,6 +66,70 @@ window.panel = {
     return m;
   },
 
+  // ----- search boxes: one on every tab (Ctrl+Shift+F). Files searches the whole folder by name (and inside the files);
+  // changes, git, tasks and media filter what's listed -----
+  filterBar(key, placeholder, onInput, extras = []) {
+    const bar = el("div", "phead psearch"), q = el("input", "pfilter");
+    q.dataset.key = key; q.placeholder = placeholder; q.value = this.q[key] || ""; q.spellcheck = false;
+    const x = el("button", "pclear", "✕"); x.title = "Clear the search (Esc)";
+    const paintX = () => { x.style.visibility = q.value ? "visible" : "hidden"; };
+    q.oninput = () => { this.q[key] = q.value; paintX(); onInput(); };
+    q.onkeydown = (e) => { e.stopPropagation(); if (e.key === "Escape") { q.value = ""; q.oninput(); } };
+    x.onclick = () => { q.value = ""; q.oninput(); q.focus(); };
+    paintX();
+    bar.append(q, ...extras, x);
+    if (this.refocus?.key === key && Date.now() - this.refocus.at < 1000) {   // (the panel was redrawn while you typed: carry on where you were)
+      const pos = this.refocus.pos; this.refocus = null;
+      setTimeout(() => { q.focus(); q.setSelectionRange(pos, pos); }, 0);
+    }
+    return bar;
+  },
+  rememberFocus() {   // call before redrawing a tab
+    const f = document.activeElement;
+    if (f?.classList?.contains("pfilter")) this.refocus = { key: f.dataset.key, pos: f.selectionStart, at: Date.now() };
+  },
+  domFilter(root, key) {   // hide the rows that don't have every word you typed
+    const terms = (this.q[key] || "").toLowerCase().split(/\s+/).filter(Boolean);
+    root.querySelectorAll(".node").forEach((n) => { n.style.display = !terms.length || terms.every((t) => n.textContent.toLowerCase().includes(t)) ? "" : "none"; });
+  },
+  async runSearch() {   // the files tab: name (and contents) search over the whole folder
+    const E = this.searchEls, q = this.q.files.trim();
+    if (!E) return;
+    E.cols.style.display = E.tree.style.display = q ? "none" : "";
+    E.results.style.display = q ? "" : "none";
+    if (!q) { E.results.innerHTML = ""; return; }
+    clearTimeout(this.searchTimer);
+    const run = async () => {
+      const key = [this.cwd, q, this.content].join("|"), token = this.searchToken = {};
+      if (this.found?.key !== key) {
+        E.results.innerHTML = '<div class="pempty">Searching…</div>';
+        const r = await api().search_files(q, this.content, this.cwd);
+        if (this.searchToken !== token) return;
+        this.found = { key, r };
+      }
+      this.paintResults(E.results, this.found.r);
+    };
+    this.searchTimer = setTimeout(run, this.found?.key === [this.cwd, q, this.content].join("|") ? 0 : 250);
+  },
+  paintResults(box, r) {
+    box.innerHTML = "";
+    if (r?.error) { box.appendChild(el("div", "pempty", esc(r.error))); return; }
+    const list = r?.results || [];
+    box.appendChild(el("div", "pinfo", list.length ? `${list.length}${r.truncated ? "+" : ""} found${this.content ? "" : ` · tick “in files” to search inside them too`}` : "Nothing found."));
+    this.visible = []; this.rows = new Map();
+    for (const e of list) {
+      const entry = { name: e.name, path: e.path, dir: false, mtime: e.mtime };
+      const row = el("div", "node sres"), dir = e.path.includes("/") ? e.path.slice(0, e.path.lastIndexOf("/") + 1) : "";
+      row.innerHTML = `<span class="nm">${esc(e.name)}${e.line ? `<span class="dim small"> :${e.line}</span>` : ""}</span><span class="dim small sdir">${esc(dir)}</span>` +
+        `<span class="mt" title="${e.mtime ? esc(new Date(e.mtime * 1000).toLocaleString()) : ""}">${shortTime(e.mtime)}</span>` +
+        (e.text ? `<div class="stext dim small">${esc(e.text)}</div>` : "");
+      row.title = e.path + (e.line ? ` (line ${e.line})` : "");
+      row.onclick = (ev) => this.clickRow(ev, entry);
+      row.oncontextmenu = (ev) => { ev.preventDefault(); ev.stopPropagation(); if (!this.sel.has(entry.path)) this.select([entry.path], entry.path); fileMenu(ev, entry); };
+      this.visible.push(entry); this.rows.set(entry.path + (e.line ? ":" + e.line : ""), row);
+      box.appendChild(row);
+    }
+  },
   renderTabs() {
     const p = $("#panel");
     if (!p.querySelector(".ptabs")) return;
@@ -90,6 +155,7 @@ ${elsewhere} running in other sessions` : ""}">` +
   },
   render() {
     const p = $("#panel");
+    this.rememberFocus();
     const keepTop = (this.tab === "files" || this.tab === "media") && this.renderedTab === this.tab ? $("#pbody")?.scrollTop || 0 : 0;
     this.renderedTab = this.tab;
     p.innerHTML = `<div class="ptabs"><span class="tabs"></span>
@@ -134,6 +200,12 @@ ${elsewhere} running in other sessions` : ""}">` +
     tools.appendChild(el("span", "spacer"));
     tool("⟳", "Refresh the file tree", () => this.load());
     if (!pc) body.appendChild(tools);
+    if (!pc) {
+      const inFiles = el("button", this.content ? "on" : "", "in files");
+      inFiles.title = "Also look inside the files' text (a little slower)";
+      inFiles.onclick = () => { this.content = !this.content; inFiles.classList.toggle("on", this.content); this.found = null; this.runSearch(); };
+      body.appendChild(this.filterBar("files", "search this folder…  (Ctrl+Shift+F)", () => this.runSearch(), [inFiles]));
+    }
     const cols = el("div", "fcols");   // click to sort; again to reverse
     for (const [key, label] of [["name", "name"], ["mtime", "modified"]]) {
       const c = el("button", "fcol " + key + (this.sortKey === key ? " on" : ""), label + (this.sortKey === key ? (this.sortDir > 0 ? " ▲" : " ▼") : ""));
@@ -181,6 +253,10 @@ ${elsewhere} running in other sessions` : ""}">` +
     body.ondragover = (ev) => { if (!this.dragging || ev.target.closest(".node")) return; ev.preventDefault(); this.dropMark(tree); };
     body.ondrop = (ev) => { if (!this.dragging || ev.target.closest(".node")) return; ev.preventDefault(); ev.stopPropagation(); this.dropOn("", ev.ctrlKey); };
     body.appendChild(tree);
+    const results = el("div", "tree ftree sresults");
+    body.appendChild(results);
+    this.searchEls = pc ? null : { cols, tree, results };
+    this.runSearch();
     this.paintSel();
     if (this.treeFocus && $("#modal").classList.contains("hidden")) tree.focus({ preventScroll: true });
   },
@@ -419,6 +495,7 @@ ${elsewhere} running in other sessions` : ""}">` +
       (c.repo ? `<span class="add">+${c.add || 0}</span>&nbsp;<span class="del">−${c.del || 0}</span>` : "")));
     if (!c.files?.length) { body.appendChild(el("div", "pempty", "No changes yet.")); return; }
     const list = el("div", "tree");
+    body.appendChild(this.filterBar("changes", "search the changes…", () => this.domFilter(list, "changes")));
     for (const f of c.files) {
       const row = el("div", "node");
       row.innerHTML = `<span class="badge-st st-${f.status}">${f.status}</span><span class="nm">${esc(f.path)}</span>` +
@@ -428,6 +505,7 @@ ${elsewhere} running in other sessions` : ""}">` +
       list.appendChild(row);
     }
     body.appendChild(list);
+    this.domFilter(list, "changes");
   },
 
   // ---------- git ----------
@@ -439,6 +517,7 @@ ${elsewhere} running in other sessions` : ""}">` +
     body.appendChild(el("div", "phead", `<span>⎇ <b>${esc(g.branch)}</b>${esc(sync)}</span>`));
     body.appendChild(el("div", "pinfo", `${esc(g.head || "")}<br>${g.dirty} changed · ${g.untracked} untracked`));
     const list = el("div", "tree");
+    body.appendChild(this.filterBar("git", "search the branches…", () => this.domFilter(list, "git")));
     for (const b of g.branches) {
       const row = el("div", "node" + (b === g.branch ? " cur" : ""));
       row.innerHTML = `<span class="tw">${b === g.branch ? "●" : " "}</span><span class="nm">${esc(b)}</span>`;
@@ -450,6 +529,7 @@ ${elsewhere} running in other sessions` : ""}">` +
       list.appendChild(row);
     }
     body.appendChild(list);
+    this.domFilter(list, "git");
     const nb = el("div", "phead");
     const input = el("input"); input.placeholder = "new branch name";
     const go = el("button", "primary", "create");

@@ -141,6 +141,67 @@ def all_files(root, limit=5000):
     return files
 
 
+TEXT_SKIP = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".ico", ".mp4", ".webm", ".mov", ".mp3", ".wav", ".ogg", ".pdf", ".zip",
+             ".7z", ".gz", ".exe", ".dll", ".pdb", ".bin", ".so", ".woff", ".woff2", ".ttf", ".otf", ".pyc", ".class", ".jar", ".safetensors",
+             ".onnx", ".pt", ".ckpt", ".gguf"}
+
+
+def search_files(root, query, content=False, limit=300):
+    """The files tab's search: names containing every word of `query`, then (with `content`) lines containing it, in the
+    folder (git's view of it when it's a repo, else a walk that skips the usual junk). {results: [{path, name, mtime,
+    line?, text?}], truncated}. Content matches are the phrase as typed, case-insensitive, at most 3 lines per file."""
+    q = (query or "").strip().lower()
+    if not q:
+        return {"results": [], "truncated": False}
+    if is_repo(root):
+        files = git(root, "ls-files", "--cached", "--others", "--exclude-standard", check=False).splitlines()
+    else:
+        files = []
+        for d, dirs, names in os.walk(root):
+            dirs[:] = [x for x in dirs if x not in HIDDEN]
+            files += [os.path.relpath(os.path.join(d, n), root).replace("\\", "/") for n in names]
+            if len(files) > 100000:
+                break
+    terms = q.split()
+    results, seen = [], set()
+    for rel in files:
+        low = rel.lower()
+        if all(t in os.path.basename(low) or t in low for t in terms):
+            results.append({"path": rel, "name": os.path.basename(rel)})
+            seen.add(rel)
+            if len(results) >= limit:
+                break
+    truncated = len(results) >= limit
+    if content and not truncated:
+        deadline = time.time() + 6
+        per = {}
+        for rel in files:
+            if time.time() > deadline or len(results) >= limit:
+                truncated = True
+                break
+            if os.path.splitext(rel)[1].lower() in TEXT_SKIP:
+                continue
+            full = os.path.join(root, rel)
+            try:
+                if os.path.getsize(full) > 1_500_000:
+                    continue
+                with open(full, "r", encoding="utf-8", errors="strict") as f:
+                    for n, line in enumerate(f, 1):
+                        if q in line.lower():
+                            per[rel] = per.get(rel, 0) + 1
+                            results.append({"path": rel, "name": os.path.basename(rel), "line": n, "text": line.strip()[:160]})
+                            if per[rel] >= 3 or len(results) >= limit:
+                                break
+            except (OSError, UnicodeDecodeError):
+                continue
+    for r in results:
+        try:
+            r["mtime"] = os.path.getmtime(os.path.join(root, r["path"]))
+        except OSError:
+            r["mtime"] = 0
+    return {"results": results, "truncated": truncated}
+
+
 def safe_path(root, rel):
     full = os.path.normpath(os.path.join(root, rel))
     if os.path.commonpath([os.path.normcase(full), os.path.normcase(os.path.normpath(root))]) != os.path.normcase(

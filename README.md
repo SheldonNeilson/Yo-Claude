@@ -82,6 +82,8 @@ The first time, a welcome tour explains everything and checks how well it hears 
   typing are fixed straight away, the rest at a short pause. **Typing prediction** shows the next word or three in
   grey after the cursor as you type (Tab takes them). A grey **suggested next message** fills the empty box (Tab takes
   it), even while Claude is still working.
+- **Search** on every tab of the right-hand panel (Ctrl+Shift+F): files searches the whole folder by name, or inside
+  the files with "in files"; changes, git, tasks and media filter their lists.
 - **File editor** (open a text file, ✎ edit): colour for common languages and file types, line numbers (in view too),
   **column selection** (hold Alt+Shift and drag, or Alt+Shift+arrows: type, delete, copy and paste across the lines),
   auto-indent, a **format** button (Shift+Alt+F; also on save if you like), AutoCorrect for comments and prose, and

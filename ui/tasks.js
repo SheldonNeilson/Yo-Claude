@@ -57,6 +57,7 @@ window.tasks = {
     if (!body || panel.tab !== "tasks") return;
     panel.renderTabs();
     const keep = body.scrollTop;
+    panel.rememberFocus();
     body.innerHTML = "";
     const t = this.open && this.list.find((x) => x.key === this.open);
     if (t) return this.renderOne(body, t);
@@ -69,6 +70,7 @@ window.tasks = {
       bar.appendChild(b);
     }
     body.appendChild(bar);
+    body.appendChild(panel.filterBar("tasks", "search the tasks…", () => panel.domFilter(body, "tasks")));
     const shown = this.scope === "session" ? mine : this.list;
     if (!shown.length) {
       const others = this.list.length - mine.length;
@@ -108,6 +110,7 @@ Click to see its output`;
       }
       body.appendChild(list);
     }
+    panel.domFilter(body, "tasks");
     body.scrollTop = keep;
   },
   renderOne(body, t) {

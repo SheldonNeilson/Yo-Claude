@@ -734,6 +734,14 @@ b.lo { color: var(--green); } b.mid { color: var(--amber); } b.hi { color: var(-
 .phead.pnav .pwhere { flex: 1; min-width: 60px; font-size: 12px; padding: 2px 6px; }
 .fcols { display: flex; padding: 2px 8px; border-bottom: 1px solid var(--line); font-size: 11px; }
 .fcols .fcol { border: 0; background: none; padding: 0 4px; color: var(--faint); } .fcols .fcol.on { color: var(--orange); }
+/* search boxes on the panel's tabs */
+.psearch { gap: 4px; }
+.psearch .pclear { flex: none; padding: 0 6px; color: var(--faint); border: 0; background: none; }
+.psearch .pclear:hover { color: var(--orange); }
+.psearch button.on { color: var(--orange); border-color: var(--orange); }
+.sres { flex-wrap: wrap; }
+.sres .sdir { margin-left: 8px; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
+.sres .stext { flex-basis: 100%; padding-left: 18px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* the media tab (gallery.js) */
 .gfilters { flex-wrap: wrap; gap: 4px; }
 .gfilters .gf { padding: 0 8px; font-size: 11px; color: var(--dim); } .gfilters .gf i { color: var(--faint); font-style: normal; }

@@ -1076,6 +1076,12 @@ class Api:
             log.warning("%s failed: %s", fn.__name__, e)
             return {"error": str(e)}
 
+    def search_files(self, query, content=False, root=None):
+        """Files tab search: {results: [{path, name, mtime, line?, text?}], truncated} (see workspace.search_files)."""
+        if root == "::pc":
+            return {"results": [], "truncated": False}
+        return self._ws(workspace.search_files, query, bool(content), root=root)
+
     def tree(self, rel="", root=None):
         if root == "::pc":   # above the drives' top folders
             return workspace.drives()
