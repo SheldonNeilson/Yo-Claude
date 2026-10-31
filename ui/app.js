@@ -314,6 +314,7 @@ function renderTree() {
       `${recent.some((s) => S.busy.has(s.id)) ? '<span class="spin busy">✻</span>' : ""}` +
       `${recent.some((s) => s.unseen) ? '<span class="dot"></span>' : ""}`;
     head.title = "The latest sessions from every folder";
+    wireDrop(head, null);
     head.onclick = () => { setOpen(RECENT_KEY, !open); renderTree(); };
     tree.appendChild(head);
     if (open) for (const s of recent) tree.appendChild(sessionRow(s, true));
@@ -330,13 +331,11 @@ function renderTree() {
     head.title = `${g}: right-click to rename, show only this group, or remove it (the sessions go back under their folders)`;
     head.onclick = () => { setOpen(gkey, !open); renderTree(); };
     head.oncontextmenu = (e) => { e.preventDefault(); groupMenu(e, g); };
-    head.ondragover = (e) => { if (dragSession) { e.preventDefault(); head.classList.add("drop"); } };
-    head.ondragleave = () => head.classList.remove("drop");
-    head.ondrop = (e) => { e.preventDefault(); head.classList.remove("drop"); if (dragSession) api().set_group(dragSession.id, dragSession.cwd, g); };
+    wireDrop(head, g);
     tree.appendChild(head);
     if (!open) continue;
-    for (const s of list) tree.appendChild(sessionRow(s, true));
-    if (!list.length) tree.appendChild(el("div", "smore dim", "empty: drag a session here, or right-click it → move to group"));
+    for (const s of list) { const r = sessionRow(s, true); wireDrop(r, g); tree.appendChild(r); }   // (drop on any row of the group too)
+    if (!list.length) { const h = el("div", "smore dim", "empty: drag a session here, or right-click it → move to group"); wireDrop(h, g); tree.appendChild(h); }
   }
   if (focus) { tree.scrollTop = scroll; return; }
   const nodes = [{ key: "", cwd: null, label: "CHATS", title: "Conversations without a folder" },
@@ -356,9 +355,7 @@ function renderTree() {
       setOpen(n.key, !open); renderTree();
     };
     head.oncontextmenu = (e) => { e.preventDefault(); folderMenu(e, n); };
-    head.ondragover = (e) => { if (dragSession && (dragSession.cwd ?? null) === n.cwd && S.groups.includes(dragSession.group)) { e.preventDefault(); head.classList.add("drop"); } };
-    head.ondragleave = () => head.classList.remove("drop");
-    head.ondrop = (e) => { e.preventDefault(); head.classList.remove("drop"); if (dragSession) api().set_group(dragSession.id, dragSession.cwd, null); };   // (back under its folder)
+    wireDrop(head, null);   // (out of its group: back under its own folder)
     tree.appendChild(head);
     if (!open) continue;
     const pinned = all.filter((s) => s.pinned);
@@ -389,11 +386,32 @@ function sessionRow(s, withFolder = false) {
   row.onclick = () => api().open_session(s.id, s.cwd);
   row.oncontextmenu = (e) => { e.preventDefault(); sessionMenu(e, s); };
   row.draggable = true;   // drag it onto a group (or, from a group, back onto its folder)
-  row.ondragstart = (e) => { dragSession = s; e.dataTransfer.setData("text/plain", s.title || ""); e.dataTransfer.effectAllowed = "move"; };
-  row.ondragend = () => { dragSession = null; };
+  row.ondragstart = (e) => {
+    dragSession = s; e.dataTransfer.setData("text/plain", s.title || ""); e.dataTransfer.effectAllowed = "move";
+    if (S.groups.includes(s.group)) {   // a bar to drop it on to take it out of its group (folders may be hidden by "show only this group")
+      const bar = el("div", "ungroupbar", `↩ drop here to take it out of “${esc(s.group)}”`);
+      bar.id = "ungroupBar"; wireDrop(bar, null);
+      setTimeout(() => { if (dragSession) { const t = $("#tree"); t.insertBefore(bar, t.firstChild); } }, 0);   // (after the drag has started: changing the page inside dragstart can cancel it)
+    }
+  };
+  row.ondragend = () => { dragSession = null; $("#ungroupBar")?.remove(); document.querySelectorAll("#tree .drop").forEach((n) => n.classList.remove("drop")); };
   return row;
 }
 let dragSession = null;
+// Makes `node` take a dragged session: into group g, or (g = null) out of its group. Nothing happens if it is already so.
+function wireDrop(node, g) {
+  const ok = () => dragSession && (g === null ? S.groups.includes(dragSession.group) : dragSession.group !== g);
+  node.addEventListener("dragover", (e) => { if (ok()) { e.preventDefault(); e.dataTransfer.dropEffect = "move"; node.classList.add("drop"); } });
+  node.addEventListener("dragleave", () => node.classList.remove("drop"));
+  node.addEventListener("drop", (e) => {
+    node.classList.remove("drop");
+    if (!ok()) return;
+    e.preventDefault();
+    const s = dragSession; dragSession = null;
+    $("#ungroupBar")?.remove();
+    api().set_group(s.id, s.cwd, g);
+  });
+}
 function groupMenu(e, g) {
   const focused = S.settings.group_focus === g, i = S.groups.indexOf(g);
   showMenu(e, [
