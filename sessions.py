@@ -2799,14 +2799,14 @@ class Router:
         self.sessions_changed(cwd)
 
     def group(self, sid, cwd, group):
-        self.meta.update(sid, group=group or None)
+        self.meta.update(sid, group=group or None, **({"cwd": cwd} if cwd else {}))
         self.sessions_changed(cwd)
 
     # top-level groups of the sidebar: named piles of sessions from any folder (sessions not in one stay under their folder)
     def groups_changed(self):
         self.meta.save()
         self.emit_groups()
-        for folder in [None] + self.workspaces():
+        for folder in [None] + self.workspaces() + self.member_folders():
             self.sessions_changed(folder)
 
     def emit_groups(self):
@@ -2817,7 +2817,18 @@ class Router:
         gc = self.meta.data.setdefault("group_cwd", {})
         gp = self.meta.data.setdefault("group_parent", {})
         return {"groups": list(self.meta.data["groups"]), "cwds": {g: c for g, c in gc.items() if g in self.meta.data["groups"]},
-                "parents": {g: p for g, p in gp.items() if g in self.meta.data["groups"]}}
+                "parents": {g: p for g, p in gp.items() if g in self.meta.data["groups"]}, "folders": self.member_folders()}
+
+    def member_folders(self):
+        """Folders outside the sidebar that hold sessions you've put in a group: they are listed too, so those sessions show."""
+        groups = set(self.meta.data["groups"])
+        out = []
+        for m in self.meta.data["sessions"].values():
+            c = m.get("cwd")
+            if c and m.get("group") in groups and not m.get("deleted") and os.path.isdir(c) and \
+                    not any(same_folder(c, w) for w in self.meta.data["workspaces"] + out):
+                out.append(c)
+        return out
 
     def default_group(self, cwd):
         """The group a folder's sessions go into unless you put them elsewhere: named after the folder (None = chats), made
@@ -2845,7 +2856,7 @@ class Router:
         return name
 
     def add_group(self, name, parent=None):
-        """A group of your own; `parent`: a group it sits inside (only the chats group has groups inside it)."""
+        """A group of your own; `parent`: a group it sits inside (any group can hold groups)."""
         name = " ".join(str(name or "").split())[:40]
         if not name:
             return "Give the group a name."
@@ -2886,7 +2897,14 @@ class Router:
         if name in gc and gc[name] is None:   # the chats group (conversations without a folder): always there, renamable but never removed
             return "The chats group is permanent: it holds your conversations that have no folder."
         folder = gc.pop(name, "")
-        self.meta.data.setdefault("group_parent", {}).pop(name, None)
+        gp = self.meta.data.setdefault("group_parent", {})
+        up = gp.pop(name, None)
+        for k in list(gp):
+            if gp[k] == name:   # (its own groups move up a level)
+                if up:
+                    gp[k] = up
+                else:
+                    del gp[k]
         if name in self.meta.data["groups"]:
             self.meta.data["groups"].remove(name)
         for m in self.meta.data["sessions"].values():
@@ -2898,6 +2916,28 @@ class Router:
             if self.folder and same_folder(self.folder, folder):   # (new sessions would start there and bring the folder back)
                 self.folder = None
         self.groups_changed()
+
+    def set_group_parent(self, name, parent):
+        """Put a group inside another (or back at the top level, for None). Never inside itself or its own groups, and the
+        chats group stays at the top."""
+        groups = self.meta.data["groups"]
+        gc = self.meta.data.setdefault("group_cwd", {})
+        gp = self.meta.data.setdefault("group_parent", {})
+        if name not in groups or (parent and parent not in groups):
+            return "No such group."
+        if name in gc and gc[name] is None:
+            return "The chats group stays at the top."
+        p = parent
+        while p:
+            if p == name:
+                return "A group can't go inside itself."
+            p = gp.get(p)
+        if parent:
+            gp[name] = parent
+        else:
+            gp.pop(name, None)
+        self.groups_changed()
+        return None
 
     def move_group(self, name, delta):
         groups = self.meta.data["groups"]

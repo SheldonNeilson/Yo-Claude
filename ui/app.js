@@ -10,7 +10,7 @@ const api = () => new Proxy(window.pywebview.api, {
     return r;
   }),
 });
-const S = { settings: {}, folder: null, workspaces: [], groups: [], groupCwd: {}, groupParent: {}, lists: {}, busy: new Set(), bg: new Set(), work: {}, active: null,
+const S = { settings: {}, folder: null, workspaces: [], groups: [], groupCwd: {}, groupParent: {}, groupFolders: [], lists: {}, busy: new Set(), bg: new Set(), work: {}, active: null,
             items: [], display: { state: "starting" }, filter: "", manual: {}, more: new Set() };
 
 const MODELS = [["", "model: default"], ["claude-fable-5-1", "Fable 5.1"], ["claude-opus-5-5", "Opus 5.5"],
@@ -116,7 +116,7 @@ function handle(e) {
     case "live": if (S.active && e.session === S.active.id) transcript.live(e.image); break;
     case "settings": S.settings = e.settings; renderToggles(); avatar.apply(); renderBusy(); renderName(); renderAwake(); break;
     case "folder": S.folder = e.folder; renderHead(); break;
-    case "groups": S.groups = e.groups; S.groupCwd = e.cwds || {}; S.groupParent = e.parents || {}; renderTree(); break;
+    case "groups": S.groups = e.groups; S.groupCwd = e.cwds || {}; S.groupParent = e.parents || {}; S.groupFolders = e.folders || []; renderTree(); break;
     case "confirm_quit":
       confirmBox(`${Who()} is in the middle of a reply in ${e.busy.map((b) => `“${b.title}”`).join(", ")}. ` +
                  "Quitting now cuts it off (background tasks keep running and are picked up after a restart).",
@@ -265,11 +265,13 @@ new MutationObserver(() => panes.render()).observe($("#app"), { attributes: true
 
 // ---------- sidebar: folders and their sessions ----------
 async function loadLists() {
-  const keys = [null, ...S.workspaces];
+  const first = await api().group_info().catch(() => null);   // (also the folders outside the sidebar that hold grouped sessions)
+  if (first) { S.groups = first.groups; S.groupCwd = first.cwds || {}; S.groupParent = first.parents || {}; S.groupFolders = first.folders || []; }
+  const keys = [null, ...S.workspaces, ...S.groupFolders];
   const lists = await Promise.all(keys.map((cwd) => api().list_sessions(cwd).catch(() => null)));
   keys.forEach((cwd, i) => { S.lists[keyOf(cwd)] = lists[i] || S.lists[keyOf(cwd)] || []; });
-  const gi = (await api().group_info().catch(() => null)) || { groups: S.groups, cwds: S.groupCwd, parents: S.groupParent };   // (listing made each folder's group)
-  S.groups = gi.groups; S.groupCwd = gi.cwds || {}; S.groupParent = gi.parents || {};
+  const gi = (await api().group_info().catch(() => null)) || { groups: S.groups, cwds: S.groupCwd, parents: S.groupParent, folders: S.groupFolders };   // (listing made each folder's group)
+  S.groups = gi.groups; S.groupCwd = gi.cwds || {}; S.groupParent = gi.parents || {}; S.groupFolders = gi.folders || [];
   for (const s of allSessions()) {
     if (s.busy) S.busy.add(s.id);
     if (s.background) { S.busy.add(s.id); S.bg.add(s.id); }
@@ -412,6 +414,8 @@ function wireDrop(node, g) {
     api().set_group(s.id, s.cwd, g);
   });
 }
+// is group `x` inside group `g` (at any depth)?
+function insideOf(x, g) { for (let p = S.groupParent[x], n = 0; p && n < 20; p = S.groupParent[p], n++) if (p === g) return true; return false; }
 const sessionsOf = (g) => allSessions().filter((s) => s.group === g);
 // every session of a group to the (restorable) trash in one go; the ones that can't go (still working, or changed in the last
 // minute) stay, and are listed
@@ -436,7 +440,12 @@ function groupMenu(e, g) {
     ...(home ? termMenuItems(home, null, "dir") : []),
     "-",
     ["rename…", () => ask("Rename group", g, async (n) => { const err = await api().rename_group(g, n); if (err) alertBox(err); })],
-    isChats ? [`new group inside ${g}…`, () => ask(`New group inside ${g}`, "", async (n) => { const err = await api().add_group(n, g); if (err) alertBox(err); })] : null,
+    [`new group inside ${g}…`, () => ask(`New group inside ${g}`, "", async (n) => { const err = await api().add_group(n, g); if (err) alertBox(err); })],
+    isChats ? null : ["put inside…", null, { sub: [
+      ...(S.groupParent[g] ? [["(top level)", () => api().set_group_parent(g, null)]] : []),
+      ...S.groups.filter((x) => x !== g && x !== S.groupParent[g] && !insideOf(x, g))
+        .map((x) => [x, async () => { const err = await api().set_group_parent(g, x); if (err) alertBox(err); }]),
+    ] }],
     ["move up", () => api().move_group(g, -1), { disabled: isChats || i <= 0 }],
     ["move down", () => api().move_group(g, 1), { disabled: isChats || i >= S.groups.length - 1 }],
     "-",
