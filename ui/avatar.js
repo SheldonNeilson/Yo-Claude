@@ -8,8 +8,10 @@
 "use strict";
 const RAMP = " .:-=+o/*#0@";   // sparse to dense: white on the dark window, so bright = dense
 const AW = 128;                // the analysis grid frames are decoded to (columns): 2 per character across
-// clips that read wrongly when they play at random (a finger to the lips looks like a shush): kept on disk, never played
-const HIDDEN = ["think_tap_lips"];
+// clips that read wrongly when they play at random: kept on disk, never played. think_tap_lips is a straight finger on the
+// lips (a shush: for shushing only, never idling); listen_lean leans in with the mouth wide open, and idle_s_swallow opens it
+// too, which looks odd when it comes round again and again.
+const HIDDEN = ["think_tap_lips", "listen_lean", "idle_s_swallow"];
 const PACE_ABOVE = 1.35;       // a clip peaking this many times above the typical clip's peak speed is slowed to match
 const COLS = 64;               // characters across, whatever the panel's width
 const VIEW = [0, 0, 1, 1];     // the part of the clip shown: left, top, right, bottom (fractions; see frameView)

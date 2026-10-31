@@ -83,6 +83,12 @@ wrong idle makes every following clip "match".
 6. Female 1's mannerisms: `ui/avatar.js` slows clips that move much faster than the typical one (`paceAll`, `PACE_ABOVE`); ask the
    user which, if any, still look wrong rather than guessing again.
 
+### Clips that must not play at random (`HIDDEN` in `ui/avatar.js`, all characters)
+`think_tap_lips` = a straight finger on the lips, i.e. a shush: only for shushing, never idling or thinking. `listen_lean` (leans in
+with the mouth wide open) and `idle_s_swallow` (mouth open) look odd on repeat. They stay on disk. **Look at every new hand-near-face
+or wide-mouth clip before it joins the pool** (contact sheet of 8 frames per clip); a prompt like "taps her lips with one finger" gets
+drawn as a shush, so word hand prompts as a curled finger on the chin or cheek. `idle_sigh` also opens the mouth wide: watch it.
+
 ### Open questions
 - Is the crude identity classifier good enough, or should a real face-embedding check go into `make_avatar_clips.py` (it only compares
   with `idle.mp4` today)?
