@@ -82,6 +82,10 @@ The first time, a welcome tour explains everything and checks how well it hears 
   typing are fixed straight away, the rest at a short pause. **Typing prediction** shows the next word or three in
   grey after the cursor as you type (Tab takes them). A grey **suggested next message** fills the empty box (Tab takes
   it), even while Claude is still working.
+- **File editor** (open a text file, ✎ edit): colour for common languages and file types, line numbers (in view too),
+  **column selection** (hold Alt+Shift and drag, or Alt+Shift+arrows: type, delete, copy and paste across the lines),
+  auto-indent, a **format** button (Shift+Alt+F; also on save if you like), AutoCorrect for comments and prose, and
+  grey auto-complete of the rest of the line (Tab takes it).
 - **Local models**: AutoCorrect and predictions use Haiku by default, or a model on your own PC (Options → Writing →
   Local Models…). The window offers a small one to download (Qwen 2.5 1.5B, through Ollama), lists whatever Ollama
   already has, tests how quick each is, and adds your own: an Ollama model name, or any server with an OpenAI-style API

@@ -24,6 +24,7 @@ import winreg
 import pystray
 import webview
 
+import formatter
 import icons
 import localai
 import media
@@ -631,11 +632,12 @@ class Api:
             log.info("Couldn't fix the message: %s", e or type(e).__name__)
             return {"text": text}
 
-    def predict_text(self, text):
-        """The grey words offered after the cursor as you type: {"text": the words} (""  when there's nothing)."""
+    def predict_text(self, text, kind="chat", name=""):
+        """The grey words offered after the cursor as you type: {"text": the words} ("" when there's nothing). kind
+        "code" is the file editor's (the rest of the line, for the file `name`), "prose" its text files'."""
         r = self._app.router
         try:
-            return {"text": r.predict(text, r.active.id if r.active else None).result(10)}
+            return {"text": r.predict(text, r.active.id if r.active else None, kind, name).result(10)}
         except Exception as e:
             log.debug("No prediction: %s", e or type(e).__name__)
             return {"text": ""}
@@ -712,6 +714,16 @@ class Api:
             return {"ms": int((time.time() - t) * 1000), "text": sessions.clean_prediction("Could you please take a look at the ", out)}
         except Exception as e:
             return {"error": str(e) or type(e).__name__}
+
+    def format_text(self, path, text):
+        """The file editor's Format button: {"text": the tidied file} or {"error": why not}."""
+        try:
+            return {"text": formatter.format_text(path, text)}
+        except ValueError as e:
+            return {"error": str(e)}
+        except Exception as e:
+            log.warning("format %s failed: %s", path, e)
+            return {"error": "Couldn't format that file."}
 
     def say_short(self, i):
         """The 🔊 button on Claude's messages: the short spoken version of message `i` in the open session."""

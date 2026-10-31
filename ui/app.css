@@ -740,3 +740,24 @@ b.lo { color: var(--green); } b.mid { color: var(--amber); } b.hi { color: var(-
 
 /* buttons never wrap their label onto a second line (a narrow space clips or squeezes them instead) */
 button { white-space: nowrap; }
+
+/* the file editor (codeview.js): colour behind a transparent text area, line numbers, column selection */
+.ce-wrap { display: block; }
+.ce { display: flex; height: 62vh; background: #0b0b0a; border: 1px solid var(--line); font: 12.5px/19px var(--mono, Consolas, monospace); overflow: hidden; }
+.ce-gut { flex: none; overflow: hidden; background: #0e0d0c; border-right: 1px solid var(--line); color: var(--faint); text-align: right; user-select: none; min-width: 4ch; }
+.ce-gin { margin: 0; padding: 8px 8px 8px 6px; font: inherit; will-change: transform; }
+.ce-main { position: relative; flex: 1; overflow: hidden; min-width: 0; }
+.ce-hl, .ce-ghost, .ce-blk { position: absolute; left: 0; top: 0; margin: 0; padding: 8px; white-space: pre; pointer-events: none; font: inherit;
+  tab-size: 4; font-variant-ligatures: none; will-change: transform; color: var(--text); }
+.ce-hl code, .ce-hl { background: none; }
+.ce-ghost { color: transparent; }
+.ce-ghost .g { color: var(--faint); }
+.ce-ghost .g::after { content: " ⇥"; font-size: .85em; opacity: .7; }
+.ce-blk { padding: 0; width: 0; height: 0; overflow: visible; }
+.ce-blk .ce-row { position: absolute; background: rgba(217, 119, 87, .32); border-left: 1px solid var(--orange); box-sizing: border-box; }
+.ce-ta { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; padding: 8px; box-sizing: border-box; border: 0 !important; resize: none; background: transparent;
+  color: transparent; caret-color: var(--text); white-space: pre; overflow: auto; font: inherit; tab-size: 4; font-variant-ligatures: none; outline: none; }
+.ce-ta::selection { background: rgba(217, 119, 87, .38); color: transparent; }
+.ce-ta.tidied { box-shadow: inset 0 0 0 1px var(--amber); }
+.ce-probe { position: absolute; visibility: hidden; white-space: pre; font: inherit; }
+.ce-status { padding: 2px 8px; border: 1px solid var(--line); border-top: 0; background: #0e0d0c; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

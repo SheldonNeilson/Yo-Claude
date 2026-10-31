@@ -497,10 +497,48 @@ def clean_prediction(text, out):
     return out
 
 
-async def predict_text(text, context="", model=None):
+WARM_CODE = WarmHaiku()
+WARM_CODE.FRESH_AFTER = 20
+CODE_SYSTEM = ("You complete code and text in a file editor. You get the file's name and the text before the cursor in "
+               "<before> tags. Reply with ONLY the text that continues the current line from the cursor, up to the end of "
+               "that line (never more than one line, at most about 12 tokens): no explanation, no code fences, don't "
+               "repeat what's before the cursor. If the last word is unfinished, start with its missing letters. If "
+               "nothing sensible comes next, reply with nothing.")
+
+
+def clean_code_prediction(text, out):
+    """The model's reply as the rest of the current line (one line, short), or "" if it isn't usable."""
+    out = re.sub(r"</?before>", "", out or "").replace(chr(13), "")
+    out = re.sub(r"^```\w*", "", out).split(chr(10))[0].rstrip()
+    if not out.strip() or "\ufffd" in out or "```" in out:
+        return ""
+    frag = re.search(r"[\w$]+$", text)
+    if frag and not out[:1].isspace() and out.lower().startswith(frag.group(0).lower()):
+        out = out[len(frag.group(0)):]   # (it gave the whole word, not just the rest)
+    return out[:80] if out.strip() else ""
+
+
+async def predict_text(text, context="", model=None, kind="chat", name=""):
     """What you're likely to type next after `text`: 1 to 3 words to show grey after the cursor (Tab takes them), from
-    Haiku (a warm session) or a local model. "" when there's nothing to offer or the call fails."""
+    Haiku (a warm session) or a local model. kind "code" (the file editor, with the file's `name`) offers the rest of the
+    line instead. "" when there's nothing to offer or the call fails."""
     text = text or ""
+    if kind == "code":
+        if len(text.strip()) < 2:
+            return ""
+        prompt = f"File: {name or 'untitled'}\n<before>{text[-1500:]}</before>"
+        try:
+            if model:
+                out = await asyncio.to_thread(localai.generate, model, CODE_SYSTEM, prompt, 28, 5)
+            else:
+                opts = sdk.ClaudeAgentOptions(model=VOICE_NOTE_MODEL, tools=[], cwd=CHAT_DIR, setting_sources=["project"],
+                                              max_turns=1, thinking={"type": "disabled"}, system_prompt=CODE_SYSTEM,
+                                              extra_args={"no-session-persistence": None})
+                out = await asyncio.wait_for(WARM_CODE.ask(prompt, opts), 8)
+        except Exception as e:
+            log.info("Code prediction failed (%s): %s", model.get("model") if model else "Haiku", e or type(e).__name__)
+            return ""
+        return clean_code_prediction(text, out)
     if len(text.strip()) < 2 or text.lstrip().startswith(("/", "@")):
         return ""
     context = (context or "").strip()
@@ -2397,7 +2435,7 @@ class Router:
             return self.run(unchanged())
         return self.run(tidy_text(text, context, localai.find(self.settings, "fix_model")))
 
-    def predict(self, text, sid=None):
+    def predict(self, text, sid=None, kind="chat", name=""):
         """What you'll probably type next (predict_text), as a Future with the words to show grey; "" if the setting is off."""
         s = self.live.get(sid) if sid else self.active
         context = ""
@@ -2407,7 +2445,7 @@ class Router:
             async def none():
                 return ""
             return self.run(none())
-        return self.run(predict_text(text, context, localai.find(self.settings, "predict_model")))
+        return self.run(predict_text(text, context, localai.find(self.settings, "predict_model"), kind, name))
 
     # --- /btw: side questions that never land in the conversation (see side_chat) ---
     def btw_ask(self, sid, question, bid=None):

@@ -128,6 +128,7 @@ const MENUS = {
         tog("Suggest the Next Message", "suggest_next"),
         tog("Suggest While Claude Works", "suggest_early"),
         tog("Reply & Comment on Selection", "reply_menu"),
+        tog("Format Files on Save", "format_on_save", false),
         "-",
         [`AutoCorrect Uses: ${models.name(S.settings.fix_model)}…`, () => models.open()],
         [`Predictions Use: ${models.name(S.settings.predict_model)}…`, () => models.open()],

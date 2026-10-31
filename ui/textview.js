@@ -5,6 +5,7 @@ const MD_EXT = /\.(md|markdown|mdx)$/i;
 function textView(d, f, path, cwd) {
   const isMd = MD_EXT.test(path);
   let text = f.text, mtime = f.mtime, mode = isMd ? "formatted" : "source", dirty = false;
+  let ce = null;   // the code editor component (codeview.js) while viewing source or editing
   const bar = el("div", "tvbar"), body = el("div", "tvbody"), note = el("span", "tvnote dim");
   d.append(bar, body);
 
@@ -15,25 +16,13 @@ function textView(d, f, path, cwd) {
       body.appendChild(md_);
       if (!f.truncated) wireChecklist(md_);
     } else if (mode === "source") {
-      const pre = el("pre", "viewer"), code = el("code");
-      code.textContent = text; pre.appendChild(code);
-      const ext = path.split(".").pop();
-      if (hljs.getLanguage(ext)) code.className = "language-" + ext;
-      try { hljs.highlightElement(code); } catch (_) {}
-      body.appendChild(pre);
+      ce = codeEditor({ text, path, readOnly: true });   // (colour, line numbers, column selection; nothing to change)
+      body.appendChild(ce.el);
     } else {
-      const ta = el("textarea", "tveditor");
-      ta.value = text; ta.spellcheck = isMd;
-      ta.oninput = () => { dirty = ta.value !== text; renderBar(); };
-      ta.onkeydown = (e) => {
-        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") { e.preventDefault(); save(); }
-        if (e.key === "Tab" && !e.shiftKey) {   // a tab in the text, not a jump to the next button
-          e.preventDefault(); ta.setRangeText("\t", ta.selectionStart, ta.selectionEnd, "end"); ta.oninput();
-        }
-        if (e.key === "Escape") { e.stopPropagation(); e.preventDefault(); cancel(); }
-      };
-      body.appendChild(ta);
-      setTimeout(() => ta.focus(), 0);
+      ce = codeEditor({ text, path, readOnly: false, onSave: save, onCancel: cancel,
+        onInput: () => { const d2 = ce.value !== text; if (d2 !== dirty) { dirty = d2; renderBar(); } } });
+      body.appendChild(ce.el);
+      setTimeout(() => ce.focus(), 0);
     }
     if (f.truncated) body.appendChild(el("div", "dim", "(showing the first 300 KB, so it can't be edited here)"));
   };
@@ -58,10 +47,11 @@ function textView(d, f, path, cwd) {
       };
     });
   };
-  const editor = () => body.querySelector(".tveditor");
+  const editor = () => body.querySelector(".ce-ta");
   const save = async () => {
     const ta = editor();
     if (!ta) return;
+    if (S.settings.format_on_save) await ce.format(true);   // (Options: format on save)
     note.textContent = "saving…";
     const r = await api().save_text(f.full || path, ta.value, mtime, cwd);
     if (r?.error) { note.textContent = ""; toast(r.error, "error"); return; }
@@ -105,6 +95,13 @@ function textView(d, f, path, cwd) {
     if (mode === "edit") {
       if (dirty) bar.appendChild(el("span", "tvdirty", "● unsaved"));
       bar.appendChild(note);
+      const fm = el("button", "", "format");
+      fm.dataset.tip = "Tidy the file: indentation, spacing, JSON layout (Shift+Alt+F; Ctrl+Z undoes it)";
+      fm.onclick = () => ce.format();
+      const fos = el("button", S.settings.format_on_save ? "on" : "", S.settings.format_on_save ? "✓ on save" : "on save");
+      fos.dataset.tip = "Format the file every time it's saved";
+      fos.onclick = () => { S.settings.format_on_save = !S.settings.format_on_save; api().set_setting("format_on_save", S.settings.format_on_save); renderBar(); };
+      bar.append(fm, fos);
       const s = el("button", "primary", "save");
       s.disabled = !dirty; s.dataset.tip = "Ctrl+S";
       s.onclick = save;
