@@ -153,13 +153,13 @@ pre:hover .codecopy { opacity: 1; }
 .question .qmulti { color: var(--faint); font-size: 11px; white-space: nowrap; }
 .question.answered .qmulti, .question.skipped .qmulti { display: none; }
 .question .qopts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
-.question .qopt { display: flex; flex-direction: column; align-items: flex-start; text-align: left; max-width: 320px; padding: 4px 10px; color: var(--text); }
+.question .qopt { display: flex; flex-direction: column; align-items: flex-start; text-align: left; flex: 1 1 220px; max-width: 360px; min-width: 0; height: auto; white-space: normal; overflow-wrap: anywhere; padding: 4px 10px; color: var(--text); }
 .question .qopt .ql::before { content: "[ ] "; color: var(--faint); }
 .question .qopt.radio .ql::before { content: "( ) "; }
 .question .qopt.on { border-color: var(--amber); color: var(--amber); background: #2a2210; }
 .question .qopt.on .ql::before { content: "[x] "; color: var(--amber); }
 .question .qopt.radio.on .ql::before { content: "(*) "; }
-.question .qopt .qd { color: var(--dim); font-size: 11px; line-height: 1.35; }
+.question .qopt .qd { color: var(--dim); font-size: 11px; line-height: 1.35; white-space: normal; }
 .question .qother { display: flex; gap: 6px; align-items: center; margin-top: 6px; }
 .question .qother input { flex: 1; max-width: 480px; }
 .question .qother input.on { border-color: var(--amber); }
