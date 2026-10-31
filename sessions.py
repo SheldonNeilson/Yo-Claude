@@ -472,15 +472,19 @@ async def tidy_text(text, context="", model=None):
 
 WARM_PREDICT = WarmHaiku()
 WARM_PREDICT.FRESH_AFTER = 20
-PREDICT_SYSTEM = ("You predict what someone is about to type next in a chat with an AI coding assistant. You get what they've "
-                  "typed so far in <typed> tags, exactly as it is, including any trailing space (and the assistant's last "
-                  "message, for context). Continue their text the way they most likely will: finish the sentence they're in "
-                  "and, when it ends naturally, add the next short sentence too, about 20 words in all at most. Reply with "
-                  "ONLY <next>the continuation</next>: no quotes, no explanation, never an answer to them. Spacing is kept "
-                  "exactly as written inside the tags: if their last word is unfinished, start with just its missing letters; "
-                  "if their text already ends with a space, start directly with the next word; if their last word is "
-                  "finished and there is no trailing space, start with ONE space. If nothing sensible comes next, reply "
-                  "<next></next>.")
+PREDICT_SYSTEM = ("You are the autocomplete in the message box of a chat app. The person typing is a USER writing to an AI coding "
+                  "assistant; you continue THEIR message, in THEIR voice: the user's requests, questions, instructions, "
+                  "corrections and thoughts, addressed to the assistant (\"can you also...\", \"I think the problem is...\", "
+                  "\"let's...\", \"why does...\"). Never write what the assistant would say: no \"I've updated\", \"Sure\", "
+                  "\"Here's\", \"Great question\", no explaining or reporting what was done, and never an answer to them. "
+                  "You get what the user has typed so far in <typed> tags, exactly as it is, including any trailing space "
+                  "(and the assistant's last message, only as background for what the user is likely to say about it). "
+                  "Continue their text the way they most likely will: finish the sentence they're in and, when it ends "
+                  "naturally, add the next short sentence too, about 20 words in all at most. Reply with ONLY "
+                  "<next>the continuation</next>: no quotes, no explanation. Spacing is kept exactly as written inside the "
+                  "tags: if their last word is unfinished, start with just its missing letters; if their text already ends "
+                  "with a space, start directly with the next word; if their last word is finished and there is no trailing "
+                  "space, start with ONE space. If nothing sensible comes next, reply <next></next>.")
 PREDICT_WORDS, PREDICT_CHARS = 24, 160   # a sentence or so
 
 
@@ -575,7 +579,8 @@ async def predict_text(text, context="", model=None, kind="chat", name=""):
         return ""
     context = (context or "").strip()
     context = context if len(context) <= 600 else "…" + context[-600:]
-    prompt = (f"Assistant's last message, for context:\n{context}\n\n" if context else "") + f"<typed>{text}</typed>"
+    prompt = (f"For background only, the assistant's last message to the user:\n{context}\n\n" if context else "") + \
+        f"The USER is typing this message to the assistant. Continue it:\n<typed>{text}</typed>"
     try:
         if model:
             out = await asyncio.to_thread(localai.generate, model, PREDICT_SYSTEM, prompt, 60, 6)
