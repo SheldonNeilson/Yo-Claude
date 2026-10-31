@@ -495,11 +495,12 @@ async function showDiff(path) {
     ["open in vs code", () => api().open_in_editor(path)], ["close", closeModal, "primary"]]);
 }
 
-// modified times in the files tab: the time today, the day this year, else the date
+// modified and created times (files and media tabs): just the time for today, else the date and the time
 function shortTime(t) {
   if (!t) return "";
-  const d = new Date(t * 1000), now = new Date();
-  if (d.toDateString() === now.toDateString()) return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-  if (d.getFullYear() === now.getFullYear()) return d.toLocaleDateString([], { day: "numeric", month: "short" });
-  return d.toLocaleDateString([], { year: "numeric", month: "short", day: "numeric" });
+  const d = new Date(t * 1000), now = new Date(), time = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  if (d.toDateString() === now.toDateString()) return time;
+  const day = d.getFullYear() === now.getFullYear() ? d.toLocaleDateString([], { day: "numeric", month: "short" })
+    : d.toLocaleDateString([], { year: "numeric", month: "short", day: "numeric" });
+  return `${day} ${time}`;
 }

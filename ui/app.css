@@ -742,7 +742,7 @@ b.lo { color: var(--green); } b.mid { color: var(--amber); } b.hi { color: var(-
 .gcols { padding: 2px 8px; }
 .gcols .gcol { padding: 0; text-align: left; white-space: nowrap; }
 .gcols .gcol:nth-child(n+3) { text-align: right; }
-.grow .gdate { text-align: right; white-space: nowrap; }
+.grow .gdate { text-align: right; line-height: 1.25; }
 .glist { overflow-y: auto; flex: 1; }
 .grow { padding: 6px 8px; border-bottom: 1px solid var(--line); cursor: pointer; }
 .grow:hover { background: var(--bg3); }
@@ -756,9 +756,9 @@ b.lo { color: var(--green); } b.mid { color: var(--amber); } b.hi { color: var(-
 .ginfo .gdates, .ginfo .gvia { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .jumpflash { animation: jumpflash .7s ease-in-out 3; }
 @keyframes jumpflash { 0%, 100% { box-shadow: 0 0 0 0 transparent; } 50% { box-shadow: 0 0 0 2px var(--orange), 0 0 14px var(--orange); } }
-.fcols .fcol.name { flex: 1; text-align: left; } .fcols .fcol.mtime { flex: none; min-width: 11ch; text-align: right; }
+.fcols .fcol.name { flex: 1; text-align: left; } .fcols .fcol.mtime { flex: none; min-width: 18ch; text-align: right; }
 .ftree .node { display: flex; align-items: baseline; } .ftree .node .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.ftree .node .mt { flex: none; width: 11ch; text-align: right; color: var(--faint); font-size: 11px; padding-right: 6px; white-space: nowrap; }
+.ftree .node .mt { flex: none; width: 18ch; text-align: right; color: var(--faint); font-size: 11px; padding-right: 6px; white-space: nowrap; }
 
 /* buttons never wrap their label onto a second line (a narrow space clips or squeezes them instead) */
 button { white-space: nowrap; }
