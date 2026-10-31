@@ -162,6 +162,7 @@ class VoskWake:
         self.phrase = phrase
         self.speech = self.quiet = 0
         self.last_text = None   # text of the utterance that just finished, if one did on this frame
+        self.short = False      # also wake on just the name ("Claude"), without "yo"
         self.after = []         # words straight after the wake word in that utterance
         self.set_alternates(alternates)
 
@@ -170,9 +171,16 @@ class VoskWake:
         import vosk
         self.alternates = list(alternates)
         self.phrases = [self.phrase] + [a for a in alternates if a and a != self.phrase]
+        if self.short and self.phrase.split()[-1] not in self.phrases:
+            self.phrases.append(self.phrase.split()[-1])
         words = {w for p in self.phrases for w in p.split()}
         grammar = self.phrases + [d for d in self.DECOYS if d not in words or d in self.phrase.split()] + ["[unk]"]
         self.rec = vosk.KaldiRecognizer(self.model, SAMPLE_RATE, json.dumps(grammar))
+
+    def set_short(self, on):
+        if bool(on) != self.short:
+            self.short = bool(on)
+            self.set_alternates(self.alternates)
 
     def set_phrase(self, phrase):
         """Another character picked: their name is the wake word now (the other name is a decoy)."""
@@ -437,6 +445,7 @@ class Assistant:
         self.mic = Mic()
         self.vad = Vad()
         self.wake = VoskWake(phrase=wake_phrase(settings), alternates=settings.get("wake_alternates", []))
+        self.wake.set_short(settings.get("short_wake", False))
         self.training = False        # training mode: report every judgement, never reply
         self.train_mute_until = 0.0
         self.peak = 0.0              # loudest frame of the speech being judged
@@ -634,6 +643,7 @@ class Assistant:
             elif cmd == "settings":
                 if getattr(self, "wake", None):   # (the character may have changed: its name wakes it)
                     self.wake.set_phrase(wake_phrase(self.settings))
+                    self.wake.set_short(self.settings.get("short_wake", False))
                 if self.state in (IDLE, PAUSED):
                     self.go_idle()
             elif isinstance(cmd, tuple) and cmd[0] == "train":
