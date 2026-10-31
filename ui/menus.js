@@ -65,17 +65,20 @@ const MENUS = {
     ["Expand all folders", () => expandAll(true)],
     ["Collapse all folders", () => expandAll(false)],
     "-",
-    ["Zoom in", () => zoom(0.1), { kbd: "Ctrl+=" }],
-    ["Zoom out", () => zoom(-0.1), { kbd: "Ctrl+-" }],
-    ["Actual size", () => zoom(0), { kbd: "Ctrl+0" }],
-    "-",
-    ["Floating bar when the window is closed", () => toggleSetting("show_bar"), { checked: setting("show_bar") }],
+    ["Zoom", null, { sub: [
+      ["Zoom in", () => zoom(0.1), { kbd: "Ctrl+=" }],
+      ["Zoom out", () => zoom(-0.1), { kbd: "Ctrl+-" }],
+      ["Actual size", () => zoom(0), { kbd: "Ctrl+0" }],
+    ] }],
+    ["Floating bar", null, { sub: [
+      ["Show when the window is closed", () => toggleSetting("show_bar"), { checked: setting("show_bar") }],
+      ["Keep visible when idle", () => toggleSetting("bar_when_idle"), { checked: setting("bar_when_idle") }],
+    ] }],
     ["Start Maximized", () => toggleSetting("start_maximized"), { checked: setting("start_maximized") }],
-    ["Keep the floating bar visible when idle", () => toggleSetting("bar_when_idle"), { checked: setting("bar_when_idle") }],
   ],
   session: () => {
     const s = activeSession(), a = S.active;
-    const pick = (list, cur, fn) => list.map(([v, t]) => ["  " + t, () => fn(v), { checked: (cur || "") === v }]);
+    const pick = (list, cur, fn) => list.map(([v, t]) => [t, () => fn(v), { checked: (cur || "") === v }]);
     return [
       ["Rename…", () => ask("Rename session", s.title, (t) => api().rename(s.id, s.cwd, t)), { disabled: !s }],
       [s?.pinned ? "Unpin" : "Pin to top", () => api().pin(s.id, s.cwd, !s.pinned), { disabled: !s }],
@@ -84,10 +87,11 @@ const MENUS = {
       ["Move to trash…", () => confirmBox(`Move “${s.title}” to the trash?`, async () => { const e = await api().delete(s.id, s.cwd); if (e) alertBox(e); }), { disabled: !s }],
       "-",
       ["Stop", () => api().stop(), { kbd: "Esc" }],
-      "-", ["sub:model"], ...pick(MODELS, a ? a.model : S.settings.model, (v) => { $("#modelSel").value = v; $("#modelSel").onchange({ target: $("#modelSel") }); }),
-      "-", ["sub:effort"], ...pick(EFFORTS, a ? a.effort : S.settings.effort, (v) => { $("#effortSel").value = v; $("#effortSel").onchange({ target: $("#effortSel") }); }),
-      ...((a ? a.cwd : S.folder) ? ["-", ["sub:permissions"], ...pick(PERMS, a ? a.permission_mode : "auto",
-        (v) => { $("#permSel").value = v; $("#permSel").onchange({ target: $("#permSel") }); })] : []),
+      "-",
+      ["Model", null, { sub: pick(MODELS, a ? a.model : S.settings.model, (v) => { $("#modelSel").value = v; $("#modelSel").onchange({ target: $("#modelSel") }); }) }],
+      ["Effort", null, { sub: pick(EFFORTS, a ? a.effort : S.settings.effort, (v) => { $("#effortSel").value = v; $("#effortSel").onchange({ target: $("#effortSel") }); }) }],
+      ...((a ? a.cwd : S.folder) ? [["Permissions", null, { sub: pick(PERMS, a ? a.permission_mode : "auto",
+        (v) => { $("#permSel").value = v; $("#permSel").onchange({ target: $("#permSel") }); }) }]] : []),
     ];
   },
   voice: () => [
@@ -95,10 +99,12 @@ const MENUS = {
     "-",
     [`Listen for “${appName()}”`, () => toggleSetting("listening"), { checked: setting("listening") }],
     ["Read replies aloud", () => toggleSetting("voice_replies"), { checked: setting("voice_replies") }],
-    [`Say Hello After “Yo ${Who()}” (Else a Beep)`, () => toggleSetting("greeting", false), { checked: setting("greeting", false) }],
-    ["Say when a session is done", () => toggleSetting("notify_done", true), { checked: setting("notify_done", true) }],
-    ["More accurate speech recognition (slower)", () => toggleSetting("accurate_speech", false), { checked: setting("accurate_speech", false) }],
-    ["PC control (screen, keyboard, mouse)", () => toggleSetting("pc_control", false), { checked: setting("pc_control", false) }],
+    ["More", null, { sub: [
+      [`Say Hello After “Yo ${Who()}” (Else a Beep)`, () => toggleSetting("greeting", false), { checked: setting("greeting", false) }],
+      ["Say when a session is done", () => toggleSetting("notify_done", true), { checked: setting("notify_done", true) }],
+      ["More accurate speech recognition (slower)", () => toggleSetting("accurate_speech", false), { checked: setting("accurate_speech", false) }],
+      ["PC control (screen, keyboard, mouse)", () => toggleSetting("pc_control", false), { checked: setting("pc_control", false) }],
+    ] }],
     "-",
     ["Training mode…", () => training.open()],
   ],
@@ -111,36 +117,49 @@ const MENUS = {
   ],
   // the extras, each on or off (named the old way). Claude's own (tick lists, advisor notes) apply from a session's
   // next start; the rest at once.
-  options: () => [
-    ["sub:writing"],
-    ["AutoCorrect (Haiku)", () => toggleSetting("fix_text"), { checked: setting("fix_text") }],
-    ["Word Prediction", () => toggleSetting("suggest_next"), { checked: setting("suggest_next") }],
-    ["Predict While Claude Works", () => toggleSetting("suggest_early"), { checked: setting("suggest_early") }],
-    ["Reply & Comment on Selection", () => toggleSetting("reply_menu"), { checked: setting("reply_menu") }],
-    "-",
-    ["sub:claude"],
-    ["Tick Lists", () => toggleSetting("checklist_tool"), { checked: setting("checklist_tool") }],
-    ["Show Advisor Notes", () => toggleSetting("advisor_relay"), { checked: setting("advisor_relay") }],
-    ["Remember Queued Messages", () => toggleSetting("keep_queue"), { checked: setting("keep_queue") }],
-    "-",
-    ["sub:face & fun"],
-    // the assistant's look and voice: three of each (the keys are what settings already hold)
-    ...[["female", [["female", "1"], ["female2", "2"], ["female3", "3"]]], ["male", [["male", "1"], ["professor", "2"], ["male3", "3"]]]]
-      .flatMap(([head, list]) => [["sub:assistant · " + head],
-        ...list.map(([c, n]) => [`  ${n}`, () => api().set_setting("character", c), { checked: (S.settings.character || "male") === c }])]),
-    ["Face in Sidebar", () => toggleSetting("avatar", false), { checked: setting("avatar", false) }],
-    ["Face on Floating Bar", () => toggleSetting("bar_avatar", false), { checked: setting("bar_avatar", false) }],
-    ["Activity on Floating Bar", () => toggleSetting("bar_feed"), { checked: setting("bar_feed") }],
-    ["Animated Tray Icon", () => toggleSetting("tray_animate"), { checked: setting("tray_animate") }],
-    ["Arcade While You Wait", () => toggleSetting("invaders"), { checked: setting("invaders") }],
-    "-",
-    ["sub:power"],
-    ["Keep PC Awake While Claude Works", () => toggleSetting("awake_while_working"), { checked: setting("awake_while_working") }],
-    ["Keep PC Awake (Always)", () => toggleSetting("keep_awake"), { checked: setting("keep_awake") }],
-    "-",
-    ["Chat Sliver Under the Arcade", () => toggleSetting("invaders_peek"), { checked: setting("invaders_peek") }],
-    ["Play Bug Invaders Now", () => window.invaders?.show()],
-  ],
+  options: () => {
+    if (!models.info) models.load().catch(() => {});   // (so the writing models show by name)
+    const tog = (label, key, def = true) => [label, () => toggleSetting(key, def), { checked: setting(key, def) }];
+    const look = (head, list) => [head, null, { sub: list.map(([c, n]) => [n, () => api().set_setting("character", c), { checked: (S.settings.character || "male") === c }]) }];
+    return [
+      ["Writing", null, { sub: [
+        tog("AutoCorrect", "fix_text"),
+        tog("Typing Prediction (Grey, Tab)", "predict_words"),
+        tog("Suggest the Next Message", "suggest_next"),
+        tog("Suggest While Claude Works", "suggest_early"),
+        tog("Reply & Comment on Selection", "reply_menu"),
+        "-",
+        [`AutoCorrect Uses: ${models.name(S.settings.fix_model)}…`, () => models.open()],
+        [`Predictions Use: ${models.name(S.settings.predict_model)}…`, () => models.open()],
+        ["Local Models…", () => models.open()],
+      ] }],
+      ["Claude", null, { sub: [
+        tog("Tick Lists", "checklist_tool"),
+        tog("Show Advisor Notes", "advisor_relay"),
+        tog("Remember Queued Messages", "keep_queue"),
+      ] }],
+      ["Face & Fun", null, { sub: [
+        // the assistant's look and voice: three of each (the keys are what settings already hold)
+        look("Female · Yo Claudia", [["female", "1"], ["female2", "2"], ["female3", "3"]]),
+        look("Male · Yo Claude", [["male", "1"], ["professor", "2"], ["male3", "3"]]),
+        "-",
+        tog("Face in Sidebar", "avatar", false),
+        tog("Face on Floating Bar", "bar_avatar", false),
+        tog("Activity on Floating Bar", "bar_feed"),
+        tog("Animated Tray Icon", "tray_animate"),
+      ] }],
+      ["Arcade", null, { sub: [
+        tog("Arcade While You Wait", "invaders"),
+        tog("Chat Sliver Under the Arcade", "invaders_peek"),
+        "-",
+        ["Play Bug Invaders Now", () => window.invaders?.show()],
+      ] }],
+      ["Power", null, { sub: [
+        tog("Keep PC Awake While Claude Works", "awake_while_working"),
+        tog("Keep PC Awake (Always)", "keep_awake"),
+      ] }],
+    ];
+  },
   help: () => [
     ["Welcome tour", () => training.open(), { kbd: "F1" }],
     ["Keyboard shortcuts", showShortcuts],

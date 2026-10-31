@@ -109,6 +109,7 @@ function handle(e) {
     case "levels": inbar.event(e); avatar.levels(e.levels); break;
     case "speech": avatar.speech(e); break;
     case "dictation": dictation(e); break;
+    case "model_progress": models.event(e); break;
     case "live": if (S.active && e.session === S.active.id) transcript.live(e.image); break;
     case "settings": S.settings = e.settings; renderToggles(); avatar.apply(); renderBusy(); renderName(); renderAwake(); break;
     case "folder": S.folder = e.folder; renderHead(); break;
@@ -1222,29 +1223,107 @@ function dictation(e) {
   box.classList.toggle("dictating", e.stage === "heard");   // grey while it's being fixed
   autosize();
 }
-function tidySoon() {   // at a short pause, or at once when you've just finished a sentence
+const TIDY_LAG = 2;   // words between the one you're typing and what gets fixed at once (the rest waits for a pause)
+function tidyZone(box) {   // a stretch of the message safely away from the cursor, not fixed yet: {kind, text} or null
+  const v = box.value, caret = box.selectionStart, words = [...v.matchAll(/\S+/g)].map((m) => [m.index, m.index + m[0].length]);
+  const c = words.filter((w) => w[0] < caret).length;   // words starting before the cursor: the last of them is being typed
+  const heads = c - 1 - TIDY_LAG, tail = c + TIDY_LAG;
+  const zones = [];
+  if (heads >= 2) zones.push({ kind: "head", text: v.slice(0, words[heads - 1][1]) });
+  if (tail < words.length - 1) zones.push({ kind: "tail", text: v.slice(words[tail][0]) });
+  return zones.find((z) => !tidy.seen.has(z.text)) || null;
+}
+function tidySoon() {   // soon when something's safely behind (or ahead of) the cursor, at a short pause for the rest
   clearTimeout(tidy.timer);
   if (S.settings.fix_text === false) return;
-  const v = $("#input").value, ended = /[.!?]\s$/.test(v) || /\n$/.test(v);
-  tidy.timer = setTimeout(tidyNow, ended ? 150 : 800);
+  const box = $("#input"), v = box.value, ended = /[.!?]\s$/.test(v) || /\n$/.test(v);
+  tidy.timer = setTimeout(tidyNow, ended ? 150 : tidyZone(box) ? 250 : 700);
 }
 async function tidyNow() {
-  const box = $("#input"), text = box.value, t = text.trim();
-  if (tidy.busy || tidy.dictating || tidy.seen.has(text) || t.split(/\s+/).length < 2 || t.startsWith("/")
-      || !$("#atlist").classList.contains("hidden")) return;
+  const box = $("#input"), full = box.value, t = full.trim();
+  if (tidy.busy || tidy.dictating || t.startsWith("/") || !$("#atlist").classList.contains("hidden")) return;
+  const zone = tidyZone(box) || (!tidy.seen.has(full) && t.split(/\s+/).length >= 2 ? { kind: "all", text: full } : null);
+  if (!zone) return;
   tidy.busy = true;
-  let fixed = text;
-  try { fixed = (await api().fix_text(text))?.text || text; } catch (_) { /* left as typed */ } finally { tidy.busy = false; }
-  if (box.value !== text) return tidySoon();   // you kept typing: again at your next pause
-  tidy.seen.add(text); tidy.seen.add(fixed);   // (so an undo isn't fixed all over again)
-  if (fixed === text || tidy.dictating || !$("#atlist").classList.contains("hidden")) return;
-  const fromEnd = text.length - box.selectionEnd, focused = document.activeElement === box;
-  box.focus(); box.select();
+  let fixed = zone.text;
+  try { fixed = (await api().fix_text(zone.text))?.text || zone.text; } catch (_) { /* left as typed */ } finally { tidy.busy = false; }
+  const v = box.value;
+  const same = zone.kind === "head" ? v.startsWith(zone.text) : zone.kind === "tail" ? v.endsWith(zone.text) : v === zone.text;
+  if (!same) return tidySoon();   // you changed that part meanwhile: again at your next pause
+  tidy.seen.add(zone.text);
+  fixed = zone.text.match(/^\s*/)[0] + fixed.trim() + zone.text.match(/\s*$/)[0];
+  if (zone.kind !== "all" && !/[.!?…]\s*$/.test(zone.text)) fixed = fixed.replace(/[.!?…]+(\s*)$/, "$1");   // (a stretch of a sentence isn't finished)
+  tidy.seen.add(fixed);   // (so an undo isn't fixed all over again)
+  if (fixed === zone.text || tidy.dictating || !$("#atlist").classList.contains("hidden")) return tidySoon();
+  const a = zone.kind === "tail" ? v.length - zone.text.length : 0, b = a + zone.text.length, d = fixed.length - zone.text.length;
+  const c0 = box.selectionStart, c1 = box.selectionEnd, focused = document.activeElement === box;
+  const at = (p) => (p >= b ? p + d : zone.kind === "all" ? Math.max(0, p + d) : p);
+  box.focus(); box.setSelectionRange(a, b);
   document.execCommand("insertText", false, fixed);   // one edit: Ctrl+Z puts back what you typed
-  const at = Math.max(0, fixed.length - fromEnd); box.setSelectionRange(at, at);
+  box.setSelectionRange(at(c0), at(c1));
   if (!focused) box.blur();
   box.classList.add("tidied"); setTimeout(() => box.classList.remove("tidied"), 900);
   autosize();
+  tidySoon();
+}
+
+// ---------- word prediction: the next word or three, grey after the cursor as you type (Tab takes them). Haiku or a local
+// model (models.js) guesses; what you type that matches it keeps it, anything else drops it and asks again ----------
+const pred = { add: "", base: "", timer: 0, busy: false, again: false, shown: false };
+function ghostPaint() {
+  const box = $("#input"), g = $("#ghost");
+  const on = !!pred.add && S.settings.predict_words !== false && document.activeElement === box && box.value && !tidy.dictating
+    && box.selectionStart === box.value.length && box.selectionEnd === box.value.length && $("#atlist").classList.contains("hidden");
+  pred.shown = on;
+  g.classList.toggle("on", on);
+  if (!on) { g.textContent = ""; return; }
+  const cs = getComputedStyle(box);
+  for (const p of ["fontFamily", "fontSize", "fontWeight", "lineHeight", "letterSpacing", "paddingTop", "paddingRight", "paddingBottom",
+    "paddingLeft", "borderTopWidth", "borderRightWidth", "borderBottomWidth", "borderLeftWidth", "boxSizing", "textIndent", "tabSize"]) g.style[p] = cs[p];
+  g.style.width = box.offsetWidth + "px"; g.style.height = box.offsetHeight + "px";
+  const tail = el("span", "g"); tail.textContent = pred.add;
+  g.textContent = box.value; g.appendChild(tail);
+  g.scrollTop = box.scrollTop;
+}
+function predictInput() {   // after every edit
+  const v = $("#input").value;
+  if (pred.add && v.length > pred.base.length && v.startsWith(pred.base)) {
+    const typed = v.slice(pred.base.length);
+    if (pred.add.startsWith(typed)) {   // you're typing what it guessed
+      pred.add = pred.add.slice(typed.length); pred.base = v;
+      ghostPaint();
+      if (!pred.add) predictSoon();
+      return;
+    }
+  }
+  pred.add = ""; ghostPaint();
+  predictSoon();
+}
+function predictSoon() {
+  clearTimeout(pred.timer);
+  if (S.settings.predict_words === false) return;
+  pred.timer = setTimeout(predictNow, 220);
+}
+async function predictNow() {
+  const box = $("#input"), v = box.value;
+  if (S.settings.predict_words === false || tidy.dictating || v.trim().length < 2 || v.startsWith("/") || /@\S*$/.test(v)
+      || document.activeElement !== box || box.selectionStart !== v.length) return;
+  if (pred.busy) { pred.again = true; return; }
+  pred.busy = true;
+  let add = "";
+  try { add = (await Promise.race([api().predict_text(v), new Promise((r) => setTimeout(r, 12000, null))]))?.text || ""; } catch (_) { /* none */ } finally { pred.busy = false; }
+  const now = box.value;
+  if (now !== v) {   // you typed on meanwhile: still good if it's what was guessed
+    const typed = now.slice(v.length);
+    add = add && now.startsWith(v) && add.startsWith(typed) ? add.slice(typed.length) : "";
+  }
+  pred.base = now; pred.add = add; ghostPaint();
+  if (pred.again || (now !== v && !add)) { pred.again = false; predictSoon(); }
+}
+function predAccept() {
+  const box = $("#input");
+  box.focus(); box.setSelectionRange(box.value.length, box.value.length);
+  document.execCommand("insertText", false, pred.add);   // one edit (Ctrl+Z takes it back); the input event asks for the next words
 }
 
 // ---------- files and media: chips, thumbnails, previews under replies, the viewer, open with… ----------
@@ -1700,9 +1779,13 @@ $("#input").addEventListener("keydown", (e) => {
     setSuggest(""); autosize();
     return;
   }
+  if (e.key === "Tab" && !e.shiftKey && !e.ctrlKey && !e.altKey && pred.shown) { e.preventDefault(); predAccept(); return; }
   if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
 });
 $("#input").addEventListener("input", () => { autosize(); composer.autocomplete(); });
+$("#input").addEventListener("input", predictInput);
+for (const ev of ["blur", "focus", "scroll", "click", "keyup"]) $("#input").addEventListener(ev, ghostPaint);
+setInterval(() => { if (pred.shown || pred.add) ghostPaint(); }, 500);   // (the box emptied by sending, a window resize...)
 $("#input").addEventListener("input", () => setSuggest(""));   // typing anything hides the suggestion
 $("#input").addEventListener("input", tidySoon);
 $("#sendBtn").onclick = send;
@@ -1716,19 +1799,42 @@ document.addEventListener("keydown", (e) => {
 $("#input").addEventListener("blur", () => setTimeout(() => { if (document.activeElement !== $("#input")) composer.closeList(); }, 150));
 
 // ---------- menus & dialogs ----------
-function showMenu(anchor, items) {
-  const m = $("#menu");
-  m.innerHTML = "";
+// Items: ["label", fn, {checked, kbd, disabled}] | "-" | ["sub:heading"] | ["label", null, {sub: [items] or () => [items]}] (a submenu
+// that opens beside its row when you point at it or click it)
+function menuRows(m, items) {
   for (const it of items) {
     if (it === "-") { m.appendChild(el("hr")); continue; }
     const [label, fn, opts = {}] = it;
     if (label.startsWith("sub:")) { m.appendChild(el("div", "sub", esc(label.slice(4)))); continue; }
+    if (opts.sub) {
+      const row = el("div", "has-sub", esc(label) + `<span class="kbd">▸</span>`), fly = el("div", "menu fly");
+      menuRows(fly, typeof opts.sub === "function" ? opts.sub() : opts.sub);
+      row.appendChild(fly);
+      const open = () => {
+        for (const x of row.parentElement.children) if (x !== row) x.classList?.remove("open");
+        row.classList.add("open");
+        fly.classList.remove("left");
+        if (fly.getBoundingClientRect().right > innerWidth - 4) fly.classList.add("left");
+        const over = fly.getBoundingClientRect().bottom - innerHeight + 8;
+        fly.style.top = over > 0 ? `${-6 - over}px` : "";
+      };
+      row.onmouseenter = open;
+      row.onclick = (e) => { if (e.target.closest(".fly")) return; e.stopPropagation(); row.classList.contains("open") ? row.classList.remove("open") : open(); };
+      m.appendChild(row);
+      continue;
+    }
     const row = el("div", opts.disabled ? "disabled" : "",
       (opts.checked !== undefined ? `<span class="chk">${opts.checked ? "✓" : ""}</span>` : "") + esc(label) +
       (opts.kbd ? `<span class="kbd">${esc(opts.kbd)}</span>` : ""));
-    row.onclick = () => { if (opts.disabled) return; hideMenu(); fn(); };
+    row.onclick = (e) => { e.stopPropagation(); if (opts.disabled) return; hideMenu(); fn(); };
+    row.onmouseenter = () => { for (const x of m.children) if (x !== row) x.classList?.remove("open"); };
     m.appendChild(row);
   }
+}
+function showMenu(anchor, items) {
+  const m = $("#menu");
+  m.innerHTML = "";
+  menuRows(m, items);
   m.classList.remove("hidden");
   const r = anchor.getBoundingClientRect ? anchor.getBoundingClientRect() : { left: anchor.clientX, bottom: anchor.clientY };
   m.style.left = Math.min(r.left, innerWidth - m.offsetWidth - 8) + "px";

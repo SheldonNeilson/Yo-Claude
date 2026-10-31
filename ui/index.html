@@ -78,7 +78,10 @@
     <div id="composer">
       <div id="chips"></div>
       <div id="atlist" class="menu hidden"></div>
-      <textarea id="input" rows="2" placeholder="> message claude…  (Enter sends · Shift+Enter new line · @ attaches a file · / commands · paste images)"></textarea>
+      <div id="inputwrap">
+        <textarea id="input" rows="2" placeholder="> message claude…  (Enter sends · Shift+Enter new line · @ attaches a file · / commands · paste images)"></textarea>
+        <div id="ghost" aria-hidden="true"></div>
+      </div>
       <div class="composer-actions">
         <button id="talkBtn" title="Talk instead of typing">[talk]</button>
         <button id="btwBtn" title="btw: ask a side question about this conversation without adding it to the conversation (or type /btw …)">[btw]</button>
@@ -115,6 +118,7 @@
 <script src="avatar.js"></script>
 <script src="training.js"></script>
 <script src="menus.js"></script>
+<script src="models.js"></script>
 <script src="meters.js"></script>
 <script src="resize.js"></script>
 <script src="invaders.js"></script>

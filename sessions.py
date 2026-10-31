@@ -27,6 +27,7 @@ import anyio
 import claude_agent_sdk as sdk
 from claude_agent_sdk._internal import sessions as sdk_sessions
 
+import localai
 import workspace
 
 log = logging.getLogger("yo_claude")
@@ -411,11 +412,30 @@ class WarmHaiku:
 WARM_TIDY = WarmHaiku()
 
 
-async def tidy_text(text, context=""):
+TIDY_SYSTEM = "You proofread messages before they're sent. You only ever return the corrected message."
+
+
+async def haiku_tidy(prompt):
+    opts = sdk.ClaudeAgentOptions(model=VOICE_NOTE_MODEL, tools=[], cwd=CHAT_DIR, setting_sources=["project"],
+                                  max_turns=1, thinking={"type": "disabled"}, system_prompt=TIDY_SYSTEM,
+                                  extra_args={"no-session-persistence": None})
+    try:
+        return await WARM_TIDY.ask(prompt, opts)   # a Haiku kept running: about 1 s, against 3+ starting one each time
+    except Exception as e:
+        log.info("AutoCorrect's warm Haiku failed (%s): a one-off call instead", e)
+        out = ""
+        async for m in sdk.query(prompt=prompt, options=opts):
+            if isinstance(m, sdk.AssistantMessage):
+                out += "".join(b.text for b in m.content if isinstance(b, sdk.TextBlock))
+        return out
+
+
+async def tidy_text(text, context="", model=None):
     """Your message with its spelling, grammar and punctuation fixed (and, for speech, words that were obviously
     misheard), from the same kind of quick separate call as spoken_line: nothing saved, nothing in the chat. Your
     words, meaning and tone stay; it never answers. Returns the text unchanged when there's nothing to fix or the fix
-    looks wrong (much longer or shorter, or a path, @file, link or `code` changed)."""
+    looks wrong (much longer or shorter, or a path, @file, link or `code` changed). `model`: a local model from
+    localai.find (None: Haiku)."""
     text = (text or "").strip()
     if len(text.split()) < 2 or text.startswith("/"):
         return text
@@ -431,25 +451,73 @@ async def tidy_text(text, context=""):
               "corrected message only, with no tags or comments. If nothing needs fixing, reply with it unchanged.\n\n"
               + (f"Claude's last message, for context:\n{context}\n\n" if context else "")
               + f"<message>\n{text}\n</message>")
-    opts = sdk.ClaudeAgentOptions(model=VOICE_NOTE_MODEL, tools=[], cwd=CHAT_DIR, setting_sources=["project"],
-                                  max_turns=1, thinking={"type": "disabled"},
-                                  system_prompt="You proofread messages before they're sent. You only ever return the "
-                                                "corrected message.",
-                                  extra_args={"no-session-persistence": None})
-    try:
-        out = await WARM_TIDY.ask(prompt, opts)   # a Haiku kept running: about 1 s, against 3+ starting one each time
-    except Exception as e:
-        log.info("AutoCorrect's warm Haiku failed (%s): a one-off call instead", e)
-        out = ""
-        async for m in sdk.query(prompt=prompt, options=opts):
-            if isinstance(m, sdk.AssistantMessage):
-                out += "".join(b.text for b in m.content if isinstance(b, sdk.TextBlock))
+    if model:   # a local model chosen in the settings (localai.py): nothing leaves the PC; if it fails the text is left as typed
+        try:
+            out = await asyncio.to_thread(localai.generate, model, TIDY_SYSTEM, prompt, min(1024, len(text) // 2 + 64), 12)
+        except Exception as e:
+            log.info("AutoCorrect on %s failed: %s", model.get("model"), e)
+            return text
+    else:
+        out = await haiku_tidy(prompt)
     out = re.sub(r"^\s*<message>\s*|\s*</message>\s*$", "", out.strip()).strip()
     if not out or not 0.6 <= len(out) / len(text) <= 1.5 and abs(len(out) - len(text)) > 12:
         return text
     if any(k not in out for k in TIDY_KEEP.findall(text)):
         return text
     return out
+
+
+WARM_PREDICT = WarmHaiku()
+WARM_PREDICT.FRESH_AFTER = 20
+PREDICT_SYSTEM = ("You predict what someone is about to type next in a chat with an AI coding assistant. You get what they've "
+                  "typed so far in <typed> tags (and the assistant's last message, for context). Reply with ONLY the text "
+                  "that comes next, usually 1 to 3 words, nothing else: no quotes, no explanation, never an answer to them. "
+                  "If their last word is unfinished, start with the missing letters of it. If it is finished, start with a "
+                  "space. If nothing sensible comes next, reply with nothing.")
+
+
+def clean_prediction(text, out):
+    """The model's reply as text to append to `text` (at most three words, no repeats), or "" if it isn't usable."""
+    out = re.sub(r"</?typed>", "", out or "").replace(chr(13), "").split(chr(10))[0]
+    if len(out) > 1 and out.strip()[:1] in "\"“'" and out.strip()[-1:] in "\"”'":
+        out = out.strip()[1:-1]
+    if not out.strip() or "�" in out or '"' in out.strip():
+        return ""
+    if text[-1:].isspace():
+        out = out.lstrip()
+    else:
+        frag = re.split(r"\s", text)[-1]
+        if frag and not out[:1].isspace() and out.lower().startswith(frag.lower()):
+            out = out[len(frag):]   # (it gave the whole word, not just the rest)
+    lead = " " if out[:1].isspace() else ""
+    words = out.split()[:3]
+    out = lead + " ".join(words)
+    if not words or len(out) > 48 or out.strip().lower() == (text.split() or [""])[-1].lower():
+        return ""
+    return out
+
+
+async def predict_text(text, context="", model=None):
+    """What you're likely to type next after `text`: 1 to 3 words to show grey after the cursor (Tab takes them), from
+    Haiku (a warm session) or a local model. "" when there's nothing to offer or the call fails."""
+    text = text or ""
+    if len(text.strip()) < 2 or text.lstrip().startswith(("/", "@")):
+        return ""
+    context = (context or "").strip()
+    context = context if len(context) <= 600 else "…" + context[-600:]
+    prompt = (f"Assistant's last message, for context:\n{context}\n\n" if context else "") + f"<typed>{text}</typed>"
+    try:
+        if model:
+            out = await asyncio.to_thread(localai.generate, model, PREDICT_SYSTEM, prompt, 14, 4)
+        else:
+            opts = sdk.ClaudeAgentOptions(model=VOICE_NOTE_MODEL, tools=[], cwd=CHAT_DIR, setting_sources=["project"],
+                                          max_turns=1, thinking={"type": "disabled"}, system_prompt=PREDICT_SYSTEM,
+                                          extra_args={"no-session-persistence": None})
+            out = await asyncio.wait_for(WARM_PREDICT.ask(prompt, opts), 8)
+    except Exception as e:
+        log.info("Prediction failed (%s): %s", model.get("model") if model else "Haiku", e or type(e).__name__)
+        return ""
+    return clean_prediction(text, out)
 
 
 BTW_PROMPT = (
@@ -2234,7 +2302,7 @@ class Router:
         await asyncio.sleep(0)   # (after turn() has put it in the queue)
         try:
             context = next((x.get("text", "") for x in reversed(s.items) if x.get("kind") == "assistant"), "")
-            fixed = await tidy_text(text, context)
+            fixed = await tidy_text(text, context, localai.find(self.settings, "fix_model"))
         except Exception as e:
             log.info("Couldn't fix a queued message: %s", e)
             return
@@ -2327,7 +2395,19 @@ class Router:
             async def unchanged():
                 return text
             return self.run(unchanged())
-        return self.run(tidy_text(text, context))
+        return self.run(tidy_text(text, context, localai.find(self.settings, "fix_model")))
+
+    def predict(self, text, sid=None):
+        """What you'll probably type next (predict_text), as a Future with the words to show grey; "" if the setting is off."""
+        s = self.live.get(sid) if sid else self.active
+        context = ""
+        if s is not None:
+            context = next((x.get("text", "") for x in reversed(s.items) if x.get("kind") == "assistant"), "")
+        if not self.settings.get("predict_words", True):
+            async def none():
+                return ""
+            return self.run(none())
+        return self.run(predict_text(text, context, localai.find(self.settings, "predict_model")))
 
     # --- /btw: side questions that never land in the conversation (see side_chat) ---
     def btw_ask(self, sid, question, bid=None):

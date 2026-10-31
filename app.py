@@ -18,14 +18,17 @@ import subprocess
 import sys
 import threading
 import time
+import uuid
 import winreg
 
 import pystray
 import webview
 
 import icons
+import localai
 import media
 import openwith
+import sessions
 import taskbar
 import workspace
 import yo_claude
@@ -628,6 +631,88 @@ class Api:
             log.info("Couldn't fix the message: %s", e or type(e).__name__)
             return {"text": text}
 
+    def predict_text(self, text):
+        """The grey words offered after the cursor as you type: {"text": the words} (""  when there's nothing)."""
+        r = self._app.router
+        try:
+            return {"text": r.predict(text, r.active.id if r.active else None).result(10)}
+        except Exception as e:
+            log.debug("No prediction: %s", e or type(e).__name__)
+            return {"text": ""}
+
+    # --- local models for AutoCorrect and predictions (localai.py) ---
+    def models_info(self):
+        """For the models window: Ollama's state, every model on offer (installed or not), and which is chosen for what."""
+        st = self._app.settings
+        return {"ollama": {"installed": bool(localai.ollama_exe()) or localai.up(), "up": localai.up()},
+                "models": localai.catalogue(st), "fix_model": st.get("fix_model", "haiku"),
+                "predict_model": st.get("predict_model", "haiku")}
+
+    def model_pull(self, mid):
+        """Download a model (Ollama's). Progress arrives as "model_progress" events."""
+        a = self._app
+        m = next((x for x in localai.catalogue(a.settings) if x["id"] == mid), None)
+        if not m or m["backend"] != "ollama":
+            return {"error": "That one isn't downloaded by Yo Claude (it's a server of your own)."}
+
+        def work():
+            def progress(pct, status):
+                a.bus.put(("model_progress", {"id": mid, "pct": pct, "status": status}))
+            err = localai.pull(m["model"], progress)
+            a.bus.put(("model_progress", {"id": mid, "done": True, "error": err}))
+        threading.Thread(target=work, name="model-pull", daemon=True).start()
+        return {"started": True}
+
+    def model_add(self, backend, model, url="", label=""):
+        """Add a model of your own: an Ollama model name, or an OpenAI-compatible server's address and model name."""
+        a = self._app
+        model, url = (model or "").strip(), (url or "").strip()
+        if not model or (backend == "openai" and not url.startswith("http")):
+            return {"error": "Give the model's name" + (" and the server's address (http://…/v1)." if backend == "openai" else ".")}
+        mid = "u-" + uuid.uuid4().hex[:6]
+        mm = {"id": mid, "label": (label or "").strip() or model, "backend": backend, "model": model, "url": url if backend == "openai" else ""}
+        a.settings["local_models"] = [*a.settings.get("local_models", []), mm]
+        a.settings.save()
+        a.emit_settings()
+        return {"id": mid}
+
+    def model_remove(self, mid):
+        """Take a model you added off the list (what's downloaded stays on disk)."""
+        a = self._app
+        a.settings["local_models"] = [m for m in a.settings.get("local_models", []) if m["id"] != mid]
+        for k in ("fix_model", "predict_model"):
+            if a.settings.get(k) == mid:
+                a.settings[k] = "haiku"
+        a.settings.save()
+        a.emit_settings()
+        return True
+
+    def model_delete(self, mid):
+        """Delete a downloaded Ollama model from the disk."""
+        a = self._app
+        m = next((x for x in localai.catalogue(a.settings) if x["id"] == mid), None)
+        if not m or m["backend"] != "ollama":
+            return {"error": "Not an Ollama model."}
+        err = localai.delete(m["model"])
+        for k in ("fix_model", "predict_model"):
+            if a.settings.get(k) == mid:
+                a.settings[k] = "haiku"
+        a.settings.save()
+        a.emit_settings()
+        return {"error": err} if err else {"ok": True}
+
+    def model_test(self, mid):
+        """Try a model: how long a prediction takes and what it says. {"ms", "text"} or {"error"}."""
+        m = next((x for x in localai.catalogue(self._app.settings) if x["id"] == mid), None)
+        if not m:
+            return {"error": "Unknown model."}
+        try:
+            t = time.time()
+            out = localai.generate(m, sessions.PREDICT_SYSTEM, "<typed>Could you please take a look at the </typed>", 14, 60)
+            return {"ms": int((time.time() - t) * 1000), "text": sessions.clean_prediction("Could you please take a look at the ", out)}
+        except Exception as e:
+            return {"error": str(e) or type(e).__name__}
+
     def say_short(self, i):
         """The 🔊 button on Claude's messages: the short spoken version of message `i` in the open session."""
         r = self._app.router
@@ -674,6 +759,10 @@ class Api:
         a.settings.save()
         if key == "launch_at_login":
             set_launch_at_login(bool(value))
+        if key in ("fix_model", "predict_model") and value != "haiku":   # (loaded now, so the first keystroke isn't slow)
+            m = localai.find(a.settings, key)
+            if m:
+                threading.Thread(target=localai.warm, args=(m,), daemon=True).start()
         if key == "pc_control":
             a.router.reconnect_all()
         if key == "accurate_speech":
