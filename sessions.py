@@ -2869,6 +2869,8 @@ class Router:
         """The group goes. A folder's own group takes the folder out of the list (its files and sessions are never touched);
         its other sessions go back to the group of their own folder."""
         gc = self.meta.data.setdefault("group_cwd", {})
+        if name in gc and gc[name] is None:   # the chats group (conversations without a folder): always there, renamable but never removed
+            return "The chats group is permanent: it holds your conversations that have no folder."
         folder = gc.pop(name, "")
         if name in self.meta.data["groups"]:
             self.meta.data["groups"].remove(name)
