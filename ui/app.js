@@ -185,7 +185,7 @@ function renderAwake() {
 function renderToggles() {
   $("#tListen").classList.toggle("on", S.settings.listening !== false);
   $("#tVoice").classList.toggle("on", S.settings.voice_replies !== false);
-  $("#tPc").classList.toggle("on", !!S.settings.pc_control);
+  $("#tPc").classList.toggle("on", S.settings.pc_control !== false);   // (on unless switched off, as in the app's own defaults)
 }
 // The window shows the conversation you have open: what Yo Claude is doing overall (any session) stays on the tray
 // and the floating bar. Your voice (listening, speaking) and a question waiting in any session still show here.
@@ -235,7 +235,7 @@ $("#folderBtn").onclick = (e) => {
 };
 $("#tListen").onclick = () => api().set_setting("listening", !(S.settings.listening !== false));
 $("#tVoice").onclick = () => api().set_setting("voice_replies", !(S.settings.voice_replies !== false));
-$("#tPc").onclick = () => api().set_setting("pc_control", !S.settings.pc_control);
+$("#tPc").onclick = () => api().set_setting("pc_control", S.settings.pc_control === false);
 $("#compactBtn").onclick = () => api().compact();
 $("#helpBtn").onclick = () => training.open();
 $("#logo").onclick = () => api().talk();

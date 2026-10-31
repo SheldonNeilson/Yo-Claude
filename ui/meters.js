@@ -114,7 +114,7 @@ function loadoutView(c) {
     if (loadoutTab === "mcp") {
       if (!servers.length) list.appendChild(el("div", "dim", "No MCP servers in this session."));
       for (const s of servers) {
-        const isOff = off.mcp.includes(s.name) || (s.name === "screen-control" && !S.settings.pc_control);
+        const isOff = off.mcp.includes(s.name) || (s.name === "screen-control" && S.settings.pc_control === false);
         const status = isOff ? "off" : s.status === "connected" ? `${s.tools} tool${s.tools === 1 ? "" : "s"}` : s.status;
         const toggle = () => s.name === "screen-control"
           ? (api().set_setting("pc_control", isOff), pending.add("mcp:" + s.name), draw())

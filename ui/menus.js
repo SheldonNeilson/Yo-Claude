@@ -122,7 +122,7 @@ const MENUS = {
       [`Wake on just “${Who()}” (no “Yo”)`, () => toggleSetting("short_wake", false), { checked: setting("short_wake", false) }],
       ["How long a pause ends what I say", null, { sub: [1.5, 2.5, 4, 6].map((v) => [`${v} seconds`, () => api().set_setting("pause_s", v), { checked: (setting("pause_s", 2.5)) === v }])}],
       ["More accurate speech recognition (slower)", () => toggleSetting("accurate_speech", false), { checked: setting("accurate_speech", false) }],
-      ["PC control (screen, keyboard, mouse)", () => toggleSetting("pc_control", false), { checked: setting("pc_control", false) }],
+      ["PC control (screen, keyboard, mouse)", () => toggleSetting("pc_control", true), { checked: setting("pc_control", true) }],
     ] }],
     "-",
     ["Training mode…", () => training.open()],
