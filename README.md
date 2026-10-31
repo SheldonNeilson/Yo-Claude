@@ -6,12 +6,17 @@ work, every file it changed and your git branch. With PC control on, it can also
 
 Unofficial fan project, not made or supported by Anthropic. Uses your own Claude account through Claude Code.
 
-![Yo Claude coding: folders and sessions on the left, the conversation with folded tool steps, and the files changed in the session on the right](docs/screenshots/coding.png)
+![Yo Claude coding: groups of sessions on the left (a group per folder, plus your own), the conversation with folded tool steps, and the files changed in the session on the right](docs/screenshots/coding.png)
 
-**Coding by voice or text.** Folders and their sessions on the left (spinning while Claude works, a dot for replies you
+**Coding by voice or text.** Your sessions on the left in groups (spinning while Claude works, a dot for replies you
 haven't read), the conversation in ASCII speech bubbles with Claude's steps folded into one-line summaries, and
 everything the session changed on the right. The meters at the top show how full this conversation is and how much
 of your plan's limits you've used.
+
+![The chat, a Markdown file in split edit and preview, and a terminal, side by side](docs/screenshots/workspace.png)
+
+**Everything on one screen.** The middle of the window is shared by the chat, a file pane (text files straight in the
+editor, Markdown as edit, split or preview) and a terminal. Every pane toggles and resizes.
 
 ![Yo Claude using the PC: the steps it took in Paint, the picture it made, and a live view of the screen while it works](docs/screenshots/pc-control.png)
 
@@ -23,6 +28,10 @@ what Claude saw, and a live view of the screen while it works.
 | ![A video Claude made, playing in the chat, with its menu open](docs/screenshots/video.png) | ![The context window breakdown](docs/screenshots/context.png) |
 | **The compact bar** | **Cleaning up old conversations** |
 | ![The compact bar while Yo Claude speaks a reply](docs/screenshots/compact-bar.png) | ![A checklist of stale conversations to move to the trash](docs/screenshots/clean-up.png) |
+| **Typing prediction** (grey, Tab takes it) | **Options → Writing** |
+| ![Typing prediction: a grey continuation of the message being typed](docs/screenshots/prediction.png) | ![The Writing menu: AutoCorrect, prediction, learning from your messages, local models](docs/screenshots/menu-writing.png) |
+| **Voice → More** | |
+| ![The Voice menu with its More submenu: wake on just the name, how long a pause ends a request](docs/screenshots/menu-voice.png) | |
 
 ![The welcome tour](docs/screenshots/welcome.png)
 
@@ -57,14 +66,17 @@ The first time, a welcome tour explains everything and checks how well it hears 
 
 ### Talking
 
-- **Say "yo claude"**, wait for "how can I help?", then speak. Pause briefly when you're done. You can also say it in
-  one breath: "yo claude, what's the weather tomorrow?"
+- **Say "yo claude"** (or "yo claudia", whichever character you picked), wait for the beep, then speak. Pause when
+  you're done: a pause of 2.5 seconds ends your request (**Voice → More → How long a pause ends what I say**: 1.5, 2.5,
+  4 or 6 seconds; a request can run up to a minute). You can also say it in one breath: "yo claude, what's the weather
+  tomorrow?" **Voice → More → Wake on just "Claude"** lets you leave out the "yo" (off by default: the bare name is an
+  ordinary word, so it wakes more by accident).
 - **Follow-ups**: after it answers it listens for about 6 seconds, so you can carry on without the wake word.
   "Never mind" ends it.
 - **Voice commands**: "new session", "new chat", "switch to *session name*".
 - **Approvals**: when Claude asks permission, say "yes, go ahead" or "no", or click.
 - **AutoCorrect**: what you say shows in the message box, Haiku fixes spelling, grammar and misheard words ("Lord"
-  becomes "Claude"), then it's sent.
+  becomes "Claude", "young Claude" becomes "Yo Claude"), then it's sent.
 - **Stop** anything: `[■]`, Esc (when no list or menu is open), a right-click on the bar, or the tray menu.
 - **Mishearing you?** Turn on **Voice → More accurate speech recognition**. It uses a bigger speech model: slower,
   and a one-off download of about 1.5 GB.
@@ -79,8 +91,10 @@ The first time, a welcome tour explains everything and checks how well it hears 
     `/files`, `/changes`, `/git`, `/stop`.
   - Claude Code's commands for the folder (`/compact`, your skills and custom commands) are listed too.
 - **AutoCorrect** fixes spelling and grammar (Ctrl+Z undoes it): words a few behind (or ahead of) the one you're
-  typing are fixed straight away, the rest at a short pause. **Typing prediction** shows the next word or three in
-  grey after the cursor as you type (Tab takes them). A grey **suggested next message** fills the empty box (Tab takes
+  typing are fixed straight away, the rest at a short pause. **Typing prediction** continues your message in grey after the cursor, a sentence or so
+  (Tab takes it all, Ctrl+→ one word), in your voice rather than Claude's. It knows the project, the conversation and the
+  files in play, and learns how you write from your own earlier messages (kept on this PC only: **Options → Writing**
+  turns learning off or forgets what it learned). A grey **suggested next message** fills the empty box (Tab takes
   it), even while Claude is still working.
 - **File pane**: the middle of the window is shared by the chat and a file pane ([chat] and [editor] in the top right, or
   View): side by side with a draggable divider, or either one filling the middle. Every file opens there in tabs: text
@@ -129,7 +143,9 @@ The first time, a welcome tour explains everything and checks how well it hears 
 - **sessions · focus · files** at the top right show or hide the panes beside the chat (focus: just the chat). The
   window opens maximized (View → Start Maximized).
 - **Her face** (bottom left): ASCII video of a real person that listens, thinks and talks along with the voice (lip
-  sync), with dozens of small mannerisms. New ones join while it runs.
+  sync), with dozens of small mannerisms (any that move much faster than the rest are slowed down). Six characters
+  (Options → Face), each with their own voice. The **show / hide Claude** (or Claudia) button next to the message box
+  hides the face. New clips join while it runs.
 - **Bug Invaders**: an ASCII space-invaders comes up over the chat while Claude works, leaving a sliver of the chat in
   view. Click it to play; Esc hides it until the next reply. New enemies (heisenbugs that blink out, memory leaks that
   drip, segfaults that dive), power-ups (`sudo`, `grep`, `pair prog`, `firewall`, `sleep`, `npm update` for weapon
@@ -139,14 +155,25 @@ The first time, a welcome tour explains everything and checks how well it hears 
 - **Resize** the sessions list and the right-hand panel by dragging their edges (double-click resets).
 - **Compact mode**: close or minimise the window and a small bar stays at the bottom of the screen, with her face and a
   few lines on what's happening (your messages, Claude's thoughts, its replies). `[⤢]` opens the window again.
+- **Keep PC awake**: the **[staying awake]** button (and Options → Power) stops Windows sleeping or locking the screen,
+  and keeps the display on, while Yo Claude runs.
 - **Tray icon** (bottom right; its colour and movement show what Yo Claude is doing): the wake word, voice replies, PC control, the floating bar, launch with Windows,
   training mode, updates, and Quit.
 
 ### Folders and sessions
 
-- `+ folder` adds a folder to the tree on the left; hover it and click `+` for a new session there. Or paste or type a
-  folder path into the box at the top and press Enter. Sessions in different folders can work at the same time.
-- **Recent** at the top lists the latest sessions from every folder, and folders with recent activity open by
+- **Everything is in a group.** A folder's sessions go into a group named after the folder, made for you the first time
+  (chats without a folder go into **Chats**). That is the default, nothing more: it is the same kind of group as the ones
+  you make yourself. Rename it, move it up or down, remove it, or drag sessions in and out like any other.
+- **Your own groups**: `+ group` makes one with any name ("AI experiments"). Sort sessions into it by **dragging** them
+  onto it (or onto any session in it), between groups, or out again (drop on **Recent**, on a group, or on the bar that
+  appears at the top while you drag). Or right-click a session → *move to group*. Right-click a group to rename it, move
+  it, remove it, or **show only this group**, so you can share your screen without showing everything.
+- A group made from a folder also has that folder's actions: **new session here** (or hover it and click `+`), open in VS
+  Code, show in Explorer, terminal. Removing it takes the folder out of the list (its files and sessions are untouched).
+- `+ folder` adds a folder (and its group). Or paste or type a folder path into the box at the top and press Enter.
+  Sessions in different folders can work at the same time.
+- **Recent** at the top lists the latest sessions from every group, and groups with recent activity open by
   themselves. Your Claude Code sessions for the same folders show up too (marked `cli`).
 - **More than one folder**: a session can also read and write other folders. Use `+ folder` in the row under the
   session title; remove one with its `×`.
