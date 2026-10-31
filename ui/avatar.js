@@ -8,6 +8,7 @@
 "use strict";
 const RAMP = " .:-=+o/*#0@";   // sparse to dense: white on the dark window, so bright = dense
 const AW = 128;                // the analysis grid frames are decoded to (columns): 2 per character across
+const PACE_ABOVE = 1.35;       // a clip peaking this many times above the typical clip's peak speed is slowed to match
 const COLS = 64;               // characters across, whatever the panel's width
 const VIEW = [0, 0, 1, 1];     // the part of the clip shown: left, top, right, bottom (fractions; see frameView)
 const REST = [44, 60];         // idle frames with a soft, closed-mouth smile: where she rests
@@ -71,6 +72,34 @@ const avatar = {
     }
     const rest = this.skips.idle?.filter(([, z]) => z >= REST[0] && z < REST[1] - 6).map(([, z]) => z + 1) || [];
     this.restFrom = Math.max(REST[0], ...rest);   // (her resting sway starts after any blink there)
+    this.paceAll();
+  },
+  // Some generated mannerisms move far faster than the rest (a head turn that is over in a blink: it looks like fast
+  // forward). Each clip's peak speed is measured from its frames (how much the picture changes from frame to frame, at
+  // its fastest 10%); any clip peaking well above the typical one plays slower, in proportion (this.pace[name], 0.4 to 1).
+  paceAll() {
+    const cache = (this.motion ||= new Map()), peak = {};
+    for (const [name, frames] of Object.entries(this.clips)) {
+      if (name === "talking" || frames.length < 8) continue;
+      let m = cache.get(frames);
+      if (m === undefined) {
+        const d = [];
+        for (let i = 1; i < frames.length; i++) {
+          let sum = 0, n = 0;
+          for (let y = 0; y < this.AH * 0.8; y += 2) for (let x = 0; x < AW; x += 2) { sum += Math.abs(frames[i][y * AW + x] - frames[i - 1][y * AW + x]); n++; }
+          d.push(sum / n);
+        }
+        d.sort((a, b) => a - b);
+        m = d[Math.floor(d.length * 0.9)] || 0;
+        cache.set(frames, m);
+      }
+      peak[name] = m;
+    }
+    const vals = Object.values(peak).filter((v) => v > 0).sort((a, b) => a - b);
+    const typical = vals[Math.floor(vals.length / 2)] || 0;
+    this.pace = {};
+    if (!typical) return;
+    for (const [name, m] of Object.entries(peak)) this.pace[name] = m > typical * PACE_ABOVE ? Math.max(0.4, (typical * PACE_ABOVE) / m) : 1;
   },
   // frame `f`, or if that's in a blink, the first frame past it going `dir` (past back-to-back blinks too)
   stepPast(f, dir, frames) {
@@ -360,7 +389,7 @@ const avatar = {
       const end = Math.min(frames.length - 1, this.turnAt || Infinity);   // a short play turns back early
       const resting = st === "idle" && this.clip === "idle" && now < this.restUntil;
       const idleish = st !== "speaking" && this.clip !== "talking";   // (every calm state: own speed, holds)
-      this.acc = (this.acc || 0) + (idleish ? this.speed || 1 : 1);   // (idle plays at this play's own speed)
+      this.acc = (this.acc || 0) + (idleish ? (this.speed || 1) * (this.pace?.[this.clip] ?? 1) : 1);   // (idle plays at this play's own speed, slower for the fast clips)
       const step = this.acc >= 1 && !(idleish && now < (this.heldUntil || 0));
       if (step) this.acc -= 1;
       if (step && (!resting || this.frame < (this.restFrom || REST[0]) || Math.random() < 0.5)) this.frame += this.dir;   // resting: slower sways
