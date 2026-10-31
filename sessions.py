@@ -131,7 +131,10 @@ UI_PROMPT = (
     "diff), use the yo-claude tools: show_file opens a file in front of them, show_folder opens the files panel at a "
     "folder, show_diff shows what changed in a file, show_panel switches the right-hand panel. Reading a file yourself "
     "shows them nothing. Also use them when seeing it would help, but not for every file you touch. When they ask "
-    "you to do something later or after a restart, queue it with queue_message."
+    "you to do something later or after a restart, queue it with queue_message. When you'd rather the user ran "
+    "something themselves (an install, a deploy, a command that needs their login or a look at its output), use "
+    "type_in_terminal: it opens Yo Claude's terminal pane and types the command at the prompt WITHOUT pressing Enter, "
+    "so they read it and run it. You can't see the terminal's output: ask them to paste it back if you need it."
 )
 CHECKLIST_PROMPT = (   # (with the checklist tool: Options > Tick Lists)
     " When the user should pick several things from a list (which to do, keep, include or fix), use the yo-claude "
@@ -952,6 +955,18 @@ class Session:
         async def show_panel(a):
             return act("panel", tab=a.get("tab", "files"))
 
+        @sdk.tool("type_in_terminal", "Open Yo Claude's terminal pane and type a command (or a few lines) at the prompt for the "
+                  "user to run: it is NEVER executed for them, they read it and press Enter. Folder: where the terminal "
+                  "should be (absolute, or relative to the session folder); omit it for the session folder. Set window to true to use a "
+                  "separate terminal window instead of the built-in pane: the command is put on the clipboard for them to paste.",
+                  {"type": "object", "properties": {
+                      "text": {"type": "string", "description": "The command(s) to put at the prompt"},
+                      "folder": {"type": "string", "description": "Optional folder to run it in"},
+                      "window": {"type": "boolean", "description": "Use an external terminal window (command goes on the clipboard)"}},
+                   "required": ["text"]})
+        async def type_in_terminal(a):
+            return act("terminal", text=str(a.get("text") or ""), path=a.get("folder", ""), window=bool(a.get("window")))
+
         @sdk.tool("checklist", "Give the user a list to tick in Yo Claude's window: each item is a yes (ticked) or a no, "
                   "they can say why for any item, and add a note. Their answers come as their next message, so end your "
                   "reply after calling it. "
@@ -976,7 +991,7 @@ class Session:
             sess.router.send(text, sid=sess.id, queued_by="claude")
             return reply("Queued: it goes after your current reply (and survives a restart).")
 
-        tools = [show_folder, show_file, show_diff, show_panel, queue_message]
+        tools = [show_folder, show_file, show_diff, show_panel, queue_message, type_in_terminal]
         if sess.router.settings.get("checklist_tool", True):
             tools.append(checklist)
         return sdk.create_sdk_mcp_server(UI_SERVER, tools=tools)
@@ -2409,6 +2424,19 @@ class Router:
             self.emit("ui", action="panel", tab=tab)
             return f"Showing the {tab} tab." if tab != "close" else "Closed the panel."
         path = (args.get("path") or "").strip().strip('"')
+        if action == "terminal":
+            text = args.get("text") or ""
+            if not text.strip():
+                return "Nothing to type."
+            folder = None
+            if path:
+                folder = os.path.normpath(path if os.path.isabs(path) or not s.cwd else os.path.join(s.cwd, path))
+                if not os.path.isdir(folder):
+                    return f"Not a folder: {folder}"
+            self.emit("ui", action="terminal", text=text[:8000], folder=folder or s.cwd, window=bool(args.get("window")))
+            if args.get("window"):
+                return "Opened a terminal window in the folder and put the command on the clipboard. It has NOT been run."
+            return "Typed it at the terminal's prompt. It has NOT been run: the user reads it and presses Enter."
         full = os.path.normpath(path if os.path.isabs(path) or not s.cwd else os.path.join(s.cwd, path))
         if not os.path.exists(full):
             return f"Not found: {full}"

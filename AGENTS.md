@@ -25,6 +25,7 @@ https://github.com/SheldonNeilson/Yo-Claude (private); their installs update fro
 | `sessions.py` | Claude sessions on the Agent SDK: router, transcript items, approvals, background tasks |
 | `yo_claude.py` | voice engine: wake word (Vosk), speech detection (Silero), Whisper, voice (edge-tts) |
 | `workspace.py` | files, git, per-session change snapshots |
+| `terminal.py` | shells on a pseudo-console (pywinpty) for the terminal pane (`ui/terminal.js`, xterm.js in `ui/vendor/`) |
 | `media.py`, `taskbar.py`, `icons.py` | local file links, taskbar state, mascot icons |
 | `ui/` | the window and the floating bar (plain HTML/JS, no build step) |
 | `pc_control/` | bundled screen-control MCP server (own environment) |

@@ -82,6 +82,11 @@ The first time, a welcome tour explains everything and checks how well it hears 
   typing are fixed straight away, the rest at a short pause. **Typing prediction** shows the next word or three in
   grey after the cursor as you type (Tab takes them). A grey **suggested next message** fills the empty box (Tab takes
   it), even while Claude is still working.
+- **Terminal**: Ctrl+` (or the [term] button) opens a real terminal (PowerShell) between the chat and the message box,
+  with tabs; drag its top edge to resize. Right-click any file or folder (files, changes and media tabs, links in the chat,
+  the sessions list) for **open in terminal** (a file opens its folder), plus cd there in the current terminal, paste its
+  path, run a script, or open an external terminal window. Code blocks and selections in the chat can be typed into it
+  (never run: you press Enter). Claude can do the same with its `type_in_terminal` tool when it'd rather you ran something.
 - **Search** on every tab of the right-hand panel (Ctrl+Shift+F): files searches the whole folder by name, or inside
   the files with "in files"; changes, git, tasks and media filter their lists.
 - **File editor** (open a text file, ✎ edit): colour for common languages and file types, line numbers (in view too),

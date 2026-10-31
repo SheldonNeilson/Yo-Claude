@@ -791,3 +791,21 @@ button { white-space: nowrap; }
 .ce-ta.tidied { box-shadow: inset 0 0 0 1px var(--amber); }
 .ce-probe { position: absolute; visibility: hidden; white-space: pre; font: inherit; }
 .ce-status { padding: 2px 8px; border: 1px solid var(--line); border-top: 0; background: #0e0d0c; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* the terminal pane (terminal.js), between the chat and the message box */
+#term { position: relative; flex: none; display: flex; flex-direction: column; border-top: 2px solid var(--line2); background: var(--bg); }
+#termGrip { position: absolute; top: -6px; left: 0; right: 0; height: 9px; cursor: ns-resize; z-index: 3; }
+#termGrip:hover, body.resizing #termGrip { background: linear-gradient(0deg, transparent 3px, var(--orange) 3px 5px, transparent 5px); }
+#termHead { flex: none; display: flex; align-items: center; gap: 6px; padding: 1px 8px; background: var(--bg2); border-bottom: 1px dashed var(--line2); font-size: 12px; min-height: 24px; }
+#termHead button { padding: 0 6px; font-size: 12px; }
+#termTabs { display: flex; gap: 4px; min-width: 0; overflow: hidden; }
+.term-tab { display: inline-flex; align-items: center; border: 1px solid var(--line2); color: var(--dim); }
+.term-tab.on { border-color: var(--orange); color: var(--orange); }
+.term-tab.dead { opacity: .55; }
+.term-tab button { border: 0; background: none; color: inherit; padding: 0 6px; font: inherit; font-size: 12px; }
+.term-tab .term-name { max-width: 18ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.term-tab .term-x { color: var(--faint); padding: 0 5px 0 0; } .term-tab .term-x:hover { color: var(--red); }
+#termBody { position: relative; flex: 1; min-height: 0; }
+.term-screen { position: absolute; inset: 4px 4px 0 8px; }
+#termBtn.on { color: var(--orange); }
+#term .xterm-viewport { background: transparent !important; }

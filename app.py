@@ -31,6 +31,7 @@ import media
 import openwith
 import sessions
 import taskbar
+import terminal
 import workspace
 import yo_claude
 from sessions import Router, app_name, same_folder
@@ -92,6 +93,7 @@ class App:
         self.bus = queue.Queue()
         self.commands = queue.Queue()
         self.router = Router(self.settings, lambda kind, data: self.bus.put((kind, data)))
+        self.terms = terminal.Terminals(lambda kind, data: self.bus.put((kind, data)), self.settings)
         self.media = media.MediaServer()
         self.voice_state, self.voice_text, self.voice_hold = "starting", "", 0.0
         self.work_state = "idle"
@@ -570,6 +572,7 @@ class App:
         self.quitting = True
         self.commands.put("quit")
         self.router.shutdown()   # leaves sessions with background tasks running; picked up again next start
+        self.terms.close_all()
         try:
             os.remove(os.path.join(DATA_DIR, "status.json"))
         except OSError:
@@ -1149,6 +1152,66 @@ class Api:
 
     def reveal(self, rel="", root=None):
         return self._ws(workspace.reveal, rel, root=root)
+
+    # --- terminals (terminal.py; the pane is ui/terminal.js) ---
+    def _term_folder(self, path, cwd):
+        """The folder a terminal should work in for `path`: the folder itself, or the folder holding the file.
+        No path: the session's folder, else the home folder."""
+        if not path:
+            f = cwd or self._cwd()
+            return f if f and os.path.isdir(f) else os.path.expanduser("~")
+        full = self._resolve(path, cwd)
+        if not full:
+            return None
+        return full if os.path.isdir(full) else os.path.dirname(full)
+
+    def term_open(self, path=None, cwd=None, cols=100, rows=14):
+        """A new terminal in that folder (or the folder holding that file). Returns its info or {"error"}."""
+        folder = self._term_folder(path, cwd)
+        if not folder:
+            return {"error": missing(path, cwd)}
+        return self._app.terms.open(folder, cols=cols, rows=rows)
+
+    def term_cd(self, tid, path, cwd=None):
+        folder = self._term_folder(path, cwd)
+        if not folder:
+            return missing(path, cwd)
+        return None if self._app.terms.cd(tid, folder) else "That terminal has closed."
+
+    def term_type_path(self, tid, path, cwd=None):
+        full = self._resolve(path, cwd)
+        if not full:
+            return missing(path, cwd)
+        return None if self._app.terms.type_path(tid, full) else "That terminal has closed."
+
+    def term_run(self, tid, path, cwd=None):
+        full = self._resolve(path, cwd)
+        if not full or not os.path.isfile(full):
+            return missing(path, cwd)
+        return self._app.terms.run_file(tid, full)
+
+    def term_write(self, tid, data):
+        self._app.terms.write(tid, data)
+
+    def term_resize(self, tid, rows, cols):
+        self._app.terms.resize(tid, rows, cols)
+
+    def term_close(self, tid):
+        self._app.terms.close(tid)
+
+    def term_list(self):
+        return {"ok": self._app.terms.available(), "terms": self._app.terms.list()}
+
+    def open_terminal_external(self, path=None, cwd=None):
+        """The folder (or the file's folder) in a separate terminal window."""
+        folder = self._term_folder(path, cwd)
+        if not folder:
+            return missing(path, cwd)
+        try:
+            terminal.open_external(folder)
+            return None
+        except OSError as e:
+            return f"Couldn't open a terminal window: {e}"
 
     # file explorer (the files tab): each returns {"path"/"paths": ..., "error": plain-English message}
     def new_file(self, folder, name, root=None):

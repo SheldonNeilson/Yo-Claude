@@ -8,6 +8,7 @@ pywin32==312
 comtypes==1.4.17
 numpy==2.5.4
 pvrecorder==1.2.7
+pywinpty==3.1.2
 vosk==0.3.45
 faster-whisper==1.2.1
 ctranslate2==4.8.3

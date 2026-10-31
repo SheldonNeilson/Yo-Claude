@@ -208,7 +208,7 @@ window.gallery = {
     if (e.kind === "dir") {
       ev.preventDefault(); ev.stopPropagation();
       return showMenu(ev, [...here, ["open in explorer", () => api().open_path(e.path, "open")], ["open in vs code", () => api().open_path(e.path, "code")],
-        ["copy path", () => copyText(e.path, "path copied")]]);
+        ...termMenuItems(e.path, null, "dir"), ["copy path", () => copyText(e.path, "path copied")]]);
     }
     showFileMenu(ev, e.path, S.active?.cwd, here);
   },

@@ -6,6 +6,7 @@
 <link rel="stylesheet" href="vendor/hl-dark.min.css">
 <link rel="stylesheet" href="app.css">
 <link rel="stylesheet" href="invaders.css">
+<link rel="stylesheet" href="vendor/xterm.css">
 </head>
 <body>
 <div id="app">
@@ -75,6 +76,17 @@
       <div id="btwLog"></div>
       <input id="btwInput" placeholder="&gt; ask a side question…  (Enter asks · Esc closes)">
     </div>
+    <div id="term" class="hidden">
+      <div id="termGrip" title="Drag to resize · double-click to reset"></div>
+      <div id="termHead">
+        <span id="termTabs"></span>
+        <button id="termNew" title="A new terminal in this session's folder">[+]</button>
+        <span class="spacer"></span>
+        <button id="termExt" title="The session's folder in a separate terminal window">[window]</button>
+        <button id="termHide" title="Hide the terminal (Ctrl+`). Its shells keep running.">[✕]</button>
+      </div>
+      <div id="termBody"></div>
+    </div>
     <div id="composer">
       <div id="chips"></div>
       <div id="atlist" class="menu hidden"></div>
@@ -85,6 +97,7 @@
       <div class="composer-actions">
         <button id="talkBtn" title="Talk instead of typing">[talk]</button>
         <button id="btwBtn" title="btw: ask a side question about this conversation without adding it to the conversation (or type /btw …)">[btw]</button>
+        <button id="termBtn" title="Terminal (Ctrl+`)">[term]</button>
         <button id="invadersBtn" title="Bug Invaders: play while you wait (Esc hides it)">[👾]</button>
         <div id="inbar" class="minibar" title="What Yo Claude is doing">
           <canvas class="mb-m" width="40" height="26" title="Talk"></canvas>
@@ -104,6 +117,9 @@
 <div id="modal" class="hidden"></div>
 <script src="vendor/marked.min.js"></script>
 <script src="vendor/highlight.min.js"></script>
+<script src="vendor/xterm.js"></script>
+<script src="vendor/xterm-addon-fit.js"></script>
+<script src="vendor/xterm-addon-web-links.js"></script>
 <script src="name.js"></script>
 <script src="mascot.js"></script>
 <script src="minibar.js"></script>
@@ -114,6 +130,7 @@
 <script src="textview.js"></script>
 <script src="panel.js"></script>
 <script src="gallery.js"></script>
+<script src="terminal.js"></script>
 <script src="tasks.js"></script>
 <script src="plan.js"></script>
 <script src="btw.js"></script>

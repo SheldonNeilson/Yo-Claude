@@ -2,7 +2,7 @@
 "use strict";
 const $ = (s) => document.querySelector(s);
 // Calls that open things answer with a message when they can't (file gone, no app for it...): show it.
-const REPORTS_ERRORS = new Set(["open_path", "open_with", "pop_out", "reveal", "open_in_editor"]);
+const REPORTS_ERRORS = new Set(["open_path", "open_with", "pop_out", "reveal", "open_in_editor", "term_cd", "term_type_path", "term_run", "open_terminal_external"]);
 const api = () => new Proxy(window.pywebview.api, {
   get: (t, k) => !REPORTS_ERRORS.has(k) ? t[k] : (...a) => t[k](...a).then((r) => {
     const err = typeof r === "string" ? r : r?.error;
@@ -74,6 +74,8 @@ window.app = {
 };
 function handle(e) {
   switch (e.kind) {
+    case "term_out": term.out(e.id, e.data); break;
+    case "term_exit": term.exited(e.id, e.code); break;
     case "item":
       if (S.active && e.session === S.active.id) {
         S.items[e.item.i] = e.item; renderItem(e.item); gallery.touch();
@@ -360,6 +362,7 @@ function folderMenu(e, n) {
     [n.cwd ? "new session here" : "new chat", () => api().new_session(n.cwd)],
     n.cwd ? ["open in vs code", () => api().open_path(n.cwd, "code")] : null,
     n.cwd ? ["show in explorer", () => api().open_path(n.cwd, "open")] : null,
+    ...(n.cwd ? termMenuItems(n.cwd, null, "dir") : []),
     n.cwd ? "-" : null,
     n.cwd ? ["remove from list (keeps files and sessions)", () => api().remove_folder(n.cwd)] : null,
   ].filter(Boolean));
@@ -1345,6 +1348,7 @@ function fileMenuItems(path, cwd, apps) {
     ["preview", () => viewFile(path, cwd)],
     ["pop out in its own window", () => api().pop_out(path, cwd)],
     ["show in explorer", () => api().open_path(path, "reveal", cwd)],
+    ...termMenuItems(path, cwd, "file"),
     ["copy path", async () => { const m = await api().media(path, cwd); copyText(m.path || path, "path copied"); }],
     "-", ["sub:open with"], ...openWith,
     ["  choose another app…", () => api().open_path(path, "openwith", cwd)],
@@ -1401,7 +1405,8 @@ function mediaUnder(node, it) {
         if (m.kind !== "dir") return showFileMenu(e, m.path, cwd);
         e.preventDefault(); e.stopPropagation();
         showMenu(e, [["sub:" + m.name], ["open in explorer", () => api().open_path(m.path, "open")],
-          ["open in vs code", () => api().open_path(m.path, "code")], ["copy path", () => copyText(m.path, "path copied")]]);
+          ["open in vs code", () => api().open_path(m.path, "code")], ...termMenuItems(m.path, null, "dir"),
+          ["copy path", () => copyText(m.path, "path copied")]]);
       };
     }
     const seen = new Set(), media = list.filter((m) => !["dir", "file"].includes(m.kind) && !seen.has(m.path) && seen.add(m.path));
@@ -1485,6 +1490,7 @@ async function showForClaude(e) {
     return viewFile(e.path, S.active?.cwd);
   }
   if (e.action === "diff") { open("changes"); await panel.load(); return showDiff(e.rel); }
+  if (e.action === "terminal") return e.window ? (copyText(e.text, "command copied: paste it in the terminal window"), term.external(e.folder, null)) : term.prefill(e.text, e.folder);
 }
 
 function showPicture(src, title) {   // a screenshot or picture from a tool result, big

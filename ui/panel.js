@@ -189,7 +189,8 @@ ${elsewhere} running in other sessions` : ""}">` +
     if (!pc) {
       const code = el("button", "", "vs code"); code.onclick = () => api().open_in_editor("", this.cwd);
       const rev = el("button", "", "explorer"); rev.onclick = () => api().reveal("", this.cwd);
-      head.append(code, rev);
+      const trm = el("button", "", "terminal"); trm.title = "Open this folder in a terminal"; trm.onclick = () => term.openAt(this.cwd, null);
+      head.append(code, rev, trm);
     }
     body.appendChild(head);
     const tools = el("div", "phead ftools");
@@ -435,9 +436,9 @@ ${elsewhere} running in other sessions` : ""}">` +
       ["copy paths", () => this.copyPaths(items, false)], ["copy relative paths", () => this.copyPaths(items, true)]]);
     if (!e.dir) return showFileMenu(ev, e.path, this.cwd, [attach, ["open in vs code", () => api().open_in_editor(e.path, this.cwd)], "-",
       ...edit, "-", ...newHere, relPath, "-"]);
-    if (this.cwd === "::pc") return showMenu(ev, [["sub:" + e.name], ["open", () => this.goTo(e.path)], ctx]);
+    if (this.cwd === "::pc") return showMenu(ev, [["sub:" + e.name], ["open", () => this.goTo(e.path)], ctx, ...termMenuItems(e.path, null, "dir")]);
     showMenu(ev, [["sub:" + e.name], ["open here", () => this.goTo(this.fullPath(e.path))], ctx, "-", attach, ["open in vs code", () => api().open_in_editor(e.path, this.cwd)],
-      ["show in explorer", () => api().reveal(e.path, this.cwd)], "-", ...newHere, "-", ...edit, "-",
+      ["show in explorer", () => api().reveal(e.path, this.cwd)], ...termMenuItems(e.path, this.cwd, "dir"), "-", ...newHere, "-", ...edit, "-",
       ["copy path", () => this.copyPaths(items, false)], relPath]);
   },
   async addContext(path) {   // the open session may also read and write this folder (from your next message)
@@ -451,6 +452,7 @@ ${elsewhere} running in other sessions` : ""}">` +
       ["new file…", () => this.newItem(false, "")], ["new folder…", () => this.newItem(true, "")],
       ["paste", () => this.paste(""), { kbd: "Ctrl+V", disabled: !this.clipHere() }], "-",
       ["open in vs code", () => api().open_in_editor("", this.cwd)], ["show in explorer", () => api().reveal("", this.cwd)],
+      ...termMenuItems(this.cwd, null, "dir"),
       ["copy path", () => copyText(this.fullPath(""), "path copied")], ["refresh", () => this.load()]]);
   },
   treeKey(ev) {
@@ -502,6 +504,7 @@ ${elsewhere} running in other sessions` : ""}">` +
         (c.repo ? `<span class="spacer"></span><span class="add">+${f.add}</span>&nbsp;<span class="del">−${f.del}</span>` : "");
       row.title = f.old ? `renamed from ${f.old}` : f.path;
       row.onclick = () => c.repo ? showDiff(f.path) : preview(f.path);
+      row.oncontextmenu = (ev) => showFileMenu(ev, f.path, S.active?.cwd, [["open", () => preview(f.path)], ...(c.repo ? [["show the changes", () => showDiff(f.path)]] : []), "-"]);
       list.appendChild(row);
     }
     body.appendChild(list);

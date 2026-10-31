@@ -62,6 +62,7 @@ const MENUS = {
     ["Sessions list", () => $("#sideBtn").click(), { checked: panes.side(), kbd: "Ctrl+Shift+B" }],
     ["Files, changes & git panel", () => $("#panelBtn").click(), { checked: $("#app").classList.contains("with-panel"), kbd: "Ctrl+B" }],
     ["Just the chat (hide both)", () => panes.focus(), { checked: !panes.side() && !panes.files() }],
+    ["Terminal", () => term.toggle(), { checked: term.shown(), kbd: "Ctrl+`" }],
     ["Expand all folders", () => expandAll(true)],
     ["Collapse all folders", () => expandAll(false)],
     "-",
@@ -240,8 +241,9 @@ $("#transcript").addEventListener("contextmenu", (e) => {
     items.push(["Comment on this…", () => commentBox(quote, { x: e.clientX, y: e.clientY }, "", (t) => composer.addComment(quote, t))]);
     items.push("-");
   }
-  if (sel) items.push(["Copy", () => copyText(sel)]);
-  if (pre) items.push(["Copy code", () => copyText(pre.querySelector("code")?.textContent ?? pre.textContent, "code copied")]);
+  if (sel) items.push(["Copy", () => copyText(sel)], ["Type selection into the terminal (not run)", () => term.paste(sel)]);
+  if (pre) items.push(["Copy code", () => copyText(pre.querySelector("code")?.textContent ?? pre.textContent, "code copied")],
+    ["Type code into the terminal (not run)", () => term.paste((pre.querySelector("code")?.textContent ?? pre.textContent).replace(/\n$/, ""))]);
   if (raw) items.push(["Copy message", () => copyText(raw, "message copied")]);
   items.push(["Copy whole conversation", () => copyText(conversationText(), "conversation copied")]);
   e.preventDefault();
@@ -253,7 +255,8 @@ document.addEventListener("keydown", (e) => {
   const k = e.key.toLowerCase();
   if (e.ctrlKey && !e.altKey) {
     if (k === "n") { e.preventDefault(); return e.shiftKey ? api().new_session(null) : api().new_session(); }
-    if (k === "f") { e.preventDefault(); return $("#search").focus(); }
+    if (e.key === "`") { e.preventDefault(); return term.toggle(); }
+    if (k === "f" && !e.shiftKey) { e.preventDefault(); return $("#search").focus(); }
     if (k === "l") { e.preventDefault(); $("#folderPath").focus(); return $("#folderPath").select(); }
     if (k === "b") { e.preventDefault(); return $(e.shiftKey ? "#sideBtn" : "#panelBtn").click(); }
     if (k === "f" && e.shiftKey) {   // search in the right-hand panel (files, changes, git, tasks or media: whichever tab is open)
