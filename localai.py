@@ -25,7 +25,7 @@ SUGGESTED = [
     {"id": "gemma3-1b", "label": "Gemma 3 · 1B (tiny)", "backend": "ollama", "model": "gemma3:1b", "size": "about 0.8 GB"},
 ]
 NO_WINDOW = 0x08000000
-DETACHED = 0x00000008
+NEW_GROUP = 0x00000200
 
 
 def _norm(name):
@@ -59,7 +59,8 @@ def ensure_ollama(url=OLLAMA_URL, wait=20):
     if not exe or url != OLLAMA_URL:
         return False
     try:
-        subprocess.Popen([exe, "serve"], creationflags=DETACHED | NO_WINDOW, stdin=subprocess.DEVNULL,
+        # (hidden console only: with DETACHED_PROCESS Ollama's model-runner children each open a console window of their own)
+        subprocess.Popen([exe, "serve"], creationflags=NEW_GROUP | NO_WINDOW, stdin=subprocess.DEVNULL,
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     except Exception as e:
         log.info("Couldn't start Ollama: %s", e)
@@ -72,13 +73,40 @@ def ensure_ollama(url=OLLAMA_URL, wait=20):
     return False
 
 
+def on_disk():
+    """{normalised model name: size} read from Ollama's own model folder, so a model you downloaded is known even while
+    Ollama isn't running (it isn't started until a model is needed)."""
+    root = os.environ.get("OLLAMA_MODELS") or os.path.join(os.path.expanduser("~"), ".ollama", "models")
+    lib = os.path.join(root, "manifests")
+    out = {}
+    try:
+        for dp, _, files in os.walk(lib):
+            for f in files:
+                rel = os.path.relpath(os.path.join(dp, f), lib).replace("\\", "/").split("/")   # host/namespace/model/tag
+                if len(rel) < 4:
+                    continue
+                host, path = rel[0], rel[1:-1]
+                name = "/".join(path[1:] if (host == "registry.ollama.ai" and path[0] == "library") else rel[:-1] if host != "registry.ollama.ai" else path)
+                size = 0
+                try:
+                    with open(os.path.join(dp, f), encoding="utf-8") as fh:
+                        size = sum(layer.get("size", 0) for layer in json.load(fh).get("layers", []))
+                except (OSError, ValueError):
+                    pass
+                out[_norm(f"{name}:{rel[-1]}")] = size
+    except OSError:
+        pass
+    return out
+
+
 def installed(url=OLLAMA_URL):
-    """{normalised model name: size in bytes} of what Ollama has downloaded ({} if it isn't running)."""
+    """{normalised model name: size in bytes} of what Ollama has downloaded: asked of the server, or when it isn't
+    running, read from its model folder."""
     try:
         r = requests.get(url + "/api/tags", timeout=2)
         return {_norm(m["name"]): m.get("size", 0) for m in r.json().get("models", [])}
     except Exception:
-        return {}
+        return on_disk() if url == OLLAMA_URL else {}
 
 
 def catalogue(settings):
