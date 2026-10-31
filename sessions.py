@@ -583,6 +583,8 @@ async def predict_text(text, context="", model=None, kind="chat", name="", profi
     partial = "" if text[-1:].isspace() else re.split(r"\s", text)[-1]
     context = (context or "").strip()
     context = context if len(context) <= 900 else "…" + context[-900:]
+    if model and len(profile) > 1500:
+        profile = profile[:1500]   # (a small local model reads less, and answers sooner)
     prompt = (f"Background:\n{profile}\n\n" if profile else "") + \
         (f"The assistant's last message to the user (background only):\n{context}\n\n" if context else "") + \
         f"The USER is typing this message to the assistant. Continue it:\n<typed>{text[:len(text) - len(partial)]}</typed>" + \
