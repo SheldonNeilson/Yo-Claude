@@ -160,7 +160,15 @@ window.gallery = {
     const k = at.indexOf(this.lastJump?.key === e.key ? this.lastJump.i : -1);
     const i = this.lastJump?.key === e.key && k > 0 ? at[k - 1] : at[at.length - 1];
     this.lastJump = { key: e.key, i };
-    const node = transcript.els.get(i);
+    let node = transcript.els.get(i);
+    if (!node) {   // a step Claude took (a file it wrote, a screenshot): inside a group of steps, folded away until opened
+      const g = transcript.groupOf.get(i);
+      if (g) {
+        if (!g.open) { g.open = true; g.steps.classList.remove("hidden"); transcript.renderHead(g); }
+        node = g.stepEls.get(i);
+        if (node && node.tagName === "DETAILS") node.open = true;
+      }
+    }
     if (!node) { toast("That part of the chat isn't shown."); return; }
     for (let d = node.parentElement; d; d = d.parentElement) if (d.tagName === "DETAILS") d.open = true;
     follow.set("chat", false);   // (so the chat stays where it was put)
