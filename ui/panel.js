@@ -90,7 +90,7 @@ ${elsewhere} running in other sessions` : ""}">` +
   },
   render() {
     const p = $("#panel");
-    const keepTop = this.tab === "files" && this.renderedTab === "files" ? $("#pbody")?.scrollTop || 0 : 0;
+    const keepTop = (this.tab === "files" || this.tab === "media") && this.renderedTab === this.tab ? $("#pbody")?.scrollTop || 0 : 0;
     this.renderedTab = this.tab;
     p.innerHTML = `<div class="ptabs"><span class="tabs"></span>
       <span class="spacer"></span><button data-act="refresh" title="Refresh">⟳</button></div><div id="pbody"></div>`;
@@ -98,7 +98,7 @@ ${elsewhere} running in other sessions` : ""}">` +
     p.querySelector("[data-act=refresh]").onclick = () => this.tab === "tasks" ? tasks.poll() : this.tab === "media" ? gallery.refresh(true) : this.load();
     const body = $("#pbody");
     if (this.tab === "tasks") return tasks.render();
-    if (this.tab === "media") return gallery.render(body);   // (works without a folder: it's about the chat)
+    if (this.tab === "media") { gallery.render(body); if (keepTop) body.scrollTop = keepTop; return; }   // (works without a folder: it's about the chat)
     if (!this.cwd) { body.innerHTML = `<div class="pempty">No folder.<br>Pick one at the top left to see files, changes and git.</div>`; return; }
     ({ files: () => this.renderFiles(body), changes: () => this.renderChanges(body), git: () => this.renderGit(body) })[this.tab]();
     if (keepTop) body.scrollTop = keepTop;

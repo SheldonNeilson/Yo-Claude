@@ -58,9 +58,11 @@ window.gallery = {
         if (old) { old.mentions.push(...e.mentions); old.last = Math.max(old.last, e.last); old.lastTs = e.lastTs || old.lastTs; continue; }
         const n = { ...e, ...st, token: e.token }; byPath.set(st.path, n); out.push(n);
       }
-      this.entries = out; this.count = out.length; this.session = S.active?.id;
+      const sig = out.map((e) => `${e.key}|${e.mentions.length}|${e.mtime}`).join(",");
+      this.same = sig === this.sig && this.session === S.active?.id;   // (nothing new: leave the list as it is)
+      this.sig = sig; this.entries = out; this.count = out.length; this.session = S.active?.id;
     } finally { this.busy = false; }
-    if (panel.tab === "media" && panel.shown()) this.render($("#pbody"));
+    if (panel.tab === "media" && panel.shown() && !(this.same && this.list?.isConnected)) this.render($("#pbody"));
     panel.renderTabs();
   },
   touch() {   // the chat changed: look again soon
@@ -82,6 +84,7 @@ window.gallery = {
   },
   render(body) {
     if (!body) return;
+    const top = body.scrollTop;   // (a re-render must not throw you back to the top)
     body.innerHTML = "";
     if (this.session !== S.active?.id) { body.appendChild(el("div", "pempty", "Looking through the chat…")); this.refresh(); return; }
     const head = el("div", "phead gfilters");
@@ -117,6 +120,7 @@ window.gallery = {
     this.list = el("div", "glist");
     body.appendChild(this.list);
     this.paintList();
+    body.scrollTop = top;
   },
   paintList() {
     const list = this.list;
