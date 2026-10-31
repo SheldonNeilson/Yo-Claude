@@ -106,6 +106,7 @@ const MENUS = {
       [`Say Hello After “Yo ${Who()}” (Else a Beep)`, () => toggleSetting("greeting", false), { checked: setting("greeting", false) }],
       ["Say when a session is done", () => toggleSetting("notify_done", true), { checked: setting("notify_done", true) }],
       ["Say a Quick “On It” During Long Waits", () => toggleSetting("voice_ack", true), { checked: setting("voice_ack", true) }],
+      ["How long a pause ends what I say", null, { sub: [1.5, 2.5, 4, 6].map((v) => [`${v} seconds`, () => api().set_setting("pause_s", v), { checked: (setting("pause_s", 2.5)) === v }])}],
       ["More accurate speech recognition (slower)", () => toggleSetting("accurate_speech", false), { checked: setting("accurate_speech", false) }],
       ["PC control (screen, keyboard, mouse)", () => toggleSetting("pc_control", false), { checked: setting("pc_control", false) }],
     ] }],

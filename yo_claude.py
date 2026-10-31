@@ -48,8 +48,8 @@ CONVERSATION_WINDOW_S = 300  # a voice conversation older than this starts a new
 FOLLOWUP_LISTEN_S = 6        # after answering, listen this long for a follow-up without the wake word
 APPROVAL_LISTEN_S = 8
 SPEECH_START_TIMEOUT_S = 7
-END_SILENCE_S = 1.5          # pause that ends your request
-MAX_UTTERANCE_S = 30
+END_SILENCE_S = 2.5          # pause that ends your request (Voice > More > How long a pause ends what I say)
+MAX_UTTERANCE_S = 60
 VAD_ON, VAD_OFF = 0.5, 0.35  # Silero speech probability thresholds
 NEURAL_VOICE = "en-US-AvaNeural"   # `edge-tts --list-voices` for others
 # each character's voice: (voice, pitch). Claudia (female) is Ava; Claude (male, the default) a deep, steady voice
@@ -212,8 +212,8 @@ class Utterance:
     """Collects one spoken request: starts when the VAD hears speech, ends after END_SILENCE_S of non-speech.
     It keeps a second from before speech was detected, so a soft first word isn't clipped."""
 
-    def __init__(self, start_timeout_s, followup):
-        self.start_timeout_s, self.followup = start_timeout_s, followup
+    def __init__(self, start_timeout_s, followup, end_silence_s=END_SILENCE_S):
+        self.start_timeout_s, self.followup, self.end_silence_s = start_timeout_s, followup, end_silence_s
         self.pre = deque(maxlen=int(FPS * PREROLL_S))
         self.audio, self.on, self.off, self.waited = [], 0, 0, 0
         self.strip_wake = False   # began with the wake word ("yo claude, what's ...") in the same breath
@@ -232,7 +232,7 @@ class Utterance:
             return None
         self.audio.append(frame)
         self.off = self.off + 1 if p < VAD_OFF else 0
-        if self.off >= END_SILENCE_S * FPS or len(self.audio) >= MAX_UTTERANCE_S * FPS:
+        if self.off >= self.end_silence_s * FPS or len(self.audio) >= MAX_UTTERANCE_S * FPS:
             return "done", np.concatenate(self.audio)
         return None
 
@@ -484,7 +484,7 @@ class Assistant:
 
     def listen(self, timeout_s=SPEECH_START_TIMEOUT_S, followup=False, text="", approval=False):
         self.vad.reset()
-        self.utterance = Utterance(timeout_s, followup)
+        self.utterance = Utterance(timeout_s, followup, float(self.settings.get("pause_s") or END_SILENCE_S))
         # what the mic heard since her voice actually stopped (the speaker waits a moment longer before listening):
         # you may already have started talking, so it goes in front of what comes next
         ended = self.speaker.ended()
