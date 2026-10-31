@@ -8,6 +8,8 @@
 "use strict";
 const RAMP = " .:-=+o/*#0@";   // sparse to dense: white on the dark window, so bright = dense
 const AW = 128;                // the analysis grid frames are decoded to (columns): 2 per character across
+// clips that read wrongly when they play at random (a finger to the lips looks like a shush): kept on disk, never played
+const HIDDEN = ["think_tap_lips"];
 const PACE_ABOVE = 1.35;       // a clip peaking this many times above the typical clip's peak speed is slowed to match
 const COLS = 64;               // characters across, whatever the panel's width
 const VIEW = [0, 0, 1, 1];     // the part of the clip shown: left, top, right, bottom (fractions; see frameView)
@@ -113,7 +115,11 @@ const avatar = {
   // the character's clips: Claudia's (female) in avatar/, Claude's (male, the default) in avatar/male/
   base() { const c = S.settings?.character || "male"; return c === "female" ? "avatar/" : `avatar/${c}/`; },
   async manifest() {   // avatar/clips.json: {fps, clips: {name: {frames, stamp}}} (or just a frame count, as it was)
-    try { const m = await (await fetch(this.base() + "clips.json", { cache: "no-store" })).json(); return m?.clips ? m : null; } catch (_) { return null; }
+    try {
+      const m = await (await fetch(this.base() + "clips.json", { cache: "no-store" })).json();
+      if (m?.clips) for (const n of HIDDEN) delete m.clips[n];
+      return m?.clips ? m : null;
+    } catch (_) { return null; }
   },
   async load(name, v, into = this.clips) {
     const count = typeof v === "number" ? v : v.frames;
