@@ -399,6 +399,21 @@ function wireDrop(node, g) {
     api().set_group(s.id, s.cwd, g);
   });
 }
+const sessionsOf = (g) => allSessions().filter((s) => s.group === g);
+// every session of a group to the (restorable) trash in one go; the ones that can't go (still working, or changed in the last
+// minute) stay, and are listed
+function trashGroup(g) {
+  const list = sessionsOf(g);
+  confirmBox(`Move all ${list.length} session${list.length === 1 ? "" : "s"} of “${g}” to the trash? You can restore them from the trash. The group itself stays${g in S.groupCwd ? ", and so do the folder's files" : ""}.`, async () => {
+    const failed = await api().clean_up(list.map((s) => ({ id: s.id, cwd: s.cwd })));
+    if (failed && failed.length) {
+      const why = failed.map((f) => `• ${findSession(f.id)?.title || f.id}: ${f.error}`).join("
+");
+      alertBox(`${list.length - failed.length} moved to the trash. ${failed.length} could not be:
+${why}`);
+    } else toast(`${list.length} moved to the trash`);
+  });
+}
 function groupMenu(e, g) {
   const focused = S.settings.group_focus === g, i = S.groups.indexOf(g), home = g in S.groupCwd ? S.groupCwd[g] : null;
   showMenu(e, [
@@ -413,6 +428,7 @@ function groupMenu(e, g) {
     ["move up", () => api().move_group(g, -1), { disabled: i <= 0 }],
     ["move down", () => api().move_group(g, 1), { disabled: i >= S.groups.length - 1 }],
     "-",
+    [`move all ${sessionsOf(g).length} sessions to the trash…`, () => trashGroup(g), { disabled: !sessionsOf(g).length }],
     ["remove group" + (home ? " (and the folder from the list)" : ""), () => confirmBox(home
       ? `Remove “${g}” and its folder from the list? The folder's files and sessions are not touched; add the folder again any time.`
       : `Remove the group “${g}”? Its sessions are not touched: they go back to the group of their own folder.`,
