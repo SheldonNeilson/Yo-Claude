@@ -497,6 +497,29 @@ def clean_prediction(text, out):
     return out
 
 
+ACK_DELAY_S = 2.0   # a spoken request still being worked on after this long gets a quick acknowledgement
+ACKS = ["Okay, give me a moment on that.", "Right, let me think about that properly.", "Good one. Let me dig into that.",
+        "On it. This might take a minute.", "Got it. Working on it now."]
+WARM_ACK = WarmHaiku()
+
+
+async def ack_line(asked, settings):
+    """One very short spoken line showing she understood what was asked and is starting on it (never an answer)."""
+    key = persona(settings)
+    if getattr(WARM_ACK, "key", None) != key:
+        await WARM_ACK.close()
+        WARM_ACK.key = key
+    prompt = ("The user just asked this out loud, and Claude is about to spend a while on it:\n<asked>" + asked[:600] +
+              "</asked>\nWrite ONE very short spoken line (at most 14 words) that shows you understood what they asked and "
+              "that you're starting on it, in her voice. Don't answer it, don't promise results, no markdown. Reply with "
+              "the line only.")
+    opts = sdk.ClaudeAgentOptions(model=VOICE_NOTE_MODEL, tools=[], cwd=CHAT_DIR, setting_sources=["project"], max_turns=1,
+                                  thinking={"type": "disabled"}, extra_args={"no-session-persistence": None},
+                                  system_prompt="You write very short spoken lines for a voice assistant. " + key)
+    out = await WARM_ACK.ask(prompt, opts)
+    return " ".join(out.split()).strip(' "')[:140]
+
+
 WARM_CODE = WarmHaiku()
 WARM_CODE.FRESH_AFTER = 20
 CODE_SYSTEM = ("You complete code and text in a file editor. You get the file's name and the text before the cursor in "
@@ -1356,6 +1379,23 @@ class Session:
                    for t in self.running_tasks()]
         self.router.meta.update(self.id, tasks=running, tasks_pid=self.pid, cwd=self.cwd)
 
+    async def acknowledge(self, fut, asked):
+        """A spoken request that's still being worked on after ACK_DELAY_S: say a quick line about it now (the reply is
+        only spoken when it's all done, which can be a long silence). Skipped for one-word replies and quick answers."""
+        if len(asked.split()) < 3:
+            return
+        await asyncio.sleep(ACK_DELAY_S)
+        if self.turn_future is not fut or fut.done():
+            return
+        try:
+            line = await asyncio.wait_for(ack_line(asked, self.router.settings), 4)
+        except Exception as e:
+            log.info("No tailored acknowledgement (%s)", e or type(e).__name__)
+            line = ""
+        if self.turn_future is not fut or fut.done():
+            return
+        self.router.emit("ack", session=self.id, text=line or random.choice(ACKS))
+
     async def turn(self, prompt, voice, item=None, text=None):
         """Send one message and stream the reply into the transcript. Returns Claude's final text. `item` is your
         message in the transcript: it's marked queued while an earlier reply runs, and skipped if you cancel it.
@@ -1404,6 +1444,9 @@ class Session:
                     await asyncio.to_thread(self.router.take_baseline, self, "opened" if self.resumed else "start")
                 await self.connect()
                 self.turn_future = asyncio.get_running_loop().create_future()
+                if voice and self.router.settings.get("voice_ack", True):   # (a long wait gets a quick spoken "on it")
+                    asked = (item or {}).get("text") or (text if isinstance(text, str) else prompt if isinstance(prompt, str) else "")
+                    asyncio.ensure_future(self.acknowledge(self.turn_future, re.sub(r"^\[voice\]\s*", "", asked or "")))
                 await self.client.query(prompt)
                 return await self.turn_future or ""
             except Exception as e:

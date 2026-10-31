@@ -295,6 +295,8 @@ class App:
                     self.notify(d["text"])
                 elif kind == "announce":   # a session is done: the voice says its short line when it's free
                     self.commands.put(("announce", d["text"]))
+                elif kind == "ack":   # a long wait on a spoken request: a quick "on it"
+                    self.commands.put(("ack", d["text"]))
                 main_events.append({"kind": kind, **d})
                 if kind in BAR_FEED:
                     bar_events.append(main_events[-1])

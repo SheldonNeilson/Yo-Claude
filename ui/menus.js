@@ -102,6 +102,7 @@ const MENUS = {
     ["More", null, { sub: [
       [`Say Hello After “Yo ${Who()}” (Else a Beep)`, () => toggleSetting("greeting", false), { checked: setting("greeting", false) }],
       ["Say when a session is done", () => toggleSetting("notify_done", true), { checked: setting("notify_done", true) }],
+      ["Say a Quick “On It” During Long Waits", () => toggleSetting("voice_ack", true), { checked: setting("voice_ack", true) }],
       ["More accurate speech recognition (slower)", () => toggleSetting("accurate_speech", false), { checked: setting("accurate_speech", false) }],
       ["PC control (screen, keyboard, mouse)", () => toggleSetting("pc_control", false), { checked: setting("pc_control", false) }],
     ] }],

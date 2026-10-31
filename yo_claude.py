@@ -648,6 +648,10 @@ class Assistant:
                 self.announcements.append(cmd[1])
                 if self.state in (IDLE, PAUSED):   # free now; otherwise it waits until the voice is
                     self.go_idle()
+            elif isinstance(cmd, tuple) and cmd[0] == "ack":   # a spoken request is taking a while: say so, then back to waiting
+                if (self.job is not None and self.state == THINKING and self.approval is None and self.approval_job is None
+                        and self.settings["voice_replies"]):
+                    self.say(cmd[1], lambda _: self.set_state(THINKING))
             elif isinstance(cmd, tuple) and cmd[0] == "alternates":
                 self.wake.set_alternates(cmd[1])
             elif isinstance(cmd, tuple) and cmd[0] == "accurate_speech":
