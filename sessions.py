@@ -29,6 +29,7 @@ from claude_agent_sdk._internal import sessions as sdk_sessions
 
 import localai
 import workspace
+import writing
 
 log = logging.getLogger("yo_claude")
 
@@ -477,14 +478,15 @@ PREDICT_SYSTEM = ("You are the autocomplete in the message box of a chat app. Th
                   "corrections and thoughts, addressed to the assistant (\"can you also...\", \"I think the problem is...\", "
                   "\"let's...\", \"why does...\"). Never write what the assistant would say: no \"I've updated\", \"Sure\", "
                   "\"Here's\", \"Great question\", no explaining or reporting what was done, and never an answer to them. "
-                  "You get what the user has typed so far in <typed> tags, exactly as it is, including any trailing space "
-                  "(and the assistant's last message, only as background for what the user is likely to say about it). "
-                  "Continue their text the way they most likely will: finish the sentence they're in and, when it ends "
-                  "naturally, add the next short sentence too, about 20 words in all at most. Reply with ONLY "
-                  "<next>the continuation</next>: no quotes, no explanation. Spacing is kept exactly as written inside the "
-                  "tags: if their last word is unfinished, start with just its missing letters; if their text already ends "
-                  "with a space, start directly with the next word; if their last word is finished and there is no trailing "
-                  "space, start with ONE space. If nothing sensible comes next, reply <next></next>.")
+                  "You get the message so far in <typed> tags, as complete words. Sometimes the user has also begun the next "
+                  "word and you are told its first letters: then your reply starts with that whole word. Otherwise your reply "
+                  "starts directly with the next word, no leading space. Continue the way they most likely will: finish the "
+                  "sentence they're in and, when it ends naturally, add the next short sentence too, about 20 words in all at "
+                  "most. Reply with ONLY <next>the continuation</next>: no quotes, no explanation. If nothing sensible comes "
+                  "next, reply <next></next>. You also get background: what the project and conversation are about, files in "
+                  "play, and messages this user wrote before. Use it: continue exactly what they are typing about, stay on "
+                  "the project's subject (never wander to an unrelated topic), and prefer the words, phrases and habits of "
+                  "their earlier messages.")
 PREDICT_WORDS, PREDICT_CHARS = 24, 160   # a sentence or so
 
 
@@ -496,12 +498,13 @@ def clean_prediction(text, out):
         out = out.strip()[1:-1]
     if not out.strip() or "�" in out or '"' in out.strip():
         return ""
-    if text[-1:].isspace():
-        out = out.lstrip()
-    else:
-        frag = re.split(r"\s", text)[-1]
-        if frag and not out[:1].isspace() and out.lower().startswith(frag.lower()):
-            out = out[len(frag):]   # (it gave the whole word, not just the rest)
+    partial = "" if (not text or text[-1].isspace()) else re.split(r"\s", text)[-1]   # the word being typed, if any
+    if not partial:
+        out = out.lstrip()                       # (a space is already there)
+    elif out.lstrip().lower().startswith(partial.lower()):
+        out = out.lstrip()[len(partial):]        # (it gave the whole word, as asked: only the rest is new)
+    elif not out[:1].isspace():
+        out = " " + out                          # (it carried on after the word instead: a new word, so a space)
     lead = " " if out[:1].isspace() else ""
     words = out.split()[:PREDICT_WORDS]
     out = lead + " ".join(words)
@@ -554,7 +557,7 @@ def clean_code_prediction(text, out):
     return out[:80] if out.strip() else ""
 
 
-async def predict_text(text, context="", model=None, kind="chat", name=""):
+async def predict_text(text, context="", model=None, kind="chat", name="", profile=""):
     """What you're likely to type next after `text`: 1 to 3 words to show grey after the cursor (Tab takes them), from
     Haiku (a warm session) or a local model. kind "code" (the file editor, with the file's `name`) offers the rest of the
     line instead. "" when there's nothing to offer or the call fails."""
@@ -577,10 +580,13 @@ async def predict_text(text, context="", model=None, kind="chat", name=""):
         return clean_code_prediction(text, out)
     if len(text.strip()) < 2 or text.lstrip().startswith(("/", "@")):
         return ""
+    partial = "" if text[-1:].isspace() else re.split(r"\s", text)[-1]
     context = (context or "").strip()
-    context = context if len(context) <= 600 else "…" + context[-600:]
-    prompt = (f"For background only, the assistant's last message to the user:\n{context}\n\n" if context else "") + \
-        f"The USER is typing this message to the assistant. Continue it:\n<typed>{text}</typed>"
+    context = context if len(context) <= 900 else "…" + context[-900:]
+    prompt = (f"Background:\n{profile}\n\n" if profile else "") + \
+        (f"The assistant's last message to the user (background only):\n{context}\n\n" if context else "") + \
+        f"The USER is typing this message to the assistant. Continue it:\n<typed>{text[:len(text) - len(partial)]}</typed>" + \
+        (f"\nThe user has begun the next word: \"{partial}\". Your reply starts with that whole word." if partial else "")
     try:
         if model:
             out = await asyncio.to_thread(localai.generate, model, PREDICT_SYSTEM, prompt, 60, 6)
@@ -1821,6 +1827,7 @@ class Router:
         self.settings = settings
         self._emit = emit
         self.meta = Meta()
+        self.writing = writing.Writing()   # how you write, for predictions (writing.py)
         self.live = {}                      # session id -> Session (open in the app this run)
         self.active = None                  # the session voice and the input box talk to
         self.folder = None                  # folder new sessions use; None = chat
@@ -2380,6 +2387,8 @@ class Router:
             s = self.new_session()
         item = None
         if origin == "user":
+            if queued_by != "claude" and self.settings.get("predict_learn", True):
+                self.writing.add(text, s.cwd)   # (kept on this PC: Options > Writing can switch it off or forget it)
             self.remember_last(s)
             item = s.add({"kind": "user", "text": text, "voice": voice, "attachments": list(attachments),
                           **({"queued_by": queued_by} if queued_by else {}),
@@ -2517,7 +2526,47 @@ class Router:
             return self.run(unchanged())
         return self.run(tidy_text(text, context, localai.find(self.settings, "fix_model")))
 
-    def predict(self, text, sid=None, kind="chat", name=""):
+    def prediction_profile(self, s, text, extra=None):
+        """What the model is told besides what you typed: the project and conversation, files in play, and your own earlier
+        messages that fit (the best predictor of how you'll carry on). Plain text, kept short for small local models."""
+        extra = extra or {}
+        cwd = s.cwd if s is not None else None
+        learn = self.settings.get("predict_learn", True)
+        lines = []
+        if s is not None:
+            lines.append(f"Project: {os.path.basename((cwd or '').rstrip(chr(92) + '/')) or 'no folder (a general chat)'}"
+                         + (f", session \"{s.title}\"" if getattr(s, "title", "") and s.title != "new session" else ""))
+            users = [x.get("text", "") for x in s.items if x.get("kind") == "user" and x.get("text")]
+            if users:
+                lines.append("What this conversation started with: " + " ".join(users[0].split())[:240])
+                recent = [" ".join(u.split())[:200] for u in users[-3:]]
+                lines.append("The user's last messages here: " + " | ".join(recent))
+            files, seen = [], set()
+            for x in reversed(s.items[-60:]):
+                if x.get("kind") == "tool" and isinstance(x.get("input"), dict):
+                    path = x["input"].get("file_path") or x["input"].get("notebook_path")
+                    if path and os.path.basename(path) not in seen and x.get("name") in ("Edit", "Write", "MultiEdit", "NotebookEdit", "Read"):
+                        seen.add(os.path.basename(path)); files.append(os.path.basename(path))
+                if len(files) >= 6:
+                    break
+            if files:
+                lines.append("Files Claude has been working on: " + ", ".join(files))
+        open_files = [str(f) for f in (extra.get("files") or [])][:6]
+        if open_files:
+            lines.append("Open in the user's editor: " + ", ".join(open_files))
+        if learn:
+            try:
+                self.writing.bootstrap(cwd or "", sdk.project_key_for_directory(cwd or CHAT_DIR))
+                ex = self.writing.examples(text, cwd, 6)
+            except Exception as e:
+                log.debug("writing examples failed: %s", e)
+                ex = []
+            if ex:
+                lines.append("Messages this user wrote before (their style, topics and habits):\n" + "\n".join("- " + t[:220] for t in ex))
+        out = "\n".join(lines)
+        return out[:2600]
+
+    def predict(self, text, sid=None, kind="chat", name="", extra=None):
         """What you'll probably type next (predict_text), as a Future with the words to show grey; "" if the setting is off."""
         s = self.live.get(sid) if sid else self.active
         context = ""
@@ -2527,7 +2576,8 @@ class Router:
             async def none():
                 return ""
             return self.run(none())
-        return self.run(predict_text(text, context, localai.find(self.settings, "predict_model"), kind, name))
+        profile = self.prediction_profile(s, text, extra) if kind == "chat" else ""
+        return self.run(predict_text(text, context, localai.find(self.settings, "predict_model"), kind, name, profile))
 
     # --- /btw: side questions that never land in the conversation (see side_chat) ---
     def btw_ask(self, sid, question, bid=None):

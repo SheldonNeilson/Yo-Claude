@@ -649,12 +649,19 @@ class Api:
             r.predict("Could you please take a look at the new fil" if kind != "code" else "const items = list.fil", None, kind, "x.js")
         return True
 
-    def predict_text(self, text, kind="chat", name=""):
+    def forget_writing(self):
+        """Forget the messages predictions have learned from (writing.py)."""
+        self._app.router.writing.forget()
+
+    def writing_count(self):
+        return self._app.router.writing.count()
+
+    def predict_text(self, text, kind="chat", name="", extra=None):
         """The grey words offered after the cursor as you type: {"text": the words} ("" when there's nothing). kind
         "code" is the file editor's (the rest of the line, for the file `name`), "prose" its text files'."""
         r = self._app.router
         try:
-            return {"text": r.predict(text, r.active.id if r.active else None, kind, name).result(10)}
+            return {"text": r.predict(text, r.active.id if r.active else None, kind, name, extra).result(10)}
         except Exception as e:
             log.debug("No prediction: %s", e or type(e).__name__)
             return {"text": ""}

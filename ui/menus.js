@@ -129,6 +129,8 @@ const MENUS = {
       ["Writing", null, { sub: [
         tog("AutoCorrect", "fix_text"),
         tog("Typing Prediction (Grey, Tab)", "predict_words"),
+        tog("Learn From My Messages (on this PC only)", "predict_learn"),
+        ["Forget What It Learned…", async () => confirmBox(`Forget the ${await api().writing_count()} messages predictions have learned from? Your sessions are not touched.`, () => { api().forget_writing(); toast("Forgotten"); })],
         tog("Suggest the Next Message", "suggest_next"),
         tog("Suggest While Claude Works", "suggest_early"),
         tog("Reply & Comment on Selection", "reply_menu"),

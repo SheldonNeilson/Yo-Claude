@@ -1371,7 +1371,7 @@ async function predictNow() {
   if (pred.busy) { pred.again = true; return; }
   pred.busy = true;
   let add = "";
-  try { add = (await Promise.race([api().predict_text(v), new Promise((r) => setTimeout(r, 20000, null))]))?.text || ""; } catch (_) { /* none */ } finally { pred.busy = false; }
+  try { add = (await Promise.race([api().predict_text(v, "chat", "", { files: typeof docs !== "undefined" ? docs.tabs().map((t) => t.name) : [] }), new Promise((r) => setTimeout(r, 20000, null))]))?.text || ""; } catch (_) { /* none */ } finally { pred.busy = false; }
   const now = box.value;
   if (now !== v) {   // you typed on meanwhile: still good if it's what was guessed
     const typed = now.slice(v.length);
