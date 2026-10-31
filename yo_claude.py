@@ -55,7 +55,7 @@ NEURAL_VOICE = "en-US-AvaNeural"   # `edge-tts --list-voices` for others
 # each character's voice: (voice, pitch). Claudia (female) is Ava; Claude (male, the default) a deep, steady voice
 VOICES = {"female": (NEURAL_VOICE, "+0Hz"), "male": ("en-US-ChristopherNeural", "-6Hz"),
           "professor": ("en-GB-RyanNeural", "-3Hz"),    # Male 2: a British voice for the European professor
-          "male3": ("en-SG-WayneNeural", "-2Hz"),       # Male 3 (Asian): Singapore English
+          "male3": ("en-US-AndrewNeural", "+0Hz"),     # Male 3 (Asian): plain American English
           "female2": ("en-ZA-LeahNeural", "+0Hz"),      # Female 2 (African): South African English
           "female3": ("en-SG-LunaNeural", "+0Hz")}      # Female 3 (Asian): Singapore English
 NEURAL_RATE = "+5%"
