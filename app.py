@@ -632,6 +632,13 @@ class Api:
             log.info("Couldn't fix the message: %s", e or type(e).__name__)
             return {"text": text}
 
+    def warm_predict(self, kind="chat"):
+        """Start the prediction session ahead of the first keystroke (the first answer otherwise waits for it to start)."""
+        r = self._app.router
+        if r.settings.get("predict_words", True):
+            r.predict("Could you please take a look at the new fil" if kind != "code" else "const items = list.fil", None, kind, "x.js")
+        return True
+
     def predict_text(self, text, kind="chat", name=""):
         """The grey words offered after the cursor as you type: {"text": the words} ("" when there's nothing). kind
         "code" is the file editor's (the rest of the line, for the file `name`), "prose" its text files'."""

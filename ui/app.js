@@ -1313,7 +1313,7 @@ async function predictNow() {
   if (pred.busy) { pred.again = true; return; }
   pred.busy = true;
   let add = "";
-  try { add = (await Promise.race([api().predict_text(v), new Promise((r) => setTimeout(r, 12000, null))]))?.text || ""; } catch (_) { /* none */ } finally { pred.busy = false; }
+  try { add = (await Promise.race([api().predict_text(v), new Promise((r) => setTimeout(r, 20000, null))]))?.text || ""; } catch (_) { /* none */ } finally { pred.busy = false; }
   const now = box.value;
   if (now !== v) {   // you typed on meanwhile: still good if it's what was guessed
     const typed = now.slice(v.length);
@@ -1786,6 +1786,7 @@ $("#input").addEventListener("keydown", (e) => {
 });
 $("#input").addEventListener("input", () => { autosize(); composer.autocomplete(); });
 $("#input").addEventListener("input", predictInput);
+$("#input").addEventListener("focus", () => { if (!pred.warmed) { pred.warmed = true; api().warm_predict("chat"); } });
 for (const ev of ["blur", "focus", "scroll", "click", "keyup"]) $("#input").addEventListener(ev, ghostPaint);
 setInterval(() => { if (pred.shown || pred.add) ghostPaint(); }, 500);   // (the box emptied by sending, a window resize...)
 $("#input").addEventListener("input", () => setSuggest(""));   // typing anything hides the suggestion

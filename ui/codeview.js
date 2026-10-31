@@ -19,7 +19,7 @@ function ceLang(path) {
   return l && typeof hljs !== "undefined" && hljs.getLanguage(l) ? l : "";
 }
 const ceEsc = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;");
-const CE_TAB = 4;
+const CE_TAB = 4, CE_WARM = {};
 const ceVis = (line, idx) => { let v = 0; for (let i = 0; i < idx && i < line.length; i++) v += line[i] === "\t" ? CE_TAB - (v % CE_TAB) : 1; return v; };
 const ceIdx = (line, vis) => {   // the character boundary nearest a visual column (tabs count as their width)
   let v = 0, i = 0;
@@ -256,7 +256,7 @@ function codeEditor({ text, path, readOnly, onInput, onSave, onCancel }) {
     let add = "";
     try {
       const sent = prose ? b.slice(-600) : b;
-      add = (await Promise.race([api().predict_text(sent, prose ? "prose" : "code", path.split(/[\\/]/).pop()), new Promise((r) => setTimeout(r, 12000, null))]))?.text || "";
+      add = (await Promise.race([api().predict_text(sent, prose ? "prose" : "code", path.split(/[\\/]/).pop()), new Promise((r) => setTimeout(r, 20000, null))]))?.text || "";
     } catch (_) { /* none */ } finally { P.busy = false; }
     const now = before();
     if (now !== b) {   // you typed on meanwhile: still good if it's what was guessed
@@ -354,6 +354,7 @@ function codeEditor({ text, path, readOnly, onInput, onSave, onCancel }) {
     if (!applying) { predictInput(); fixSoon(); }
   });
   paintHL(); sync(); paintStatus();
+  if (!ro && !CE_WARM[prose ? "prose" : "code"]) { CE_WARM[prose ? "prose" : "code"] = 1; api().warm_predict(prose ? "chat" : "code"); }
   return {
     el: wrap, ta, format,
     get value() { return ta.value; },

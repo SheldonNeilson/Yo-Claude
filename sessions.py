@@ -396,8 +396,8 @@ class WarmHaiku:
                     if isinstance(m, sdk.AssistantMessage):
                         out += "".join(b.text for b in m.content if isinstance(b, sdk.TextBlock))
                 return out
-            except Exception:
-                await self.close()
+            except BaseException:   # (a timeout or cancel leaves an answer unread: start afresh next time)
+                await asyncio.shield(self.close())
                 raise
 
     async def close(self):
@@ -534,7 +534,7 @@ async def predict_text(text, context="", model=None, kind="chat", name=""):
                 opts = sdk.ClaudeAgentOptions(model=VOICE_NOTE_MODEL, tools=[], cwd=CHAT_DIR, setting_sources=["project"],
                                               max_turns=1, thinking={"type": "disabled"}, system_prompt=CODE_SYSTEM,
                                               extra_args={"no-session-persistence": None})
-                out = await asyncio.wait_for(WARM_CODE.ask(prompt, opts), 8)
+                out = await asyncio.wait_for(WARM_CODE.ask(prompt, opts), 15)
         except Exception as e:
             log.info("Code prediction failed (%s): %s", model.get("model") if model else "Haiku", e or type(e).__name__)
             return ""
@@ -551,7 +551,7 @@ async def predict_text(text, context="", model=None, kind="chat", name=""):
             opts = sdk.ClaudeAgentOptions(model=VOICE_NOTE_MODEL, tools=[], cwd=CHAT_DIR, setting_sources=["project"],
                                           max_turns=1, thinking={"type": "disabled"}, system_prompt=PREDICT_SYSTEM,
                                           extra_args={"no-session-persistence": None})
-            out = await asyncio.wait_for(WARM_PREDICT.ask(prompt, opts), 8)
+            out = await asyncio.wait_for(WARM_PREDICT.ask(prompt, opts), 15)
     except Exception as e:
         log.info("Prediction failed (%s): %s", model.get("model") if model else "Haiku", e or type(e).__name__)
         return ""
