@@ -2726,6 +2726,61 @@ class Router:
         self.meta.update(sid, group=group or None)
         self.sessions_changed(cwd)
 
+    # top-level groups of the sidebar: named piles of sessions from any folder (sessions not in one stay under their folder)
+    def groups_changed(self):
+        self.meta.save()
+        self.emit("groups", groups=list(self.meta.data["groups"]))
+        for folder in [None] + self.workspaces():
+            self.sessions_changed(folder)
+
+    def add_group(self, name):
+        name = " ".join(str(name or "").split())[:40]
+        if not name:
+            return "Give the group a name."
+        if name not in self.meta.data["groups"]:
+            self.meta.data["groups"].append(name)
+        self.groups_changed()
+        return None
+
+    def rename_group(self, old, new):
+        new = " ".join(str(new or "").split())[:40]
+        groups = self.meta.data["groups"]
+        if not new or old not in groups:
+            return "Give the group a name."
+        if new != old and new in groups:
+            return f"There is already a group called {new}."
+        groups[groups.index(old)] = new
+        for m in self.meta.data["sessions"].values():
+            if m.get("group") == old:
+                m["group"] = new
+        self.groups_changed()
+        return None
+
+    def delete_group(self, name):
+        """The group goes; its sessions go back under their folders (nothing else is touched)."""
+        if name in self.meta.data["groups"]:
+            self.meta.data["groups"].remove(name)
+        for m in self.meta.data["sessions"].values():
+            if m.get("group") == name:
+                m["group"] = None
+        self.groups_changed()
+
+    def move_group(self, name, delta):
+        groups = self.meta.data["groups"]
+        if name in groups:
+            i = groups.index(name)
+            j = max(0, min(len(groups) - 1, i + int(delta)))
+            groups.insert(j, groups.pop(i))
+            self.groups_changed()
+
+    def group_folder(self, cwd, group):
+        """Every session of a folder into a group (or out of groups, for None)."""
+        for s in self.list(cwd):
+            self.meta.session(s["id"])["group"] = group or None
+        if group and group not in self.meta.data["groups"]:
+            self.meta.data["groups"].append(group)
+        self.groups_changed()
+
     def session_file(self, sid, cwd):
         folder = os.path.join(PROJECTS_DIR, sdk.project_key_for_directory(cwd or CHAT_DIR))
         return folder, os.path.join(folder, f"{sid}.jsonl")

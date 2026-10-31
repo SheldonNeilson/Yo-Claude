@@ -843,3 +843,10 @@ button { white-space: nowrap; }
 
 #docsPath { flex: none; padding: 3px 10px; font-size: 11px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; direction: rtl; text-align: left; cursor: pointer; border-bottom: 1px solid var(--line); background: var(--bg); }
 #docsPath:hover { color: var(--orange); }
+
+/* the sidebar's top-level groups (renderTree) */
+.gnode .fname { color: var(--amber); } .gnode .gcount { color: var(--faint); font-size: 11px; }
+.fnode.drop { background: #2a2210; outline: 1px dashed var(--amber); }
+.gfocus { display: flex; align-items: center; gap: 6px; padding: 5px 8px; color: var(--amber); border-bottom: 1px solid var(--line2); background: #1c1710; }
+.gfocus button { padding: 0 8px; font-size: 11px; }
+.session[draggable="true"] { cursor: pointer; }

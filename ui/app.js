@@ -2,7 +2,7 @@
 "use strict";
 const $ = (s) => document.querySelector(s);
 // Calls that open things answer with a message when they can't (file gone, no app for it...): show it.
-const REPORTS_ERRORS = new Set(["open_path", "open_with", "pop_out", "reveal", "open_in_editor", "term_cd", "term_type_path", "term_run", "open_terminal_external"]);
+const REPORTS_ERRORS = new Set(["add_group", "rename_group", "open_path", "open_with", "pop_out", "reveal", "open_in_editor", "term_cd", "term_type_path", "term_run", "open_terminal_external"]);
 const api = () => new Proxy(window.pywebview.api, {
   get: (t, k) => !REPORTS_ERRORS.has(k) ? t[k] : (...a) => t[k](...a).then((r) => {
     const err = typeof r === "string" ? r : r?.error;
@@ -116,6 +116,7 @@ function handle(e) {
     case "live": if (S.active && e.session === S.active.id) transcript.live(e.image); break;
     case "settings": S.settings = e.settings; renderToggles(); avatar.apply(); renderBusy(); renderName(); renderAwake(); break;
     case "folder": S.folder = e.folder; renderHead(); break;
+    case "groups": S.groups = e.groups; renderTree(); break;
     case "confirm_quit":
       confirmBox(`${Who()} is in the middle of a reply in ${e.busy.map((b) => `“${b.title}”`).join(", ")}. ` +
                  "Quitting now cuts it off (background tasks keep running and are picked up after a restart).",
@@ -296,9 +297,17 @@ function renderTree() {
   const scroll = tree.scrollTop;
   tree.innerHTML = "";
   const f = S.filter.toLowerCase();
-  if (!f) {   // the latest sessions from every folder, so nothing recent hides in a collapsed folder
+  const focus = S.groups.includes(S.settings.group_focus) ? S.settings.group_focus : "";   // "show only this group"
+  if (focus) {
+    const bar = el("div", "gfocus", `<span>▦ ${esc(focus)}</span><span class="spacer"></span><button title="Show every folder and group again">show all</button>`);
+    bar.querySelector("button").onclick = () => api().set_setting("group_focus", null);
+    tree.appendChild(bar);
+  }
+  const inGroup = (g) => allSessions().filter((s) => s.group === g && (!f || (s.title || "").toLowerCase().includes(f) || (s.first || "").toLowerCase().includes(f)))
+    .sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0) || (b.modified || 0) - (a.modified || 0));
+  if (!f && !focus) {   // the latest sessions from every folder, so nothing recent hides in a collapsed folder
     const open = isOpen(RECENT_KEY, null, true);
-    const recent = allSessions().slice().sort((a, b) => (b.modified || 0) - (a.modified || 0)).slice(0, RECENT_SHOWN);
+    const recent = allSessions().filter((s) => !(s.group && S.groups.includes(s.group))).sort((a, b) => (b.modified || 0) - (a.modified || 0)).slice(0, RECENT_SHOWN);
     const head = el("div", "fnode recent");
     head.innerHTML = `<span class="tw">${open ? "▾" : "▸"}</span><span class="fname">◷ RECENT</span>` +
       `${recent.some((s) => S.busy.has(s.id)) ? '<span class="spin busy">✻</span>' : ""}` +
@@ -308,10 +317,32 @@ function renderTree() {
     tree.appendChild(head);
     if (open) for (const s of recent) tree.appendChild(sessionRow(s, true));
   }
+  // your groups: top level, above the folders, each with its sessions from any folder
+  for (const g of S.groups) {
+    if (focus && g !== focus) continue;
+    const list = inGroup(g);
+    if (f && !list.length) continue;
+    const gkey = "grp:" + g, open = (f && list.length) || isOpen(gkey, null, true);
+    const head = el("div", "fnode gnode");
+    head.innerHTML = `<span class="tw">${open ? "▾" : "▸"}</span><span class="fname">▦ ${esc(g)}</span><span class="gcount">${list.length}</span>` +
+      `${list.some((s) => S.busy.has(s.id)) ? '<span class="spin busy">✻</span>' : ""}${list.some((s) => s.unseen) ? '<span class="dot" title="New reply"></span>' : ""}`;
+    head.title = `${g}: right-click to rename, show only this group, or remove it (the sessions go back under their folders)`;
+    head.onclick = () => { setOpen(gkey, !open); renderTree(); };
+    head.oncontextmenu = (e) => { e.preventDefault(); groupMenu(e, g); };
+    head.ondragover = (e) => { if (dragSession) { e.preventDefault(); head.classList.add("drop"); } };
+    head.ondragleave = () => head.classList.remove("drop");
+    head.ondrop = (e) => { e.preventDefault(); head.classList.remove("drop"); if (dragSession) api().set_group(dragSession.id, dragSession.cwd, g); };
+    tree.appendChild(head);
+    if (!open) continue;
+    for (const s of list) tree.appendChild(sessionRow(s, true));
+    if (!list.length) tree.appendChild(el("div", "smore dim", "empty: drag a session here, or right-click it → move to group"));
+  }
+  if (focus) { tree.scrollTop = scroll; return; }
   const nodes = [{ key: "", cwd: null, label: "CHATS", title: "Conversations without a folder" },
                  ...S.workspaces.map((w) => ({ key: keyOf(w), cwd: w, label: base(w), title: w }))];
   for (const n of nodes) {
-    const all = (S.lists[n.key] || []).filter((s) => !f || (s.title || "").toLowerCase().includes(f) || (s.first || "").toLowerCase().includes(f));
+    const all = (S.lists[n.key] || []).filter((s) => !(s.group && S.groups.includes(s.group)))   // (sessions in a group show there)
+      .filter((s) => !f || (s.title || "").toLowerCase().includes(f) || (s.first || "").toLowerCase().includes(f));
     const busy = all.some((s) => S.busy.has(s.id)), unseen = all.some((s) => s.unseen);
     const open = (f && all.length) || isOpen(n.key, S.lists[n.key] || []);
     const head = el("div", "fnode" + (sameFolder(S.active?.cwd ?? null, n.cwd) && S.active ? " here" : ""));
@@ -324,12 +355,14 @@ function renderTree() {
       setOpen(n.key, !open); renderTree();
     };
     head.oncontextmenu = (e) => { e.preventDefault(); folderMenu(e, n); };
+    head.ondragover = (e) => { if (dragSession && (dragSession.cwd ?? null) === n.cwd && S.groups.includes(dragSession.group)) { e.preventDefault(); head.classList.add("drop"); } };
+    head.ondragleave = () => head.classList.remove("drop");
+    head.ondrop = (e) => { e.preventDefault(); head.classList.remove("drop"); if (dragSession) api().set_group(dragSession.id, dragSession.cwd, null); };   // (back under its folder)
     tree.appendChild(head);
     if (!open) continue;
     const pinned = all.filter((s) => s.pinned);
-    const grouped = S.groups.map((g) => [g, all.filter((s) => !s.pinned && s.group === g)]).filter(([, l]) => l.length);
-    const rest = all.filter((s) => !s.pinned && !(s.group && S.groups.includes(s.group)));
-    const rows = [...pinned.map((s) => ["", s]), ...grouped.flatMap(([g, l]) => [[g, null], ...l.map((s) => ["", s])])];
+    const rest = all.filter((s) => !s.pinned);
+    const rows = [...pinned.map((s) => ["", s])];
     const limit = S.more.has(n.key) || f ? rest.length : Math.max(0, SESSIONS_SHOWN - rows.length);
     rows.push(...rest.slice(0, limit).map((s) => ["", s]));
     for (const [g, s] of rows) tree.appendChild(s ? sessionRow(s) : el("div", "sgroup", esc(g)));
@@ -354,8 +387,27 @@ function sessionRow(s, withFolder = false) {
   row.title = s.first || s.title;
   row.onclick = () => api().open_session(s.id, s.cwd);
   row.oncontextmenu = (e) => { e.preventDefault(); sessionMenu(e, s); };
+  row.draggable = true;   // drag it onto a group (or, from a group, back onto its folder)
+  row.ondragstart = (e) => { dragSession = s; e.dataTransfer.setData("text/plain", s.title || ""); e.dataTransfer.effectAllowed = "move"; };
+  row.ondragend = () => { dragSession = null; };
   return row;
 }
+let dragSession = null;
+function groupMenu(e, g) {
+  const focused = S.settings.group_focus === g, i = S.groups.indexOf(g);
+  showMenu(e, [
+    ["sub:" + g],
+    [focused ? "show everything again" : "show only this group", () => api().set_setting("group_focus", focused ? null : g)],
+    "-",
+    ["rename…", () => ask("Rename group", g, async (n) => { const err = await api().rename_group(g, n); if (err) alertBox(err); })],
+    ["move up", () => api().move_group(g, -1), { disabled: i <= 0 }],
+    ["move down", () => api().move_group(g, 1), { disabled: i >= S.groups.length - 1 }],
+    "-",
+    ["remove group (sessions go back under their folders)", () => confirmBox(`Remove the group “${g}”? Its sessions stay where they are on disk and go back under their folders.`,
+      () => { if (S.settings.group_focus === g) api().set_setting("group_focus", null); api().delete_group(g); })],
+  ]);
+}
+$("#newGroupBtn").onclick = () => ask("New group", "", async (n) => { const err = await api().add_group(n); if (err) alertBox(err); });
 function folderMenu(e, n) {
   showMenu(e, [
     ["sub:" + (n.cwd || "chats")],
@@ -363,6 +415,8 @@ function folderMenu(e, n) {
     n.cwd ? ["open in vs code", () => api().open_path(n.cwd, "code")] : null,
     n.cwd ? ["show in explorer", () => api().open_path(n.cwd, "open")] : null,
     ...(n.cwd ? termMenuItems(n.cwd, null, "dir") : []),
+    ["put all its sessions in group", null, { sub: [...S.groups.map((g) => [g, () => api().group_folder(n.cwd, g)]),
+      ["new group…", () => ask("New group for this folder's sessions", n.label, (g) => api().group_folder(n.cwd, g))]] }],
     n.cwd ? "-" : null,
     n.cwd ? ["remove from list (keeps files and sessions)", () => api().remove_folder(n.cwd)] : null,
   ].filter(Boolean));

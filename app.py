@@ -1054,6 +1054,21 @@ class Api:
     def set_group(self, sid, cwd, group):
         self._app.router.group(sid, cwd, group)
 
+    def add_group(self, name):
+        return self._app.router.add_group(name)
+
+    def rename_group(self, old, new):
+        return self._app.router.rename_group(old, new)
+
+    def delete_group(self, name):
+        self._app.router.delete_group(name)
+
+    def move_group(self, name, delta):
+        self._app.router.move_group(name, delta)
+
+    def group_folder(self, cwd, group):
+        self._app.router.group_folder(cwd, group)
+
     def delete(self, sid, cwd):
         return self._app.router.delete(sid, cwd)
 
