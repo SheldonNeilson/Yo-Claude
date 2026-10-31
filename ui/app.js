@@ -76,7 +76,7 @@ function handle(e) {
   switch (e.kind) {
     case "item":
       if (S.active && e.session === S.active.id) {
-        S.items[e.item.i] = e.item; renderItem(e.item);
+        S.items[e.item.i] = e.item; renderItem(e.item); gallery.touch();
         if (planBox.isPlanItem(e.item)) planBox.update();
       }
       break;
@@ -96,6 +96,7 @@ function handle(e) {
       S.active = e.session; S.items = e.items || []; S.folder = e.session.cwd;
       const s = findSession(S.active.id); if (s) s.unseen = false;
       renderTranscript(); renderHead(); renderTree();   // its folder opens by itself (it holds the active session)
+      gallery.session = null; gallery.entries = []; gallery.count = 0; gallery.touch();
       tasks.sessionChanged();
       planBox.collapsed = null; planBox.update();
       if (window.btw?.session && btw.session !== S.active.id) btw.close();   // side chats belong to their conversation
@@ -172,6 +173,7 @@ function renderAwake() {
   $("#faceBtn")?.classList.toggle("on", S.settings?.avatar === true);   // (the face button under the sessions)   // ☕ in the menu bar: lit while the PC is kept awake always
   const b = $("#awakeBtn"), on = S.settings?.keep_awake !== false;
   b.classList.toggle("on", on);
+  b.textContent = on ? "[staying awake]" : "[stay awake]";   // (text only, like the other buttons up there)
   b.title = on ? "The PC is kept awake (it won't go to sleep while Yo Claude runs). Click to let it sleep when idle."
     : `Click to keep the PC awake always. (While ${Who()} works it's kept awake anyway`
       + (S.settings?.awake_while_working === false ? ": that's off too, in Options)" : ")");

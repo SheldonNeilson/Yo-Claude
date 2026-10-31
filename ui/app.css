@@ -734,6 +734,24 @@ b.lo { color: var(--green); } b.mid { color: var(--amber); } b.hi { color: var(-
 .phead.pnav .pwhere { flex: 1; min-width: 60px; font-size: 12px; padding: 2px 6px; }
 .fcols { display: flex; padding: 2px 8px; border-bottom: 1px solid var(--line); font-size: 11px; }
 .fcols .fcol { border: 0; background: none; padding: 0 4px; color: var(--faint); } .fcols .fcol.on { color: var(--orange); }
+/* the media tab (gallery.js) */
+.gfilters { flex-wrap: wrap; gap: 4px; }
+.gfilters .gf { padding: 0 8px; font-size: 11px; color: var(--dim); } .gfilters .gf i { color: var(--faint); font-style: normal; }
+.gfilters .gf.on { color: var(--orange); border-color: var(--orange); }
+.fcols .gcol { flex: 1; text-align: center; }
+.glist { overflow-y: auto; flex: 1; }
+.grow { display: flex; gap: 8px; padding: 6px 8px; border-bottom: 1px solid var(--line); cursor: pointer; align-items: center; }
+.grow:hover { background: var(--bg3); }
+.gthumb { flex: none; width: 64px; height: 46px; background: #0b0b0a; border: 1px solid var(--line); display: flex; align-items: center; justify-content: center;
+          overflow: hidden; color: var(--dim); font-size: 18px; cursor: zoom-in; }
+.gthumb img, .gthumb video { width: 100%; height: 100%; object-fit: cover; display: block; }
+.gthumb.ico { cursor: pointer; }
+.gthumb:hover { border-color: var(--orange); }
+.ginfo { min-width: 0; flex: 1; line-height: 1.35; }
+.ginfo .gname { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text); }
+.ginfo .gdates, .ginfo .gvia { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.jumpflash { animation: jumpflash .7s ease-in-out 3; }
+@keyframes jumpflash { 0%, 100% { box-shadow: 0 0 0 0 transparent; } 50% { box-shadow: 0 0 0 2px var(--orange), 0 0 14px var(--orange); } }
 .fcols .fcol.name { flex: 1; text-align: left; } .fcols .fcol.mtime { flex: none; min-width: 11ch; text-align: right; }
 .ftree .node { display: flex; align-items: baseline; } .ftree .node .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .ftree .node .mt { flex: none; width: 11ch; text-align: right; color: var(--faint); font-size: 11px; padding-right: 6px; white-space: nowrap; }

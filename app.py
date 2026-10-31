@@ -857,6 +857,26 @@ class Api:
         return {"kind": media.kind_of(full), "url": self._app.media.url(full), "path": full,
                 "name": os.path.basename(full), "size": os.path.getsize(full)}
 
+    def file_stats(self, paths, cwd=None):
+        """For the media tab: of the paths mentioned in a chat, the ones that exist, as {path as given: {path, name, kind
+        (dir/image/video/audio/pdf/file), size, mtime, ctime, url when it can be shown}}."""
+        out = {}
+        for p in list(dict.fromkeys(paths or []))[:400]:
+            full = self._resolve(str(p).strip().strip("'\""), cwd)
+            if not full:
+                continue
+            try:
+                st = os.stat(full)
+            except OSError:
+                continue
+            kind = "dir" if os.path.isdir(full) else media.kind_of(full)
+            info = {"path": full, "name": os.path.basename(full) or full, "kind": kind, "size": 0 if kind == "dir" else st.st_size,
+                    "mtime": st.st_mtime, "ctime": st.st_ctime}
+            if kind in ("image", "video", "audio", "pdf"):
+                info["url"] = self._app.media.url(full)
+            out[p] = info
+        return out
+
     def resolve_media(self, paths, cwd=None):
         """Of the paths mentioned in a reply, the existing images/video/audio/PDFs (shown under the message)."""
         out = []

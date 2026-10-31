@@ -74,6 +74,7 @@ window.panel = {
       `<button data-t="files" class="${this.tab === "files" ? "on" : ""}">files</button>` +
       `<button data-t="changes" class="${this.tab === "changes" ? "on" : ""}">changes${n ? ` <b>${n}</b>` : ""}</button>` +
       `<button data-t="git" class="${this.tab === "git" ? "on" : ""}">git</button>` +
+      `<button data-t="media" class="${this.tab === "media" ? "on" : ""}" title="Every screenshot, picture and file in this chat">media${gallery.count ? ` <i>${gallery.count}</i>` : ""}</button>` +
       `<button data-t="tasks" class="${this.tab === "tasks" ? "on" : ""}${running ? " busy" : ""}${tasks.flashUntil > Date.now() ? " pulse" : ""}" title="Background commands and subagents` +
       `${running ? `
 ${running} running in this session` : ""}${elsewhere ? `
@@ -84,6 +85,7 @@ ${elsewhere} running in other sessions` : ""}">` +
       if (this.tab === "files") await this.loadDirs();
       this.render();
       if (this.tab === "tasks") tasks.poll();
+      if (this.tab === "media") gallery.refresh();
     });
   },
   render() {
@@ -93,9 +95,10 @@ ${elsewhere} running in other sessions` : ""}">` +
     p.innerHTML = `<div class="ptabs"><span class="tabs"></span>
       <span class="spacer"></span><button data-act="refresh" title="Refresh">⟳</button></div><div id="pbody"></div>`;
     this.renderTabs();
-    p.querySelector("[data-act=refresh]").onclick = () => this.tab === "tasks" ? tasks.poll() : this.load();
+    p.querySelector("[data-act=refresh]").onclick = () => this.tab === "tasks" ? tasks.poll() : this.tab === "media" ? gallery.refresh(true) : this.load();
     const body = $("#pbody");
     if (this.tab === "tasks") return tasks.render();
+    if (this.tab === "media") return gallery.render(body);   // (works without a folder: it's about the chat)
     if (!this.cwd) { body.innerHTML = `<div class="pempty">No folder.<br>Pick one at the top left to see files, changes and git.</div>`; return; }
     ({ files: () => this.renderFiles(body), changes: () => this.renderChanges(body), git: () => this.renderGit(body) })[this.tab]();
     if (keepTop) body.scrollTop = keepTop;
