@@ -37,8 +37,20 @@ const TYPES = {
               shot: "?", rank: 3, name: "TODO" },
   bug:      { frames: [["\\(oo)/", " /  \\ "], ["/(oo)\\", " \\  / "]], color: "amber", pts: 10, hp: 1, die: "squashed",
               dieColor: "amber", shot: "*", rank: 4, name: "bug" },
+  heisen:   { frames: [["\\(??)/", " /  \\ "], ["/(??)\\", " \\  / "]], color: "text", pts: 40, hp: 1, die: "can't reproduce", dieColor: "dim",
+              shot: "?", rank: 3, flicker: true, name: "heisenbug" },
+  leak:     { frames: [["{leak}", " (  ) "], ["{leak}", " )  ( "]], color: "green", pts: 15, hp: 1, die: "free()", dieColor: "green",
+              shot: "o", rank: 3, splits: true, name: "memory leak" },
+  segv:     { frames: [["<SEGV>", " \\||/ "], ["<SEGV>", " /||\\ "]], color: "red", pts: 50, hp: 1, die: "core dumped", dieColor: "red",
+              shot: "#", rank: 2, dives: true, name: "segfault" },
 };
-const UFO = [["  _.----._  ", "<(while(1))>"], ["  _.----._  ", ">(while(1))<"]];
+const SEASON = (() => { const d = new Date(); return d.getMonth() === 9 && d.getDate() === 31 ? "halloween" : d.getDay() === 5 ? "friday" : ""; })();
+const UFO_TEXT = SEASON === "halloween" ? "(BOO! BOO)" : SEASON === "friday" ? "(DEPLOY!!)" : "(while(1))";
+const UFO = [["  _.----._  ", "<" + UFO_TEXT + ">"], ["  _.----._  ", ">" + UFO_TEXT + "<"]];
+const UFO_NAME = SEASON === "friday" ? "deploy on a friday" : SEASON === "halloween" ? "ghost process" : "infinite loop";
+const ALLY = [" /+\\ ", "[---]"];
+// weapon levels (npm update): [offset, sideways speed] per shot
+const WEAPON = [null, [[0, 0]], [[-5, 0], [5, 0]], [[-5, 0], [5, 0], [0, -110], [0, 110]], [[-7, 0], [0, 0], [7, 0], [0, -150], [0, 150]]];
 const CLIPPY = [
   ["   .---.  ", "  / .-. \\ ", "  | | | | ", " (o)| |(o)", "  | | | | ", "  | '-' | ", "  \\_____/ "],
   ["   .---.  ", "  / .-. \\ ", "  | | | | ", " (-)| |(-)", "  | | | | ", "  | '-' | ", "  \\_____/ "],
@@ -53,6 +65,13 @@ const POWERS = {
   duck:     { label: "rubber duck", color: "amber" },
   coffee:   { label: "coffee", color: "orange2" },
   lgtm:     { label: "LGTM", color: "green" },
+  npm:      { label: "npm update", color: "amber" },
+  sudo:     { label: "sudo", color: "red" },
+  grep:     { label: "grep", color: "blue" },
+  pair:     { label: "pair prog", color: "green" },
+  firewall: { label: "firewall", color: "orange" },
+  sleep:    { label: "sleep(7)", color: "blue" },
+  life:     { label: "+1 ✻", color: "orange2" },
 };
 const COMMITS = ["feat: initial commit", "fix: off-by-one in the formation", "test: add failing tests (on purpose)",
   "chore: bump all the dependencies", "refactor: everything, again", "fix: fix the fix", "hotfix: friday 16:59 deploy",
@@ -85,7 +104,7 @@ root.innerHTML = '<span class="inv-tag inv-title">[ bug invaders<span class="inv
   '<span class="inv-tag inv-ctl"><button data-act="peek"></button><button data-act="sound"></button><button data-act="auto"></button>' +
   '<button data-act="close" title="Hide until Claude\'s next reply (Esc)">[✕]</button></span>' +
   '<span class="inv-tag inv-status"></span>' +
-  '<span class="inv-tag inv-keys">[ ←→ move · space fire · P pause · M sound · Esc hide ]</span><canvas></canvas>';
+  '<span class="inv-tag inv-keys">[ ←→ move · space fire · P pause · M sound · L scores · Esc hide ]</span><canvas></canvas>';
 const cv = root.querySelector("canvas"), ctx = cv.getContext("2d");
 const mctx = document.createElement("canvas").getContext("2d");
 const btn = (a) => root.querySelector(`[data-act="${a}"]`), statusEl = root.querySelector(".inv-status");
@@ -243,9 +262,13 @@ const G = {
   player: { x: 0, y: 0, w: 30, h: 26, inv: 0, cool: 0 },
   shots: [], ebul: [], enemies: [], drones: [], powerups: [], particles: [], floaters: [], shields: [],
   form: { x: 0, y: 0, dir: 1, stepT: 0, frame: 0, n: 0 }, ufo: null, boss: null, duck: null,
-  fx: { refactor: 0, coffee: 0 }, combo: { n: 0, last: -9, best: 0 }, shake: 0, intro: 0, clearT: 0, commit: "",
+  fx: { refactor: 0, coffee: 0, pierce: 0, homing: 0, ally: 0, slow: 0 }, weapon: 1, bubble: false, ally: null, diveT: 6,
+  entry: null, scored: false, rank: -1, cheat: false, konami: false, sudoWave: 0,
+  combo: { n: 0, last: -9, best: 0 }, shake: 0, intro: 0, clearT: 0, commit: "",
   stars: Array.from({ length: 48 }, () => ({ x: Math.random(), y: Math.random(), s: rnd(3, 16), b: Math.random() < 0.25 })),
 };
+const epos = (e) => (e.dive ? { x: e.dive.x, y: e.dive.y } : { x: G.form.x + e.ox, y: G.form.y + e.oy });
+const hidden = (e) => TYPES[e.type].flicker && Math.sin(G.rt * 2.4 + e.col * 0.9 + e.oy * 0.05) < -0.35;   // a heisenbug between blinks
 function placePlayer() {
   const m = measure(PLAYER, 12), P = G.player;
   P.w = m.w; P.h = m.h; P.y = view.H - m.h - 6;
@@ -258,8 +281,9 @@ function fitFormation() {   // the field got narrower (a pane opened): pull the 
   F.x = Math.max(8 - lo, Math.min(F.x, view.W - 8 - hi));   // keeps the left edge in view if it can't all fit
 }
 function newGame() {
-  Object.assign(G, { state: "play", paused: false, score: 0, lives: 3, hits: 0, wave: 0, fx: { refactor: 0, coffee: 0 }, duck: null,
-    combo: { n: 0, last: -9, best: 0 }, particles: [], floaters: [], powerups: [], shields: [] });
+  Object.assign(G, { state: "play", paused: false, score: 0, lives: 3, hits: 0, wave: 0, duck: null, weapon: 1, bubble: false, ally: null,
+    fx: { refactor: 0, coffee: 0, pierce: 0, homing: 0, ally: 0, slow: 0 }, entry: null, scored: false, rank: -1, cheat: false,
+    konami: false, sudoWave: 0, combo: { n: 0, last: -9, best: 0 }, particles: [], floaters: [], powerups: [], shields: [] });
   placePlayer(); G.player.x = view.W / 2 - G.player.w / 2; G.player.inv = 0;
   startWave(1);
 }
@@ -270,7 +294,7 @@ function waveTitle(n) {
 }
 function startWave(n) {
   Object.assign(G, { wave: n, shots: [], ebul: [], drones: [], ufo: null, boss: null, enemies: [], clearT: 0, intro: 2.6,
-    ufoT: rnd(10, 18), efireT: 1, commit: waveTitle(n) });
+    ufoT: rnd(10, 18), efireT: 1, diveT: rnd(4, 8), commit: waveTitle(n) });
   if (n === 1 || n % 4 === 1 || !G.shields.length) buildShields();
   if (n % 4 === 0) spawnBoss(n / 4); else buildFormation(n);
 }
@@ -279,6 +303,7 @@ function buildFormation(n) {
   if (n > 1) {
     const pool = ["bug", "bug", "todo", "todo", "fail", "fail", "nan", "conflict"];
     if (n > 4) pool.push("conflict", "nan");
+    if (n > 2) pool.push("leak"); if (n > 3) pool.push("heisen"); if (n > 4) pool.push("segv");
     rows = Array.from({ length: n >= 6 ? 6 : 5 }, () => pick(pool)).sort((a, b) => TYPES[a].rank - TYPES[b].rank);
   }
   const gapX = 50, gapY = 30, base = measure(TYPES.bug.frames[0], 12);
@@ -324,6 +349,7 @@ function eraseShields(x, y, w, h) {
 }
 function spawnBoss(level) {
   const hp = 36 + 18 * (level - 1);
+  G.hitsAtBoss = G.hits;
   G.boss = { level, hp, max: hp, x: view.W / 2, y: 50, w: 0, h: 0, t: 0, fireT: 2, spawnT: 5, sayT: 0, say: SAYS[0], flash: 0 };
 }
 
@@ -335,7 +361,18 @@ function burst(x, y, color, n = 10, chars = "01*+.") {
   if (G.particles.length > 280) G.particles.splice(0, G.particles.length - 280);
 }
 function float(text, x, y, color, size = 11, life = 1.1) { G.floaters.push({ text, x, y, color, size, t: 0, life }); }
-function addScore(n) { G.score += n; if (G.score > G.hi) G.hi = G.score; }
+const MILESTONES = [[404, "404: bugs not found", 0], [1337, "1337 h4x0r: +1 ✻", 1], [9001, "IT'S OVER 9000!", 1]];
+function addScore(n) {
+  const was = G.score;
+  G.score += n; if (G.score > G.hi) G.hi = G.score;
+  if (G.state !== "play") return;
+  for (const [at, msg, life] of MILESTONES) {
+    if (was >= at || G.score < at) continue;
+    float(msg, view.W / 2, view.H * 0.6, C.amber, 15, 2.2); SFX.combo();
+    if (life && G.lives < MAX_LIVES) G.lives++;
+  }
+}
+
 const comboLive = () => G.time - G.combo.last < 1.6;
 const mult = () => (comboLive() ? 1 + Math.min(4, Math.floor(G.combo.n / 5)) : 1);
 function comboHit() {
@@ -348,17 +385,19 @@ function comboHit() {
 
 // ---------- update ----------
 function fire() {
-  const P = G.player, spread = G.fx.refactor > 0, max = (G.fx.coffee > 0 ? 4 : 2) * (spread ? 3 : 1);
-  if (G.shots.length >= max) return;
-  P.cool = G.fx.coffee > 0 ? 0.16 : 0.32;
-  const cx = P.x + P.w / 2, y = P.y - 8;
-  G.shots.push({ x: cx, y, vx: 0, vy: -440 });
-  if (spread) G.shots.push({ x: cx, y, vx: -140, vy: -420 }, { x: cx, y, vx: 140, vy: -420 });
+  const P = G.player, spread = G.fx.refactor > 0, W = WEAPON[G.weapon];
+  const n = W.length + (spread ? 2 : 0), max = (G.fx.coffee > 0 ? 4 : 2) * n;
+  if (G.shots.filter((s) => !s.ally).length >= max) return;
+  P.cool = (G.fx.coffee > 0 ? 0.16 : 0.32) * (G.weapon >= 4 ? 0.8 : 1);
+  const cx = P.x + P.w / 2, y = P.y - 8, pierce = G.fx.pierce > 0;
+  const add = (dx, vx) => G.shots.push({ x: cx + dx, y, vx, vy: -440, pierce, hit: pierce ? new Set() : null });
+  for (const [dx, vx] of W) add(dx, vx);
+  if (spread) { add(0, -140); add(0, 140); }
   SFX.shoot();
 }
 function stepFormation(dt) {
-  const F = G.form, alive = G.enemies.filter((e) => e.alive);
-  if (!alive.length || (F.stepT -= dt) > 0) return;
+  const F = G.form, alive = G.enemies.filter((e) => e.alive && !e.dive);
+  if (!alive.length || (F.stepT -= dt * (G.fx.slow > 0 ? 0.35 : 1)) > 0) return;
   F.stepT = (0.04 + (0.34 * alive.length) / G.enemies.length) / (1 + 0.1 * (G.wave - 1));
   let minX = Infinity, maxX = -Infinity;
   for (const e of alive) { minX = Math.min(minX, F.x + e.ox); maxX = Math.max(maxX, F.x + e.ox + e.w); }
@@ -371,12 +410,46 @@ function stepFormation(dt) {
     if (ey + e.h >= G.player.y) return gameOver("the bugs shipped to production");
   }
 }
+function updateDivers(dt) {   // segfaults peel off and dive at you; the ones that get past fly back into line
+  const P = G.player, sdt = dt * (G.fx.slow > 0 ? 0.4 : 1);
+  if (!G.boss && (G.diveT -= dt) <= 0) {
+    G.diveT = rnd(3, 6.5) / (1 + 0.06 * G.wave);
+    const cand = G.enemies.filter((e) => e.alive && !e.dive && TYPES[e.type].dives);
+    if (cand.length && G.enemies.filter((e) => e.alive && e.dive).length < 1 + Math.floor(G.wave / 5)) {
+      const e = pick(cand), p = epos(e);
+      e.dive = { x: p.x, y: p.y, t: 0, sway: Math.random() * 6 };
+    }
+  }
+  for (const e of G.enemies) {
+    const d = e.dive;
+    if (!d || !e.alive) continue;
+    d.t += sdt;
+    const tx = P.x + P.w / 2 - e.w / 2;
+    d.y += (120 + 8 * G.wave) * sdt;
+    d.x = clamp(d.x + clamp(tx - d.x, -150 * sdt, 150 * sdt) * (d.y < P.y - 120 ? 1 : 0.2) + Math.sin(d.t * 5 + d.sway) * 50 * sdt, 2, view.W - e.w - 2);
+    eraseShields(d.x, d.y, e.w, e.h);
+    if (overlap(d.x, d.y, e.w, e.h, P.x, P.y, P.w, P.h)) { kill(e, true); playerHit(); continue; }
+    if (d.y > view.H) e.dive = null;
+  }
+}
+function updateAlly(dt) {   // the pair programmer: tags along beside you and fires on its own
+  if (!(G.fx.ally > 0)) { G.ally = null; return; }
+  const P = G.player, m = measure(ALLY, 10);
+  const A = G.ally = G.ally || { x: P.x + P.w + 14, y: P.y, cool: 0.3, w: m.w, h: m.h };
+  A.w = m.w; A.h = m.h; A.y = P.y + P.h - m.h;
+  const tx = P.x + P.w + 14 + Math.sin(G.time * 1.7) * 6;
+  A.x += (clamp(tx, 4, view.W - A.w - 4) - A.x) * Math.min(1, dt * 7);
+  if ((A.cool -= dt) <= 0 && (G.boss || G.enemies.some((e) => e.alive))) {
+    A.cool = 0.55;
+    G.shots.push({ x: A.x + A.w / 2, y: A.y - 6, vx: 0, vy: -420, ally: true });
+  }
+}
 function enemyFire(dt) {
   if ((G.efireT -= dt) > 0) return;
   G.efireT = rnd(0.4, 1.25) / (1 + 0.12 * (G.wave - 1));
   if (G.ebul.length >= 2 + Math.floor(G.wave / 2)) return;
   const bottoms = new Map();
-  for (const e of G.enemies) if (e.alive && (!bottoms.has(e.col) || bottoms.get(e.col).oy < e.oy)) bottoms.set(e.col, e);
+  for (const e of G.enemies) if (e.alive && !e.dive && (!bottoms.has(e.col) || bottoms.get(e.col).oy < e.oy)) bottoms.set(e.col, e);
   const list = [...bottoms.values()];
   if (!list.length) return;
   const px = G.player.x + G.player.w / 2;
@@ -424,7 +497,7 @@ function updateBoss(dt) {
 }
 function updateDrones(dt) {
   for (const d of G.drones) {
-    d.y += 38 * dt; d.x += Math.sin(G.time * 2 + d.seed) * 40 * dt;
+    d.y += (d.drip ? 70 : 38) * dt; d.x += Math.sin(G.time * 2 + d.seed) * (d.drip ? 14 : 40) * dt;
     eraseShields(d.x, d.y, d.w, d.h);
     const P = G.player;
     if (overlap(d.x, d.y, d.w, d.h, P.x, P.y, P.w, P.h)) { d.dead = true; playerHit(); }
@@ -434,21 +507,29 @@ function updateDrones(dt) {
 }
 function kill(e, noDrop) {
   e.alive = false;
-  const T = TYPES[e.type], cx = G.form.x + e.ox + e.w / 2, cy = G.form.y + e.oy + e.h / 2, m = comboHit(), pts = T.pts * m;
+  const T = TYPES[e.type], p = epos(e), cx = p.x + e.w / 2, cy = p.y + e.h / 2, m = comboHit(), pts = T.pts * m;
   addScore(pts);
   burst(cx, cy, C[T.color], 12);
   float(T.die, cx, cy - 6, C[T.dieColor]);
   if (m > 1) float(`+${pts}`, cx, cy + 8, C.dim, 10);
+  if (T.splits) {   // a memory leak drips two more
+    const mm = measure(["(.)"], 11);
+    for (const dx of [-14, 14]) G.drones.push({ x: cx + dx - mm.w / 2, y: cy, w: mm.w, h: mm.h, seed: Math.random() * 6, label: "(.)", die: "free()", drip: true });
+  }
   G.shake = Math.max(G.shake, 1.2);
   SFX.hit();
   if (!noDrop) dropPower(cx, cy, false);
 }
 function dropPower(x, y, force) {
-  if (!force && (Math.random() > 0.08 || G.powerups.length >= 2)) return;
-  const pool = ["refactor", "refactor", "coffee", "coffee", "duck", "lgtm", "revert"];
-  if (G.lives < 3) pool.push("revert", "revert");
-  const type = pick(pool), m = measure(["[" + POWERS[type].label + "]"], 11);
-  G.powerups.push({ type, x: clamp(x - m.w / 2, 4, view.W - m.w - 4), y, w: m.w, h: m.h });
+  if (!force && (Math.random() > 0.1 || G.powerups.length >= 2)) return;
+  const pool = ["refactor", "refactor", "coffee", "coffee", "duck", "lgtm", "revert", "sudo", "grep", "pair", "firewall", "sleep", "npm", "npm", "life"]
+    .filter((t) => (t !== "npm" || G.weapon < 4) && (t !== "life" || G.lives < MAX_LIVES));
+  if (G.lives < 3) pool.push("revert", "revert", "firewall");
+  const fake = G.wave >= 3 && Math.random() < 0.14;   // a trojan: looks like a power-up, but its name is spelled with numbers
+  const type = fake ? pick(["coffee", "refactor", "sudo", "firewall"]) : pick(pool);
+  const label = fake ? POWERS[type].label.replace(/[oe]/, (c) => (c === "o" ? "0" : "3")) : POWERS[type].label;
+  const m = measure(["[" + label + "]"], 11);
+  G.powerups.push({ type, label, fake, x: clamp(x - m.w / 2, 4, view.W - m.w - 4), y, w: m.w, h: m.h });
 }
 function applyPower(type) {
   const P = G.player, cx = P.x + P.w / 2, y = P.y - 20;
@@ -459,7 +540,17 @@ function applyPower(type) {
   } else if (type === "refactor") { G.fx.refactor = 10; float("refactor: spread shot", cx, y, C.blue); }
   else if (type === "coffee") { G.fx.coffee = 10; float("coffee: faster everything", cx, y, C.orange2); }
   else if (type === "duck") { G.duck = { hp: 5, x: P.x, y: P.y - 34, t: 0 }; float("rubber duck: explain it to me", cx, y, C.amber); }
-  else if (type === "lgtm") {
+  else if (type === "sudo") { G.fx.pierce = 9; float("sudo: shots go right through", cx, y, C.red); }
+  else if (type === "grep") { G.fx.homing = 9; float("grep: shots find the bugs", cx, y, C.blue); }
+  else if (type === "pair") { G.fx.ally = 12; float("a pair programmer joins", cx, y, C.green); }
+  else if (type === "firewall") { G.bubble = true; float("firewall up: blocks one hit", cx, y, C.orange); }
+  else if (type === "sleep") { G.fx.slow = 7; float("sleep(7): everything slows down", cx, y, C.blue); }
+  else if (type === "npm") {
+    if (G.weapon < 4) { G.weapon++; float(`npm update: weapon v${G.weapon}`, cx, y, C.amber, 12, 1.5); }
+    else { addScore(300); float("already latest: +300", cx, y, C.amber); }
+  } else if (type === "life") {
+    if (G.lives < MAX_LIVES) { G.lives++; float("+1 ✻", cx, y, C.orange2); } else { addScore(300); float("full health: +300", cx, y, C.orange2); }
+  } else if (type === "lgtm") {
     for (const b of G.ebul) burst(b.x, b.y, C.green, 2, "✓.");
     G.ebul = []; G.drones = [];
     const alive = G.enemies.filter((e) => e.alive);
@@ -471,15 +562,23 @@ function applyPower(type) {
 function playerHit() {
   const P = G.player;
   if (P.inv > 0 || G.state !== "play") return;
+  if (G.bubble) {   // the firewall takes it
+    G.bubble = false; P.inv = 1.2; G.shake = 4; G.ebul = [];
+    burst(P.x + P.w / 2, P.y + 6, C.orange, 18, "()|");
+    float("firewall held", P.x + P.w / 2, P.y - 22, C.orange, 12, 1.2);
+    SFX.hurt();
+    return;
+  }
   G.lives--; G.hits++; P.inv = 2; G.shake = 9; G.combo.n = 0;
   burst(P.x + P.w / 2, P.y + 8, C.orange, 26);
   float(pick(OUCH), P.x + P.w / 2, P.y - 22, C.red, 12, 1.4);
+  if (G.weapon > 1) { G.weapon--; float(`weapon downgraded to v${G.weapon}`, P.x + P.w / 2, P.y - 38, C.dim, 10, 1.4); }
   G.ebul = [];
   SFX.hurt();
   if (G.lives <= 0) gameOver("FATAL: unhandled exception in production");
 }
 function gameOver(reason) {
-  G.state = "over"; G.overReason = reason; G.overAt = G.rt; G.shake = 10;
+  G.state = "over"; G.overReason = reason; G.overAt = G.rt; G.shake = 10; G.scored = false;
   store.set("hi", G.hi); SFX.boom();
 }
 function bossHit() {
@@ -492,19 +591,35 @@ function bossHit() {
   float("CLIPPY.EXE has stopped responding", view.W / 2, cy, C.amber, 14, 2.2);
   float(`+${bonus}`, view.W / 2, cy + 20, C.dim, 11, 2);
   if (G.lives < MAX_LIVES) { G.lives++; float("+1 ✻", G.player.x + G.player.w / 2, G.player.y - 20, C.orange, 12, 1.6); }
+  if (G.hits === G.hitsAtBoss) { addScore(500); float("flawless: Clippy has nothing to say  +500", view.W / 2, cy + 40, C.green, 12, 2.2); }
   G.boss = null; G.drones = []; G.ebul = []; G.clearT = 2.6; G.shake = 12;
   SFX.boom();
 }
 function updateShots(dt) {
+  const homing = G.fx.homing > 0;
   for (const s of G.shots) {
+    if (homing && s.vy < 0 && !s.ally) {   // grep: steer toward the nearest bug above
+      let want = null, best = 1e9;
+      for (const e of G.enemies) {
+        if (!e.alive || hidden(e)) continue;
+        const p = epos(e), dx = p.x + e.w / 2 - s.x, dy = p.y + e.h / 2 - s.y;
+        if (dy > 0) continue;
+        const d = dx * dx + dy * dy * 0.5;
+        if (d < best) { best = d; want = dx; }
+      }
+      if (want != null) s.vx += clamp(clamp(want * 3, -240, 240) - s.vx, -700 * dt, 700 * dt);
+    }
     s.x += s.vx * dt; s.y += s.vy * dt;
     if (s.y < 18 || s.x < 0 || s.x > view.W) { s.dead = true; continue; }
     if (shieldHit(s.x, s.y)) { s.dead = true; continue; }
     for (const e of G.enemies) {
-      if (!e.alive || !overlap(s.x - 1, s.y, 2, 10, G.form.x + e.ox, G.form.y + e.oy, e.w, e.h)) continue;
-      s.dead = true; e.hp--; e.flash = 0.07;
+      if (!e.alive || hidden(e) || (s.hit && s.hit.has(e))) continue;
+      const p = epos(e);
+      if (!overlap(s.x - 1, s.y, 2, 10, p.x, p.y, e.w, e.h)) continue;
+      if (s.hit) s.hit.add(e); else s.dead = true;   // a sudo shot goes through
+      e.hp--; e.flash = 0.07;
       if (e.hp <= 0) kill(e); else { SFX.hit(); burst(s.x, s.y, C.amber, 4, "=<>"); }
-      break;
+      if (!s.hit) break;
     }
     if (s.dead) continue;
     const U = G.ufo;
@@ -512,7 +627,7 @@ function updateShots(dt) {
       s.dead = true; G.ufo = null; G.ufoT = rnd(14, 24);
       const pts = pick([50, 100, 150, 300]) * comboHit();
       addScore(pts); burst(U.x + U.w / 2, U.y + U.h / 2, C.orange2, 22);
-      float("break;", U.x + U.w / 2, U.y + 4, C.orange2, 13, 1.4); float(`+${pts}`, U.x + U.w / 2, U.y + 20, C.dim, 10, 1.4);
+      float(SEASON === "friday" ? "rollback!" : "break;", U.x + U.w / 2, U.y + 4, C.orange2, 13, 1.4); float(`+${pts}`, U.x + U.w / 2, U.y + 20, C.dim, 10, 1.4);
       dropPower(U.x + U.w / 2, U.y + U.h, true); G.shake = Math.max(G.shake, 4); SFX.boom();
       continue;
     }
@@ -520,7 +635,15 @@ function updateShots(dt) {
     if (B && overlap(s.x - 1, s.y, 2, 10, B.x + 6, B.y, B.w - 12, B.h)) { s.dead = true; burst(s.x, s.y, C.amber, 3); bossHit(); continue; }
     for (const d of G.drones) {
       if (d.dead || !overlap(s.x - 1, s.y, 2, 10, d.x, d.y, d.w, d.h)) continue;
-      s.dead = d.dead = true; addScore(15 * comboHit()); burst(d.x + d.w / 2, d.y, C.text, 8); float("DONE ✓", d.x + d.w / 2, d.y, C.green);
+      s.dead = d.dead = true; addScore(15 * comboHit()); burst(d.x + d.w / 2, d.y, d.drip ? C.green : C.text, 8);
+      float(d.die || "DONE ✓", d.x + d.w / 2, d.y, C.green);
+      break;
+    }
+    if (s.dead) continue;
+    for (const p of G.powerups) {   // shoot a trojan before it reaches you
+      if (p.dead || !p.fake || !overlap(s.x - 1, s.y, 2, 10, p.x, p.y, p.w, p.h)) continue;
+      s.dead = p.dead = true; addScore(150 * comboHit()); burst(p.x + p.w / 2, p.y, C.red, 12, "01x");
+      float("trojan neutralised +150", p.x + p.w / 2, p.y, C.red, 11, 1.3); SFX.hit();
       break;
     }
     if (s.dead) continue;
@@ -530,12 +653,14 @@ function updateShots(dt) {
   }
   G.shots = G.shots.filter((s) => !s.dead);
   G.drones = G.drones.filter((d) => !d.dead);
+  G.powerups = G.powerups.filter((p) => !p.dead);
 }
 function updateBullets(dt) {
   const P = G.player, D = G.duck;
   for (const b of G.ebul) {
     if (b.dead) continue;
-    b.y += b.vy * dt; b.x += b.vx * dt;
+    const sl = G.fx.slow > 0 ? 0.5 : 1;   // sleep(7)
+    b.y += b.vy * dt * sl; b.x += b.vx * dt * sl;
     if (b.wob) b.x += Math.sin((G.time + b.seed) * 9) * 70 * dt;
     if (b.y > view.H || b.x < -10 || b.x > view.W + 10) { b.dead = true; continue; }
     if (shieldHit(b.x, b.y + 8)) { b.dead = true; continue; }
@@ -552,8 +677,11 @@ function updateBullets(dt) {
 function updatePowerups(dt) {
   const P = G.player;
   for (const p of G.powerups) {
-    p.y += 60 * dt;
-    if (overlap(p.x, p.y, p.w, p.h, P.x, P.y, P.w, P.h)) { p.dead = true; applyPower(p.type); }
+    p.y += (p.fake ? 85 : 60) * dt;
+    if (overlap(p.x, p.y, p.w, p.h, P.x, P.y, P.w, P.h)) {
+      p.dead = true;
+      if (p.fake) { float("it was a trojan!", P.x + P.w / 2, P.y - 22, C.red, 12, 1.3); playerHit(); } else applyPower(p.type);
+    }
     else if (p.y > view.H) p.dead = true;
   }
   G.powerups = G.powerups.filter((p) => !p.dead);
@@ -582,10 +710,10 @@ function update(dt) {
   P.x = clamp(P.x + dir * (G.fx.coffee > 0 ? 340 : 220) * dt, 4, view.W - P.w - 4);
   if (keys.has("fire") && P.cool <= 0) fire();
   if (G.intro > 0) G.intro -= dt;
-  else { stepFormation(dt); enemyFire(dt); updateUfo(dt); }
+  else { stepFormation(dt); enemyFire(dt); updateUfo(dt); updateDivers(dt); }
   if (G.state !== "play") return updateFx(dt);
   if (G.boss) updateBoss(dt);
-  updateDrones(dt); updateShots(dt); updateBullets(dt); updatePowerups(dt); updateDuck(dt); updateFx(dt);
+  updateDrones(dt); updateShots(dt); updateBullets(dt); updatePowerups(dt); updateDuck(dt); updateAlly(dt); updateFx(dt);
   if (G.state !== "play") return;   // a hit can end the run mid-update
   if (!G.boss && !G.clearT && G.enemies.length && !G.enemies.some((e) => e.alive)) {
     G.clearT = 1.8; addScore(100 * G.wave);
@@ -608,13 +736,18 @@ function render() {
     ctx.fillRect(s.x * W, (s.y * H + G.rt * s.s) % H, 1.3, 1.3);
   }
   if (G.state === "title") drawTitle();
+  else if (G.state === "board") drawBoard();
   else {
     drawField(); drawHud();
     if (G.state === "over") drawOver();
+    else if (G.state === "entry") drawEntry();
     else if (G.intro > 0) drawIntro();
   }
   if (G.state !== "over" && !V.bannerUntil) {
-    if (G.state === "play" && !isFocused()) {
+    if ((G.state === "entry" || G.state === "board") && !isFocused()) {
+      box([{ t: "[ click here to type ]", c: C.amber }, { t: G.state === "entry" ? "your initials need the keyboard" : "then SPACE carries on", c: C.dim }],
+        W / 2, H * 0.9, { center: true, frame: C.dim });
+    } else if (G.state === "play" && !isFocused()) {
       box([{ t: "[ paused ]", c: C.amber }, { t: "click here to keep playing", c: C.text },
         { t: "(your typing still goes to the message box)", c: C.dim }], W / 2, H * 0.6, { center: true, frame: C.dim });
     } else if (G.state === "play" && G.paused) {
@@ -637,21 +770,29 @@ function drawField() {
   }
   for (const e of G.enemies) {
     if (!e.alive) continue;
-    const T = TYPES[e.type], hurt = e.hp < T.hp, lines = hurt ? T.hurt[frame] : T.frames[frame];
-    drawSprite(sprite(lines, 12, e.flash > 0 ? "#ffffff" : C[hurt ? "amber" : T.color]), G.form.x + e.ox, G.form.y + e.oy);
+    const T = TYPES[e.type], hurt = e.hp < T.hp, lines = hurt ? T.hurt[frame] : T.frames[frame], p = epos(e);
+    drawSprite(sprite(lines, 12, e.flash > 0 ? "#ffffff" : C[hurt ? "amber" : T.color]), p.x, p.y, hidden(e) ? 0.12 : 1);
   }
   if (G.ufo) drawSprite(sprite(UFO[Math.floor(G.rt * 6) % 2], 12, C.orange2, 7), G.ufo.x, G.ufo.y);
   if (G.boss) drawBoss();
-  for (const d of G.drones) drawSprite(sprite(["[TODO]"], 11, C.text), d.x, d.y);
+  for (const d of G.drones) drawSprite(sprite([d.label || "[TODO]"], 11, d.drip ? C.green : C.text), d.x, d.y);
   for (const p of G.powerups) {
     const pw = POWERS[p.type];
-    drawSprite(sprite(["[" + pw.label + "]"], 11, C[pw.color], 7), p.x, p.y, 0.65 + 0.35 * Math.sin(G.rt * 10));
+    drawSprite(sprite(["[" + (p.label || pw.label) + "]"], 11, C[pw.color], 7), p.x, p.y, 0.65 + 0.35 * Math.sin(G.rt * 10));
   }
-  for (const s of G.shots) drawSprite(sprite([s.vx < 0 ? "\\" : s.vx > 0 ? "/" : "|"], 12, C.amber, 6), s.x - 3.5, s.y);
+  for (const s of G.shots) {
+    const ch = s.vx < -40 ? "\\" : s.vx > 40 ? "/" : "|";
+    drawSprite(sprite([ch], 12, s.pierce ? C.red : s.ally ? C.green : C.amber, 6), s.x - 3.5, s.y);
+  }
   for (const b of G.ebul) drawSprite(sprite([b.ch], 12, b.color, 5), b.x - 3.5, b.y);
   if (G.state === "play" || Math.floor(G.rt * 4) % 2) {
     if (!(P.inv > 0 && Math.floor(G.rt * 14) % 2)) drawSprite(sprite(PLAYER, 12, G.fx.coffee > 0 ? C.orange2 : C.orange, 7), P.x, P.y);
   }
+  if (G.bubble && G.state === "play") {
+    const a = 0.65 + 0.3 * Math.sin(G.rt * 6);
+    txt("(", P.x - 8, P.y - 2, C.orange, 22, "left", 6, a); txt(")", P.x + P.w + 1, P.y - 2, C.orange, 22, "left", 6, a);
+  }
+  if (G.ally) drawSprite(sprite(ALLY, 10, C.green, 5), G.ally.x, G.ally.y);
   if (G.duck) drawSprite(sprite(DUCK, 10, C.amber, 5), G.duck.x, G.duck.y);
   for (const p of G.particles) drawSprite(sprite([p.ch], 10, p.color, 3), p.x, p.y, 1 - p.t / p.life);
   for (const f of G.floaters) txt(f.text, f.x, f.y, f.color, f.size, "center", 5, Math.min(1, 2.2 * (1 - f.t / f.life)));
@@ -685,8 +826,18 @@ function drawHud() {
   if (G.fx.refactor > 0) fx.push([`refactor ${Math.ceil(G.fx.refactor)}s`, C.blue]);
   if (G.fx.coffee > 0) fx.push([`coffee ${Math.ceil(G.fx.coffee)}s`, C.orange2]);
   if (G.duck) fx.push([`duck ${"♥".repeat(G.duck.hp)}`, C.amber]);
-  let x = W - 8;
-  for (const [t, c] of fx.reverse()) { txt(t, x, 18, c, 10, "right", 3); x -= (t.length + 2) * charW(10); }
+  if (G.fx.pierce > 0) fx.push([`sudo ${Math.ceil(G.fx.pierce)}s`, C.red]);
+  if (G.fx.homing > 0) fx.push([`grep ${Math.ceil(G.fx.homing)}s`, C.blue]);
+  if (G.fx.ally > 0) fx.push([`pair ${Math.ceil(G.fx.ally)}s`, C.green]);
+  if (G.fx.slow > 0) fx.push([`sleep ${Math.ceil(G.fx.slow)}s`, C.blue]);
+  if (G.bubble) fx.push(["firewall", C.orange]);
+  if (G.weapon > 1) fx.push([`weapon v${G.weapon}`, C.amber]);
+  let x = W - 8, row = 18;
+  for (const [t, c] of fx.reverse()) {
+    const w = (t.length + 2) * charW(10);
+    if (x - w < W * 0.42 && row === 18) { row = 30; x = W - 8; }
+    txt(t, x, row, c, 10, "right", 3); x -= w;
+  }
 }
 function drawIntro() {
   const W = view.W, H = view.H, a = Math.min(1, G.intro / 0.4), y = H * 0.5;
@@ -701,7 +852,7 @@ function drawIntro() {
 function drawTitle() {
   const W = view.W, H = view.H, cx = W / 2;
   const wait = !V.manual;   // it popped up by itself while Claude works (not opened with the button or the menu)
-  let y = Math.max(10, H * 0.5 - 196 - (wait ? 11 : 0));
+  let y = Math.max(6, (H - 352 - (wait ? 22 : 0)) / 2);
   if (wait) {   // typed out like a prompt, then a blinking cursor
     const s = "While you wait...", n = Math.min(s.length, Math.floor((G.rt - V.shownAt) * 16)), cw = charW(12);
     const x0 = cx - ((s.length + 3) * cw) / 2;
@@ -709,27 +860,32 @@ function drawTitle() {
     txt(s.slice(0, n) + (n < s.length || Math.floor(G.rt * 2.5) % 2 ? "▍" : ""), x0 + cw * 2, y, C.dim, 12);
     y += 22;
   }
-  y += drawPixelText("BUG INVADERS", cx, y, W * 0.75, 5, C.amber, C.orange) + 8;
-  txt(`something to shoot at while ${Who()} thinks`, cx, y, C.dim, 12, "center"); y += 26;
-  const legend = [["conflict", "merge conflict", "30  · takes two hits"], ["fail", "failing test", "20"], ["nan", "NaN", "20  · wobbly shots"],
-    ["todo", "TODO", "10"], ["bug", "bug", "10"]];
-  const lx = cx - 150;
-  for (const [t, name, pts] of legend) {
-    drawSprite(sprite(TYPES[t].frames[Math.floor(G.rt * 2) % 2], 12, C[TYPES[t].color]), lx, y);
-    txt(name, lx + 70, y + 6, C.text, 12); txt(pts, lx + 200, y + 6, C.dim, 12);
-    y += 28;
+  y += drawPixelText("BUG INVADERS", cx, y, W * 0.75, 4, C.amber, C.orange) + 4;
+  txt(`something to shoot at while ${Who()} thinks`, cx, y, C.dim, 12, "center"); y += 20;
+  const legend = [["conflict", "merge conflict", "30 · takes two hits"], ["fail", "failing test", "20"], ["nan", "NaN", "20 · wobbly shots"],
+    ["todo", "TODO", "10"], ["bug", "bug", "10"], ["heisen", "heisenbug", "40 · blinks out of reach"], ["leak", "memory leak", "15 · drips on death"],
+    ["segv", "segfault", "50 · dives at you"], ["ufo", UFO_NAME, "??? · break; it"]];
+  const two = W >= 540, colW = 262, lx0 = two ? cx - colW - 6 : cx - 130, rows = two ? 5 : legend.length;
+  legend.forEach(([t, name, pts], i) => {
+    const col = two ? Math.floor(i / rows) : 0, r = i % rows, x = lx0 + col * (colW + 12), yy = y + r * 27;
+    const lines = t === "ufo" ? UFO[Math.floor(G.rt * 6) % 2] : TYPES[t].frames[Math.floor(G.rt * 2) % 2];
+    drawSprite(sprite(lines, 12, t === "ufo" ? C.orange2 : C[TYPES[t].color], t === "ufo" ? 6 : 5), x + (t === "ufo" ? -6 : 0), yy);
+    txt(name, x + 82, yy + 1, C.text, 11); txt(pts, x + 82, yy + 14, C.dim, 10);
+  });
+  y += rows * 27 + 8;
+  const items = Object.values(POWERS).map((p) => [`[${p.label}]`, C[p.color]]), cw = charW(11);
+  const width = (part) => part.reduce((a, [t]) => a + (t.length + 1) * cw, 0);
+  const lines = width(items) > W - 30 ? [items.slice(0, Math.ceil(items.length / 2)), items.slice(Math.ceil(items.length / 2))] : [items];
+  for (const part of lines) {
+    let x = cx - width(part) / 2;
+    for (const [t, c] of part) { txt(t, x, y, c, 11, "left", 4); x += (t.length + 1) * cw; }
+    y += 16;
   }
-  drawSprite(sprite(UFO[Math.floor(G.rt * 6) % 2], 12, C.orange2, 6), lx - 20, y);
-  txt("infinite loop", lx + 70, y + 6, C.text, 12); txt("???  · break; it", lx + 200, y + 6, C.dim, 12);
-  y += 36;
-  const pw = Object.values(POWERS), cw = charW(11);
-  let total = pw.reduce((n, p) => n + (p.label.length + 3) * cw, 0), px = cx - total / 2;
-  for (const p of pw) { txt(`[${p.label}]`, px, y, C[p.color], 11, "left", 4); px += (p.label.length + 3) * cw; }
-  y += 28;
+  txt("collect npm update to level up your weapon · beware fake power-ups: their names are spelled with numbers", cx, y, C.faint, 10, "center"); y += 18;
   const blink = Math.floor(G.rt * 2.5) % 2 === 0;
-  if (isFocused()) txt("press SPACE to start", cx, y, C.amber, 14, "center", 6, blink ? 1 : 0.35);
+  if (isFocused()) txt("press SPACE to start · L: top 10", cx, y, C.amber, 14, "center", 6, blink ? 1 : 0.35);
   else txt("[ click here to play ]", cx, y, C.amber, 14, "center", 6, blink ? 1 : 0.35);
-  txt("the message box keeps the keyboard until you click in · Esc hides", cx, y + 22, C.faint, 11, "center");
+  txt("the message box keeps the keyboard until you click in · Esc hides", cx, y + 20, C.faint, 11, "center");
 }
 function drawOver() {
   const W = view.W, H = view.H;
@@ -739,7 +895,80 @@ function drawOver() {
   txt(G.overReason || "", W / 2, y, C.red, 13, "center", 4); y += 26;
   txt(`score ${G.score}   ·   best ${G.hi}`, W / 2, y, C.text, 12, "center"); y += 18;
   txt(`reached wave ${G.wave}   ·   best combo ${G.combo.best}`, W / 2, y, C.dim, 12, "center"); y += 34;
-  if (G.rt - G.overAt > 0.8) txt("press SPACE to git reset --hard", W / 2, y, C.amber, 13, "center", 5, Math.floor(G.rt * 2.5) % 2 ? 1 : 0.4);
+  const high = !G.scored && qualifies(G.score), blink = Math.floor(G.rt * 2.5) % 2 ? 1 : 0.4;
+  if (high) txt("★ a top-10 score ★", W / 2, y - 14, C.green, 13, "center", 5);
+  if (G.rt - G.overAt > 0.8) txt(high ? "press SPACE to sign it" : "press SPACE to git reset --hard · L: top 10", W / 2, y + 8, C.amber, 13, "center", 5, blink);
+}
+// ---------- the leaderboard: top 10 and the initials screen ----------
+const scores = () => { const l = store.get("scores", []); return Array.isArray(l) ? l : []; };
+const qualifies = (n) => n > 0 && (scores().length < 10 || n > scores()[9].s);
+const ALPHA = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+G.hi = Math.max(G.hi, scores()[0]?.s || 0);
+function beginEntry() {
+  const last = String(store.get("last", "AAA")).toUpperCase().replace(/[^A-Z0-9]/g, "A").padEnd(3, "A").slice(0, 3);
+  G.entry = { c: last.split(""), pos: 0, warn: -9 }; G.state = "entry"; keys.clear();
+}
+function entryKey(e) {
+  const E = G.entry, k = e.key, n = ALPHA.length;
+  const cycle = (d) => { E.c[E.pos] = ALPHA[(ALPHA.indexOf(E.c[E.pos]) + d + n) % n]; };
+  if (k === "ArrowUp") cycle(1);
+  else if (k === "ArrowDown") cycle(-1);
+  else if (k === "ArrowLeft") E.pos = Math.max(0, E.pos - 1);
+  else if (k === "ArrowRight") E.pos = Math.min(2, E.pos + 1);
+  else if (k === "Backspace") { if (E.c[E.pos] === " ") E.pos = Math.max(0, E.pos - 1); E.c[E.pos] = " "; }
+  else if (/^[a-z0-9]$/i.test(k)) { E.c[E.pos] = k.toUpperCase(); E.pos = Math.min(2, E.pos + 1); }
+  else if (k === "Enter") {
+    if (E.c.includes(" ")) { E.warn = G.rt; G.shake = 3; } else submitScore();
+  }
+  SFX.step(E.pos);
+}
+function submitScore() {
+  const name = G.entry.c.join(""), list = scores();
+  const row = { n: name, s: G.score, w: G.wave, t: Date.now(), c: G.cheat ? 1 : 0 };
+  store.set("last", name);
+  list.push(row); list.sort((a, b) => b.s - a.s || a.t - b.t);
+  const top = list.slice(0, 10); store.set("scores", top);
+  G.scored = true; G.entry = null; SFX.reply();
+  openBoard("over", top.indexOf(row));
+}
+function openBoard(from, rank) { G.state = "board"; G.boardFrom = from; G.boardAt = G.rt; G.rank = rank; }
+function drawEntry() {
+  const W = view.W, H = view.H, cx = W / 2, E = G.entry;
+  ctx.fillStyle = "rgba(11,11,10,.84)"; ctx.fillRect(0, 0, W, H);
+  let y = Math.max(8, H * 0.1);
+  y += drawPixelText("HIGH SCORE", cx, y, W * 0.6, 6, C.amber, C.orange) + 10;
+  const rank = scores().filter((r) => r.s >= G.score).length + 1;
+  txt(`${G.score} points · wave ${G.wave} · #${rank} on the board`, cx, y, C.text, 13, "center", 3); y += 28;
+  txt("sign it with three characters", cx, y, C.dim, 12, "center"); y += 34;
+  for (let i = 0; i < 3; i++) {
+    const x = cx + (i - 1) * 62, on = i === E.pos, ch = E.c[i] === " " ? "_" : E.c[i];
+    txt(ch, x, y, on ? C.amber : C.text, 44, "center", on ? 10 : 3);
+    ctx.fillStyle = on ? C.amber : C.dim; ctx.fillRect(x - 20, y + 54, 40, 3);
+    if (on) { const b = Math.floor(G.rt * 3) % 2; txt("▲", x, y - 18 - b, C.orange, 12, "center"); txt("▼", x, y + 62 + b, C.orange, 12, "center"); }
+  }
+  y += 90;
+  if (G.rt - E.warn < 1.4) txt("all three, please", cx, y, C.red, 13, "center", 4);
+  y += 24;
+  txt("↑ ↓ change the letter · ← → move · type to set it · ⌫ clears · ENTER saves", cx, y, C.dim, 11, "center");
+}
+function drawBoard() {
+  const W = view.W, H = view.H, cx = W / 2, list = scores();
+  let y = Math.max(8, (H - 330) / 2);
+  y += drawPixelText("TOP 10", cx, y, W * 0.4, 5, C.amber, C.orange) + 12;
+  const x0 = cx - 140;
+  txt("RANK  NAME   SCORE    WAVE", x0, y, C.dim, 11); y += 20;
+  for (let i = 0; i < 10; i++) {
+    const r = list[i], mine = i === G.rank, blink = mine && Math.floor(G.rt * 3) % 2 === 0;
+    const col = mine ? (blink ? C.amber : C.orange2) : r ? (i < 3 ? C.text : C.dim) : C.faint;
+    txt(String(i + 1).padStart(2, " ") + ".", x0, y, col, 12, "left", mine ? 5 : 0);
+    txt(r ? r.n + (r.c ? "*" : "") : "---", x0 + 52, y, col, 12, "left", mine ? 5 : 0);
+    txt(r ? pad(r.s) : "000000", x0 + 108, y, col, 12, "left", mine ? 5 : 0);
+    txt(r ? String(r.w) : "-", x0 + 200, y, col, 12, "left");
+    y += 20;
+  }
+  y += 8;
+  const blink = Math.floor(G.rt * 2.5) % 2 ? 1 : 0.4;
+  txt(G.boardFrom === "title" ? "press SPACE to go back" : "press SPACE to play again", cx, y, C.amber, 13, "center", 5, blink);
 }
 function drawBanner() {
   const W = view.W, H = view.H, p = 1 - (V.bannerUntil - performance.now()) / BANNER_MS;
@@ -756,6 +985,7 @@ let raf = 0, last = 0, statusAt = 0;
 const isFocused = () => document.activeElement === root || V.forceFocus;
 function advance(dt, force) {
   G.rt += dt;
+  if (G.state === "over" && !G.scored && !V.bannerUntil && G.rt - G.overAt > 2.2) { if (qualifies(G.score)) beginEntry(); else G.scored = true; }
   if (G.state === "play" && !G.paused && !V.bannerUntil && (force || isFocused())) update(dt);
   G.shake = Math.max(0, G.shake - dt * 28);
 }
@@ -793,10 +1023,43 @@ function paintCtl() {
 // ---------- keys: only while the game has focus; game keys never reach the app (Esc there would stop Claude) ----------
 const keys = new Set();
 const KEYMAP = { ArrowLeft: "left", a: "left", A: "left", ArrowRight: "right", d: "right", D: "right", " ": "fire", ArrowUp: "fire",
-  w: "fire", W: "fire", Enter: "start", p: "pause", P: "pause", m: "mute", M: "mute", ArrowDown: "none" };
+  w: "fire", W: "fire", Enter: "start", p: "pause", P: "pause", m: "mute", M: "mute", ArrowDown: "none", l: "scores", L: "scores" };
+// Easter eggs: the Konami code, and a few words typed while playing
+let typed = "", seq = [];
+const KONAMI = ["arrowup", "arrowup", "arrowdown", "arrowdown", "arrowleft", "arrowright", "arrowleft", "arrowright", "b", "a"];
+const EGG_WORDS = {
+  sudo() {
+    if (G.sudoWave === G.wave) return float("sudo: not in the sudoers file. This incident will be reported.", view.W / 2, view.H * 0.5, C.red, 12, 2.4);
+    G.sudoWave = G.wave; G.cheat = true; G.fx.pierce = Math.max(G.fx.pierce, 10); SFX.power();
+    float("sudo: you are root now", view.W / 2, view.H * 0.5, C.red, 14, 2);
+  },
+  xyzzy() { addScore(1); float("Nothing happens.", view.W / 2, view.H * 0.5, C.dim, 13, 2); },
+  quack() { if (!G.duck) applyPower("duck"); },
+  clippy() {
+    float("It looks like you're cheating. Need help?", view.W / 2, view.H * 0.5, C.amber, 13, 2.4);
+    const m = measure(["[TODO]"], 11);
+    for (let i = 0; i < 3; i++) G.drones.push({ x: view.W * (0.25 + 0.25 * i) - m.w / 2, y: 30, w: m.w, h: m.h, seed: Math.random() * 6 });
+  },
+  idkfa() { float("wrong game. Try the other one.", view.W / 2, view.H * 0.5, C.dim, 13, 2); },
+};
+function eggKey(e) {
+  if (G.state !== "play") return;
+  const k = e.key.toLowerCase();
+  seq.push(k); if (seq.length > 10) seq.shift();
+  if (k.length === 1) typed = (typed + k).slice(-8);
+  if (seq.length === 10 && seq.every((x, i) => x === KONAMI[i]) && !G.konami) {
+    G.konami = G.cheat = true; G.weapon = 4; G.bubble = true; G.lives = MAX_LIVES; G.fx.pierce = 15; G.fx.homing = 15; SFX.reply();
+    float("↑↑↓↓←→←→BA  30 lives!", view.W / 2, view.H * 0.45, C.amber, 16, 2.4);
+    float("(all right, five. And every upgrade.)", view.W / 2, view.H * 0.45 + 20, C.dim, 11, 2.4);
+    seq = [];
+  }
+  for (const [w, fn] of Object.entries(EGG_WORDS)) if (typed.endsWith(w)) { typed = ""; fn(); }
+}
 root.addEventListener("keydown", (e) => {
   if (e.ctrlKey || e.altKey || e.metaKey) return;   // the app's shortcuts keep working
   if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); hideNow(true); return; }
+  if (G.state === "entry" && e.target === root && !V.bannerUntil) { e.preventDefault(); e.stopPropagation(); entryKey(e); return; }
+  if (e.target === root && !e.repeat) eggKey(e);
   const k = KEYMAP[e.key];
   if (!k || e.target !== root) return;
   e.preventDefault(); e.stopPropagation();
@@ -813,8 +1076,22 @@ root.addEventListener("blur", () => keys.clear());
 function press(k) {
   if (V.bannerUntil) return;
   if (k === "mute") return toggleSound();
-  if (G.state === "title") { if (k === "fire" || k === "start") newGame(); return; }
-  if (G.state === "over") { if ((k === "fire" || k === "start") && G.rt - G.overAt > 0.8) newGame(); return; }
+  if (G.state === "board") {
+    if ((k === "fire" || k === "start" || k === "scores") && G.rt - G.boardAt > 0.4) {
+      if (G.boardFrom === "title") G.state = "title";
+      else if (!G.scored && qualifies(G.score)) beginEntry();
+      else newGame();
+    }
+    return;
+  }
+  if (G.state === "title") { if (k === "scores") openBoard("title", -1); else if (k === "fire" || k === "start") newGame(); return; }
+  if (G.state === "over") {
+    if (G.rt - G.overAt <= 0.8) return;
+    if (k === "scores") openBoard("over", -1);
+    else if (k === "fire" || k === "start") { if (!G.scored && qualifies(G.score)) beginEntry(); else newGame(); }
+    return;
+  }
+  if (G.state === "entry") return;
   if (k === "pause") G.paused = !G.paused;
   else if (G.paused && (k === "fire" || k === "start")) G.paused = false;
 }
