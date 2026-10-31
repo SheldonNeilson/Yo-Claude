@@ -169,6 +169,8 @@ The first time, a welcome tour explains everything and checks how well it hears 
   onto it (or onto any session in it), between groups, or out again (drop on **Recent**, on a group, or on the bar that
   appears at the top while you drag). Or right-click a session → *move to group*. Right-click a group to rename it, move
   it, remove it, or **show only this group**, so you can share your screen without showing everything.
+- **Chats come first.** Under **Recent** sits the permanent **Chats** group: conversations with no folder, which can't be
+  removed. Right-click it → *new group inside Chats…* to sort chats into groups of their own, nested inside it.
 - A group made from a folder also has that folder's actions: **new session here** (or hover it and click `+`), open in VS
   Code, show in Explorer, terminal. Removing it takes the folder out of the list (its files and sessions are untouched).
 - `+ folder` adds a folder (and its group). Or paste or type a folder path into the box at the top and press Enter.

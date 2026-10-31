@@ -1070,8 +1070,8 @@ class Api:
     def set_group(self, sid, cwd, group):
         self._app.router.group(sid, cwd, group)
 
-    def add_group(self, name):
-        return self._app.router.add_group(name)
+    def add_group(self, name, parent=None):
+        return self._app.router.add_group(name, parent)
 
     def rename_group(self, old, new):
         return self._app.router.rename_group(old, new)

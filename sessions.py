@@ -2812,7 +2812,9 @@ class Router:
     def group_info(self):
         """The groups in order, and for the ones that are a folder's (named after it by default) which folder."""
         gc = self.meta.data.setdefault("group_cwd", {})
-        return {"groups": list(self.meta.data["groups"]), "cwds": {g: c for g, c in gc.items() if g in self.meta.data["groups"]}}
+        gp = self.meta.data.setdefault("group_parent", {})
+        return {"groups": list(self.meta.data["groups"]), "cwds": {g: c for g, c in gc.items() if g in self.meta.data["groups"]},
+                "parents": {g: p for g, p in gp.items() if g in self.meta.data["groups"]}}
 
     def default_group(self, cwd):
         """The group a folder's sessions go into unless you put them elsewhere: named after the folder (None = chats), made
@@ -2839,12 +2841,15 @@ class Router:
         self.emit_groups()
         return name
 
-    def add_group(self, name):
+    def add_group(self, name, parent=None):
+        """A group of your own; `parent`: a group it sits inside (only the chats group has groups inside it)."""
         name = " ".join(str(name or "").split())[:40]
         if not name:
             return "Give the group a name."
         if name not in self.meta.data["groups"]:
             self.meta.data["groups"].append(name)
+            if parent and parent in self.meta.data["groups"]:
+                self.meta.data.setdefault("group_parent", {})[name] = parent
         self.groups_changed()
         return None
 
@@ -2859,6 +2864,12 @@ class Router:
         gc = self.meta.data.setdefault("group_cwd", {})
         if old in gc:
             gc[new] = gc.pop(old)
+        gp = self.meta.data.setdefault("group_parent", {})
+        for k in list(gp):
+            if k == old:
+                gp[new] = gp.pop(old)
+            elif gp[k] == old:
+                gp[k] = new
         for m in self.meta.data["sessions"].values():
             if m.get("group") == old:
                 m["group"] = new
@@ -2872,6 +2883,7 @@ class Router:
         if name in gc and gc[name] is None:   # the chats group (conversations without a folder): always there, renamable but never removed
             return "The chats group is permanent: it holds your conversations that have no folder."
         folder = gc.pop(name, "")
+        self.meta.data.setdefault("group_parent", {}).pop(name, None)
         if name in self.meta.data["groups"]:
             self.meta.data["groups"].remove(name)
         for m in self.meta.data["sessions"].values():
