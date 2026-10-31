@@ -407,10 +407,8 @@ function trashGroup(g) {
   confirmBox(`Move all ${list.length} session${list.length === 1 ? "" : "s"} of “${g}” to the trash? You can restore them from the trash. The group itself stays${g in S.groupCwd ? ", and so do the folder's files" : ""}.`, async () => {
     const failed = await api().clean_up(list.map((s) => ({ id: s.id, cwd: s.cwd })));
     if (failed && failed.length) {
-      const why = failed.map((f) => `• ${findSession(f.id)?.title || f.id}: ${f.error}`).join("
-");
-      alertBox(`${list.length - failed.length} moved to the trash. ${failed.length} could not be:
-${why}`);
+      const why = failed.map((f) => `• ${findSession(f.id)?.title || f.id}: ${f.error}`).join("\n");
+      alertBox(`${list.length - failed.length} moved to the trash. ${failed.length} could not be:\n${why}`);
     } else toast(`${list.length} moved to the trash`);
   });
 }
