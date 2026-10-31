@@ -105,7 +105,7 @@ window.gallery = {
     q.oninput = () => { this.query = q.value; this.paintList(); };
     find.appendChild(q);
     body.appendChild(find);
-    const cols = el("div", "fcols");   // click to sort; again to reverse
+    const cols = el("div", "fcols gcols");   // click to sort; again to reverse (the same columns as the rows below)
     for (const [key, label, tip] of [["order", "chat", "In the order they came up in the chat"], ["name", "name", "Sort by name"],
       ["mtime", "modified", "Sort by when the file last changed"], ["ctime", "created", "Sort by when the file was made"]]) {
       const c = el("button", "fcol gcol" + (this.sortKey === key ? " on" : ""), label + (this.sortKey === key ? (this.sortDir > 0 ? " ▲" : " ▼") : ""));
@@ -142,11 +142,15 @@ window.gallery = {
     else { th.textContent = this.icon(e); th.classList.add("ico"); }
     th.title = "Preview";
     th.onclick = (ev) => { ev.stopPropagation(); this.preview(e); };
-    const dates = e.kind === "shot" ? `seen ${shortTime(e.ts)}` : `modified ${shortTime(e.mtime)} · created ${shortTime(e.ctime)}`;
     const size = e.size ? ` · ${this.size(e.size)}` : "";
-    info.innerHTML = `<div class="gname">${esc(e.name)}</div><div class="gdates dim small" title="${e.kind === "shot" ? "" : esc(`modified ${new Date(e.mtime * 1000).toLocaleString()}\ncreated ${new Date(e.ctime * 1000).toLocaleString()}`)}">${esc(dates + size)}</div>` +
-      `<div class="gvia faint small">${esc(e.via)}${e.mentions.length > 1 ? ` · ${e.mentions.length}×` : ""} · ${esc(whenText(e.lastTs || e.ts) || "")}</div>`;
-    r.append(th, info);
+    info.innerHTML = `<div class="gname">${esc(e.name)}</div>` +
+      `<div class="gvia faint small">${esc(e.via)}${e.mentions.length > 1 ? ` · ${e.mentions.length}×` : ""}${esc(size)}</div>`;
+    const date = (t) => el("div", "gdate dim small", t ? esc(shortTime(t)) : "");   // (a screenshot has no file: its time is under "modified")
+    const dm = date(e.mtime), dc = date(e.kind === "shot" ? 0 : e.ctime);
+    if (e.kind !== "shot") {
+      dm.title = `modified ${new Date(e.mtime * 1000).toLocaleString()}`; dc.title = `created ${new Date(e.ctime * 1000).toLocaleString()}`;
+    } else dm.title = `seen ${new Date(e.ts * 1000).toLocaleString()}`;
+    r.append(th, info, dm, dc);
     r.title = (e.path || e.name) + "\nClick: jump to it in the chat · picture: preview · right-click: more";
     r.onclick = () => this.jump(e);
     r.oncontextmenu = (ev) => this.menu(ev, e);
