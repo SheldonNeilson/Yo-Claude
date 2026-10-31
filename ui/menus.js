@@ -136,7 +136,7 @@ const MENUS = {
     "-",
     ["sub:power"],
     ["Keep PC Awake While Claude Works", () => toggleSetting("awake_while_working"), { checked: setting("awake_while_working") }],
-    ["Keep PC Awake (Always)", () => toggleSetting("keep_awake", false), { checked: setting("keep_awake", false) }],
+    ["Keep PC Awake (Always)", () => toggleSetting("keep_awake"), { checked: setting("keep_awake") }],
     "-",
     ["Chat Sliver Under the Arcade", () => toggleSetting("invaders_peek"), { checked: setting("invaders_peek") }],
     ["Play Bug Invaders Now", () => window.invaders?.show()],

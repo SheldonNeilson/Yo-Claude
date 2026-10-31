@@ -95,6 +95,9 @@ class App:
         self.ready = {}            # window -> loaded
         self.tick = 0
         self.taskbar = None
+        if not self.settings.get("awake_v2"):   # once: keeping the PC awake is on by default now (☕ awake turns it off)
+            self.settings.update(keep_awake=True, awake_v2=True)
+            self.settings.save()
         if not self.settings.get("character"):   # once: who had her face on keeps her (Claudia); new installs get Claude
             self.settings["character"] = "female" if self.settings.get("avatar") is True else "male"
             self.settings.save()
@@ -441,13 +444,6 @@ class App:
         def checked(key):
             return lambda item: bool(s.get(key, True))
 
-        def flip_off(key):   # (a setting that's off until turned on)
-            def action(icon, item):
-                s[key] = not s.get(key, False)
-                s.save()
-                self.emit_settings()
-            return action
-
         menu = pystray.Menu(
             pystray.MenuItem(lambda item: f"Open {self.name()}", lambda: self.show_main(), default=True),
             pystray.MenuItem("Talk now", lambda: self.commands.put("talk")),
@@ -466,8 +462,7 @@ class App:
                              checked=checked("bar_when_idle")),
             pystray.MenuItem("Keep PC awake while Claude works", toggle("awake_while_working"),
                              checked=checked("awake_while_working")),
-            pystray.MenuItem("Keep PC awake (always)", flip_off("keep_awake"),
-                             checked=lambda item: bool(s.get("keep_awake", False))),
+            pystray.MenuItem("Keep PC awake (always)", toggle("keep_awake"), checked=checked("keep_awake")),
             pystray.MenuItem("Launch with Windows", toggle("launch_at_login", set_launch_at_login),
                              checked=checked("launch_at_login")),
             pystray.Menu.SEPARATOR,
@@ -491,13 +486,13 @@ class App:
 
     def keep_awake(self):
         """Keeps the PC from going to sleep (the screen may still turn off): while Claude works in any session, of
-        any project, including background tasks (on by default, like Claude Code's own), or always, as long as Yo
-        Claude runs (off by default). Options, the tray menu or ☕ in the menu bar switch them."""
+        any project, including background tasks, or always, as long as Yo Claude runs (both on by default).
+        [☕ awake] at the top of the window, Options or the tray menu switch them."""
         es_continuous, es_system = 0x80000000, 0x00000001
         awake = None
         while True:
             s = self.settings
-            want = bool(s.get("keep_awake", False)) or (
+            want = bool(s.get("keep_awake", True)) or (
                 s.get("awake_while_working", True) and bool(self.router.busy_report()))
             if want != awake:
                 ctypes.windll.kernel32.SetThreadExecutionState(es_continuous | (es_system if want else 0))
