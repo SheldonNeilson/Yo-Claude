@@ -845,7 +845,7 @@ button { white-space: nowrap; }
 #docsPath:hover { color: var(--orange); }
 
 /* the sidebar's top-level groups (renderTree) */
-.gnode .fname { color: var(--amber); } .gnode .gcount { color: var(--faint); font-size: 11px; }
+.gnode .gcount { color: var(--faint); font-size: 11px; }
 .fnode.drop, .session.drop, .smore.drop, .ungroupbar.drop { background: #2a2210; outline: 1px dashed var(--amber); outline-offset: -1px; }
 .ungroupbar { position: sticky; top: 0; z-index: 2; padding: 8px; text-align: center; color: var(--amber); background: #1c1710; border-bottom: 1px dashed var(--amber); }
 .gfocus { display: flex; align-items: center; gap: 6px; padding: 5px 8px; color: var(--amber); border-bottom: 1px solid var(--line2); background: #1c1710; }

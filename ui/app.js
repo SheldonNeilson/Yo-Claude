@@ -10,7 +10,7 @@ const api = () => new Proxy(window.pywebview.api, {
     return r;
   }),
 });
-const S = { settings: {}, folder: null, workspaces: [], groups: [], lists: {}, busy: new Set(), bg: new Set(), work: {}, active: null,
+const S = { settings: {}, folder: null, workspaces: [], groups: [], groupCwd: {}, lists: {}, busy: new Set(), bg: new Set(), work: {}, active: null,
             items: [], display: { state: "starting" }, filter: "", manual: {}, more: new Set() };
 
 const MODELS = [["", "model: default"], ["claude-fable-5-1", "Fable 5.1"], ["claude-opus-5-5", "Opus 5.5"],
@@ -116,7 +116,7 @@ function handle(e) {
     case "live": if (S.active && e.session === S.active.id) transcript.live(e.image); break;
     case "settings": S.settings = e.settings; renderToggles(); avatar.apply(); renderBusy(); renderName(); renderAwake(); break;
     case "folder": S.folder = e.folder; renderHead(); break;
-    case "groups": S.groups = e.groups; renderTree(); break;
+    case "groups": S.groups = e.groups; S.groupCwd = e.cwds || {}; renderTree(); break;
     case "confirm_quit":
       confirmBox(`${Who()} is in the middle of a reply in ${e.busy.map((b) => `“${b.title}”`).join(", ")}. ` +
                  "Quitting now cuts it off (background tasks keep running and are picked up after a restart).",
@@ -268,6 +268,8 @@ async function loadLists() {
   const keys = [null, ...S.workspaces];
   const lists = await Promise.all(keys.map((cwd) => api().list_sessions(cwd)));
   keys.forEach((cwd, i) => { S.lists[keyOf(cwd)] = lists[i] || []; });
+  const gi = await api().group_info();   // (listing made each folder's group)
+  S.groups = gi.groups; S.groupCwd = gi.cwds || {};
   for (const s of allSessions()) {
     if (s.busy) S.busy.add(s.id);
     if (s.background) { S.busy.add(s.id); S.bg.add(s.id); }
@@ -308,7 +310,7 @@ function renderTree() {
     .sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0) || (b.modified || 0) - (a.modified || 0));
   if (!f && !focus) {   // the latest sessions from every folder, so nothing recent hides in a collapsed folder
     const open = isOpen(RECENT_KEY, null, true);
-    const recent = allSessions().filter((s) => !(s.group && S.groups.includes(s.group))).sort((a, b) => (b.modified || 0) - (a.modified || 0)).slice(0, RECENT_SHOWN);
+    const recent = allSessions().sort((a, b) => (b.modified || 0) - (a.modified || 0)).slice(0, RECENT_SHOWN);
     const head = el("div", "fnode recent");
     head.innerHTML = `<span class="tw">${open ? "▾" : "▸"}</span><span class="fname">◷ RECENT</span>` +
       `${recent.some((s) => S.busy.has(s.id)) ? '<span class="spin busy">✻</span>' : ""}` +
@@ -319,59 +321,42 @@ function renderTree() {
     tree.appendChild(head);
     if (open) for (const s of recent) tree.appendChild(sessionRow(s, true));
   }
-  // your groups: top level, above the folders, each with its sessions from any folder
+  // groups: a folder's sessions sit in the group named after it, until you move them; every group is the same kind of thing
   for (const g of S.groups) {
     if (focus && g !== focus) continue;
     const list = inGroup(g);
     if (f && !list.length) continue;
-    const gkey = "grp:" + g, open = (f && list.length) || isOpen(gkey, null, true);
-    const head = el("div", "fnode gnode");
-    head.innerHTML = `<span class="tw">${open ? "▾" : "▸"}</span><span class="fname">▦ ${esc(g)}</span><span class="gcount">${list.length}</span>` +
-      `${list.some((s) => S.busy.has(s.id)) ? '<span class="spin busy">✻</span>' : ""}${list.some((s) => s.unseen) ? '<span class="dot" title="New reply"></span>' : ""}`;
-    head.title = `${g}: right-click to rename, show only this group, or remove it (the sessions go back under their folders)`;
-    head.onclick = () => { setOpen(gkey, !open); renderTree(); };
+    const cwd = S.groupCwd[g] ?? null, isFolder = g in S.groupCwd;
+    const gkey = "grp:" + g, open = (f && list.length) || isOpen(gkey, list);
+    const head = el("div", "fnode gnode" + (isFolder && S.active && sameFolder(S.active.cwd ?? null, cwd) ? " here" : ""));
+    head.innerHTML = `<span class="tw">${open ? "▾" : "▸"}</span><span class="fname">${isFolder && cwd ? "▤" : "▦"} ${esc(g)}</span><span class="gcount">${list.length}</span>` +
+      `${list.some((s) => S.busy.has(s.id)) ? '<span class="spin busy">✻</span>' : ""}${list.some((s) => s.unseen) ? '<span class="dot" title="New reply"></span>' : ""}` +
+      `<span class="spacer"></span><button class="fadd" title="New ${groupHome(g) ? "session in " + esc(base(groupHome(g))) : "chat"}">+</button>`;
+    head.title = isFolder && cwd ? `${g}: ${cwd}` : g;
+    head.onclick = (e) => {
+      if (e.target.closest(".fadd")) return api().new_session(groupHome(g));
+      setOpen(gkey, !open); renderTree();
+    };
     head.oncontextmenu = (e) => { e.preventDefault(); groupMenu(e, g); };
     wireDrop(head, g);
     tree.appendChild(head);
     if (!open) continue;
-    for (const s of list) { const r = sessionRow(s, true); wireDrop(r, g); tree.appendChild(r); }   // (drop on any row of the group too)
-    if (!list.length) { const h = el("div", "smore dim", "empty: drag a session here, or right-click it → move to group"); wireDrop(h, g); tree.appendChild(h); }
-  }
-  if (focus) { tree.scrollTop = scroll; return; }
-  const nodes = [{ key: "", cwd: null, label: "CHATS", title: "Conversations without a folder" },
-                 ...S.workspaces.map((w) => ({ key: keyOf(w), cwd: w, label: base(w), title: w }))];
-  for (const n of nodes) {
-    const all = (S.lists[n.key] || []).filter((s) => !(s.group && S.groups.includes(s.group)))   // (sessions in a group show there)
-      .filter((s) => !f || (s.title || "").toLowerCase().includes(f) || (s.first || "").toLowerCase().includes(f));
-    const busy = all.some((s) => S.busy.has(s.id)), unseen = all.some((s) => s.unseen);
-    const open = (f && all.length) || isOpen(n.key, S.lists[n.key] || []);
-    const head = el("div", "fnode" + (sameFolder(S.active?.cwd ?? null, n.cwd) && S.active ? " here" : ""));
-    head.innerHTML = `<span class="tw">${open ? "▾" : "▸"}</span><span class="fname">${n.cwd ? "▤ " : "◇ "}${esc(n.label)}</span>` +
-      `${busy ? '<span class="spin busy">✻</span>' : ""}${unseen ? '<span class="dot" title="New reply"></span>' : ""}` +
-      `<span class="spacer"></span><button class="fadd" title="New ${n.cwd ? "session in this folder" : "chat"}">+</button>`;
-    head.title = n.title;
-    head.onclick = (e) => {
-      if (e.target.closest(".fadd")) return api().new_session(n.cwd);
-      setOpen(n.key, !open); renderTree();
-    };
-    head.oncontextmenu = (e) => { e.preventDefault(); folderMenu(e, n); };
-    wireDrop(head, null);   // (out of its group: back under its own folder)
-    tree.appendChild(head);
-    if (!open) continue;
-    const pinned = all.filter((s) => s.pinned);
-    const rest = all.filter((s) => !s.pinned);
-    const rows = [...pinned.map((s) => ["", s])];
-    const limit = S.more.has(n.key) || f ? rest.length : Math.max(0, SESSIONS_SHOWN - rows.length);
-    rows.push(...rest.slice(0, limit).map((s) => ["", s]));
-    for (const [g, s] of rows) tree.appendChild(s ? sessionRow(s) : el("div", "sgroup", esc(g)));
+    const pinned = list.filter((s) => s.pinned), rest = list.filter((s) => !s.pinned);
+    const limit = S.more.has(gkey) || f ? rest.length : Math.max(0, SESSIONS_SHOWN - pinned.length);
+    for (const s of [...pinned, ...rest.slice(0, limit)]) { const r = sessionRow(s, !isFolder || !cwd || !sameFolder(s.cwd, cwd)); wireDrop(r, g); tree.appendChild(r); }   // (drop on any row of the group too)
     if (rest.length > limit) {
       const more = el("div", "smore", `show ${rest.length - limit} more`);
-      more.onclick = () => { S.more.add(n.key); renderTree(); };
+      more.onclick = () => { S.more.add(gkey); renderTree(); };
       tree.appendChild(more);
     }
-    if (!all.length) tree.appendChild(el("div", "smore dim", f ? "no matches" : "no sessions yet"));
+    if (!list.length) { const h = el("div", "smore dim", f ? "no matches" : "empty: drag a session here, or right-click it → move to group"); wireDrop(h, g); tree.appendChild(h); }
   }
   tree.scrollTop = scroll;
+}
+// where "+" starts a session for a group: its folder, else the folder of its newest session, else a plain chat
+function groupHome(g) {
+  if (g in S.groupCwd) return S.groupCwd[g];
+  return allSessions().filter((s) => s.group === g).sort((a, b) => (b.modified || 0) - (a.modified || 0))[0]?.cwd ?? null;
 }
 function sessionRow(s, withFolder = false) {
   const row = el("div", "session" + (S.active && S.active.id === s.id ? " active" : "") + (s.unseen ? " unseen" : ""));
@@ -388,8 +373,8 @@ function sessionRow(s, withFolder = false) {
   row.draggable = true;   // drag it onto a group (or, from a group, back onto its folder)
   row.ondragstart = (e) => {
     dragSession = s; e.dataTransfer.setData("text/plain", s.title || ""); e.dataTransfer.effectAllowed = "move";
-    if (S.groups.includes(s.group)) {   // a bar to drop it on to take it out of its group (folders may be hidden by "show only this group")
-      const bar = el("div", "ungroupbar", `↩ drop here to take it out of “${esc(s.group)}”`);
+    if (!inFolderGroup(s)) {   // a bar to drop it on to send it back to its folder's group (that group may be hidden by "show only this group")
+      const bar = el("div", "ungroupbar", `↩ drop here to send it back to its folder's group`);
       bar.id = "ungroupBar"; wireDrop(bar, null);
       setTimeout(() => { if (dragSession) { const t = $("#tree"); t.insertBefore(bar, t.firstChild); } }, 0);   // (after the drag has started: changing the page inside dragstart can cancel it)
     }
@@ -398,9 +383,11 @@ function sessionRow(s, withFolder = false) {
   return row;
 }
 let dragSession = null;
+const inFolderGroup = (s) => g_isHome(s.group, s.cwd);
+function g_isHome(g, cwd) { return g in S.groupCwd && sameFolder(S.groupCwd[g], cwd ?? null); }
 // Makes `node` take a dragged session: into group g, or (g = null) out of its group. Nothing happens if it is already so.
 function wireDrop(node, g) {
-  const ok = () => dragSession && (g === null ? S.groups.includes(dragSession.group) : dragSession.group !== g);
+  const ok = () => dragSession && (g === null ? !inFolderGroup(dragSession) : dragSession.group !== g);
   node.addEventListener("dragover", (e) => { if (ok()) { e.preventDefault(); e.dataTransfer.dropEffect = "move"; node.classList.add("drop"); } });
   node.addEventListener("dragleave", () => node.classList.remove("drop"));
   node.addEventListener("drop", (e) => {
@@ -413,33 +400,26 @@ function wireDrop(node, g) {
   });
 }
 function groupMenu(e, g) {
-  const focused = S.settings.group_focus === g, i = S.groups.indexOf(g);
+  const focused = S.settings.group_focus === g, i = S.groups.indexOf(g), home = g in S.groupCwd ? S.groupCwd[g] : null;
   showMenu(e, [
     ["sub:" + g],
     [focused ? "show everything again" : "show only this group", () => api().set_setting("group_focus", focused ? null : g)],
+    [home ? "new session in " + base(home) : "new chat", () => api().new_session(home)],
+    home ? ["open in vs code", () => api().open_path(home, "code")] : null,
+    home ? ["show in explorer", () => api().open_path(home, "open")] : null,
+    ...(home ? termMenuItems(home, null, "dir") : []),
     "-",
     ["rename…", () => ask("Rename group", g, async (n) => { const err = await api().rename_group(g, n); if (err) alertBox(err); })],
     ["move up", () => api().move_group(g, -1), { disabled: i <= 0 }],
     ["move down", () => api().move_group(g, 1), { disabled: i >= S.groups.length - 1 }],
     "-",
-    ["remove group (sessions go back under their folders)", () => confirmBox(`Remove the group “${g}”? Its sessions stay where they are on disk and go back under their folders.`,
-      () => { if (S.settings.group_focus === g) api().set_setting("group_focus", null); api().delete_group(g); })],
-  ]);
-}
-$("#newGroupBtn").onclick = () => ask("New group", "", async (n) => { const err = await api().add_group(n); if (err) alertBox(err); });
-function folderMenu(e, n) {
-  showMenu(e, [
-    ["sub:" + (n.cwd || "chats")],
-    [n.cwd ? "new session here" : "new chat", () => api().new_session(n.cwd)],
-    n.cwd ? ["open in vs code", () => api().open_path(n.cwd, "code")] : null,
-    n.cwd ? ["show in explorer", () => api().open_path(n.cwd, "open")] : null,
-    ...(n.cwd ? termMenuItems(n.cwd, null, "dir") : []),
-    ["put all its sessions in group", null, { sub: [...S.groups.map((g) => [g, () => api().group_folder(n.cwd, g)]),
-      ["new group…", () => ask("New group for this folder's sessions", n.label, (g) => api().group_folder(n.cwd, g))]] }],
-    n.cwd ? "-" : null,
-    n.cwd ? ["remove from list (keeps files and sessions)", () => api().remove_folder(n.cwd)] : null,
+    ["remove group" + (home ? " (and the folder from the list)" : ""), () => confirmBox(home
+      ? `Remove “${g}” and its folder from the list? The folder's files and sessions are not touched; add the folder again any time.`
+      : `Remove the group “${g}”? Its sessions are not touched: they go back to the group of their own folder.`,
+      () => { if (S.settings.group_focus === g) api().set_setting("group_focus", null); api().delete_group(g); }), { disabled: g in S.groupCwd && !home }],
   ].filter(Boolean));
 }
+$("#newGroupBtn").onclick = () => ask("New group", "", async (n) => { const err = await api().add_group(n); if (err) alertBox(err); });
 function sessionMenu(e, s) {
   const groups = S.groups.filter((g) => g !== s.group).map((g) => ["  → " + g, () => api().set_group(s.id, s.cwd, g)]);
   showMenu(e, [
@@ -447,7 +427,7 @@ function sessionMenu(e, s) {
     [s.pinned ? "unpin" : "pin to top", () => api().pin(s.id, s.cwd, !s.pinned)],
     "-", ["sub:move to group"], ...groups,
     ["  → new group…", () => ask("New group", "", (g) => { if (!S.groups.includes(g)) S.groups.push(g); api().set_group(s.id, s.cwd, g); })],
-    s.group ? ["  → no group", () => api().set_group(s.id, s.cwd, null)] : null,
+    ["  → its folder's group", () => api().set_group(s.id, s.cwd, null), { disabled: inFolderGroup(s) }],
     "-",
     ["fork (branch the conversation)", async () => { const err = await api().fork(s.id, s.cwd); if (err) alertBox(err); }],
     ["move to trash", () => confirmBox(`Move “${s.title}” to the trash? You can restore it from the trash.`,

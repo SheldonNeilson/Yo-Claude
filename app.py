@@ -1073,6 +1073,9 @@ class Api:
     def move_group(self, name, delta):
         self._app.router.move_group(name, delta)
 
+    def group_info(self):
+        return self._app.router.group_info()
+
     def group_folder(self, cwd, group):
         self._app.router.group_folder(cwd, group)
 

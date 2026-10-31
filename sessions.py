@@ -2235,9 +2235,16 @@ class Router:
             log.warning("list_sessions failed: %s", e)
             infos = []
         meta = self.meta.data["sessions"]
+        groups = self.meta.data["groups"]
+        home = self.default_group(cwd)   # (every session lives in a group: its own, or else its folder's)
+        homed = False
         out, seen = [], set()
         for s in infos:
             m = meta.get(s.session_id, {})
+            if m.get("group") not in groups:
+                m = self.meta.session(s.session_id)
+                m["group"] = home
+                homed = True
             seen.add(s.session_id)
             out.append({"id": s.session_id, "title": m.get("title") or s.custom_title or s.summary or s.first_prompt
                         or "(empty)", "first": s.first_prompt, "modified": s.last_modified, "created": s.created_at,
@@ -2250,7 +2257,10 @@ class Router:
             if s.id not in seen and same_folder(s.cwd, cwd):
                 out.append({"id": s.id, "title": "New session", "modified": s.last_used * 1000,
                             "created": s.last_used * 1000, "cwd": cwd, "source": "yoclaude", "pinned": False,
-                            "group": None, "live": True, "busy": s.id in self.work})
+                            "group": (self.meta.data["sessions"].get(s.id) or {}).get("group") if (self.meta.data["sessions"].get(s.id) or {}).get("group") in groups else home,
+                            "live": True, "busy": s.id in self.work})
+        if homed:
+            self.meta.save()
         out.sort(key=lambda x: x["modified"] or 0, reverse=True)
         return out
 
@@ -2781,9 +2791,42 @@ class Router:
     # top-level groups of the sidebar: named piles of sessions from any folder (sessions not in one stay under their folder)
     def groups_changed(self):
         self.meta.save()
-        self.emit("groups", groups=list(self.meta.data["groups"]))
+        self.emit_groups()
         for folder in [None] + self.workspaces():
             self.sessions_changed(folder)
+
+    def emit_groups(self):
+        self.emit("groups", **self.group_info())
+
+    def group_info(self):
+        """The groups in order, and for the ones that are a folder's (named after it by default) which folder."""
+        gc = self.meta.data.setdefault("group_cwd", {})
+        return {"groups": list(self.meta.data["groups"]), "cwds": {g: c for g, c in gc.items() if g in self.meta.data["groups"]}}
+
+    def default_group(self, cwd):
+        """The group a folder's sessions go into unless you put them elsewhere: named after the folder (None = chats), made
+        on first use. It is an ordinary group after that: rename it, move it, drag sessions in and out."""
+        groups = self.meta.data["groups"]
+        gc = self.meta.data.setdefault("group_cwd", {})
+        for g, c in gc.items():
+            if g in groups and same_folder(c, cwd):
+                return g
+        if cwd:
+            base = os.path.basename(cwd.rstrip("\\/")) or cwd
+            tries = [base, f"{os.path.basename(os.path.dirname(cwd.rstrip(chr(92) + '/')))} / {base}"]
+        else:
+            tries = ["Chats"]
+        name = next((t for t in tries if t not in groups), None)
+        n = 2
+        while name is None:
+            if f"{tries[-1]} {n}" not in groups:
+                name = f"{tries[-1]} {n}"
+            n += 1
+        gc[name] = cwd or None
+        groups.append(name)
+        self.meta.save()
+        self.emit_groups()
+        return name
 
     def add_group(self, name):
         name = " ".join(str(name or "").split())[:40]
@@ -2802,6 +2845,9 @@ class Router:
         if new != old and new in groups:
             return f"There is already a group called {new}."
         groups[groups.index(old)] = new
+        gc = self.meta.data.setdefault("group_cwd", {})
+        if old in gc:
+            gc[new] = gc.pop(old)
         for m in self.meta.data["sessions"].values():
             if m.get("group") == old:
                 m["group"] = new
@@ -2809,12 +2855,17 @@ class Router:
         return None
 
     def delete_group(self, name):
-        """The group goes; its sessions go back under their folders (nothing else is touched)."""
+        """The group goes. A folder's own group takes the folder out of the list (its files and sessions are never touched);
+        its other sessions go back to the group of their own folder."""
+        gc = self.meta.data.setdefault("group_cwd", {})
+        folder = gc.pop(name, "")
         if name in self.meta.data["groups"]:
             self.meta.data["groups"].remove(name)
         for m in self.meta.data["sessions"].values():
             if m.get("group") == name:
                 m["group"] = None
+        if folder:
+            self.set_workspace(folder, False)
         self.groups_changed()
 
     def move_group(self, name, delta):

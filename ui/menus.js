@@ -24,7 +24,7 @@ function zoom(step) {
   api().set_setting("zoom", z);
 }
 function expandAll(open) {
-  for (const k of ["", ...S.workspaces.map(keyOf)]) S.manual[k] = { open, at: Date.now() };
+  for (const k of S.groups.map((g) => "grp:" + g)) S.manual[k] = { open, at: Date.now() };
   api().set_setting("tree_manual", S.manual); renderTree();
 }
 async function pastePath() { $("#folderPath").focus(); $("#folderPath").value = (await api().paste_text()) || ""; }
