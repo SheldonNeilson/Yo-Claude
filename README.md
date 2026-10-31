@@ -82,6 +82,11 @@ The first time, a welcome tour explains everything and checks how well it hears 
   typing are fixed straight away, the rest at a short pause. **Typing prediction** shows the next word or three in
   grey after the cursor as you type (Tab takes them). A grey **suggested next message** fills the empty box (Tab takes
   it), even while Claude is still working.
+- **File pane**: the middle of the window is shared by the chat and a file pane ([chat] and [editor] in the top right, or
+  View): side by side with a draggable divider, or either one filling the middle. Every file opens there in tabs: text
+  files straight in the editor (colour, line numbers, Format, Ctrl+S saves; Esc never drops your edits), Markdown with
+  edit / split / preview, pictures, video, audio and PDFs too. A file Claude changes reloads by itself, unless you have
+  unsaved edits (then it asks). All the panes toggle and resize.
 - **Terminal**: Ctrl+` (or the [term] button) opens a real terminal (PowerShell) between the chat and the message box,
   with tabs; drag its top edge to resize. Right-click any file or folder (files, changes and media tabs, links in the chat,
   the sessions list) for **open in terminal** (a file opens its folder), plus cd there in the current terminal, paste its

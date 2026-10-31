@@ -1418,7 +1418,8 @@ function mediaUnder(node, it) {
   if (mediaCache.has(it.i)) return show(mediaCache.get(it.i));
   api().resolve_paths([...tokens], cwd).then((list) => { mediaCache.set(it.i, list || []); show(list || []); });
 }
-async function viewFile(path, cwd, opts = {}) {
+function viewFile(path, cwd, opts = {}) { return docs.open(path, cwd, opts); }   // files open in the file pane (docs.js)
+async function viewFileModal(path, cwd, opts = {}) {   // (the old pop-up viewer, kept as a fallback)
   const m = await api().media(path, cwd);
   if (!m || m.error) return alertBox(m?.error || "Couldn't open that.");
   const d = dialog(m.name);

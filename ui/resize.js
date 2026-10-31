@@ -4,10 +4,10 @@ const PANES = {
   side: { el: "#side", edge: "right", setting: "side_width", css: "--side-w", min: 180, max: 560, fallback: 560 },
   panel: { el: "#panel", edge: "left", setting: "panel_width", css: "--panel-w", min: 240, max: 900, fallback: 340 },
 };
-const MIN_CHAT = 520;   // the conversation keeps at least this much
+const MIN_CHAT = 520;   // the middle (chat, or chat and file pane) keeps at least this much
 function setPaneWidth(p, w) {
   const other = Object.values(PANES).find((o) => o !== p), otherEl = $(other.el);
-  const room = innerWidth - MIN_CHAT - (otherEl.offsetParent ? otherEl.getBoundingClientRect().width : 0);
+  const room = innerWidth - (document.querySelector('#middle:not(.no-docs):not(.no-chat)') ? 660 : MIN_CHAT) - (otherEl.offsetParent ? otherEl.getBoundingClientRect().width : 0);
   w = Math.round(Math.max(p.min, Math.min(p.max, w, room)));
   $("#app").style.setProperty(p.css, w + "px");
   return w;

@@ -809,3 +809,34 @@ button { white-space: nowrap; }
 .term-screen { position: absolute; inset: 4px 4px 0 8px; }
 #termBtn.on { color: var(--orange); }
 #term .xterm-viewport { background: transparent !important; }
+
+/* the middle: chat | divider | file pane (docs.js) */
+#middle { display: flex; min-width: 0; min-height: 0; }
+#middle > #chat { flex: 1 1 0; min-width: 0; }
+#docsGrip { flex: none; width: 7px; margin: 0 -4px; position: relative; z-index: 5; cursor: col-resize; }
+#docsGrip:hover, body.resizing #docsGrip { background: linear-gradient(90deg, transparent 2px, var(--orange) 2px 5px, transparent 5px); }
+#docs { flex: none; width: var(--docs-w, 50%); display: flex; flex-direction: column; min-width: 0; min-height: 0; border-left: 2px solid var(--line2); background: var(--bg); }
+#middle.no-docs > #docs, #middle.no-docs > #docsGrip, #middle.no-chat > #chat, #middle.no-chat > #docsGrip { display: none; }
+#middle.no-chat > #docs { flex: 1 1 0; width: auto; border-left: 0; }
+#docsTabs { flex: none; display: flex; gap: 4px; padding: 5px 8px 0; overflow-x: auto; scrollbar-width: none; min-height: 28px; border-bottom: 1px solid var(--line); background: var(--bg2); }
+.doc-tab { display: inline-flex; flex: none; align-items: center; border: 1px solid var(--line2); border-bottom: 0; color: var(--dim); }
+.doc-tab.on { border-color: var(--orange); color: var(--orange); background: var(--bg); }
+.doc-tab button { border: 0; background: none; color: inherit; padding: 0 6px; font: inherit; font-size: 12px; }
+.doc-tab .doc-name { max-width: 24ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.doc-tab .doc-x { color: var(--faint); padding: 0 5px 0 0; } .doc-tab .doc-x:hover { color: var(--red); }
+.doc-dot { color: var(--amber); }
+#docsBar { flex: none; display: flex; align-items: center; gap: 4px; padding: 4px 8px; border-bottom: 1px dashed var(--line2); min-height: 30px; }
+#docsBar button { padding: 2px 10px; } #docsBar button.on { color: var(--orange); border-color: var(--orange); } #docsBar button:disabled { opacity: .45; cursor: default; }
+#docsBody { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; }
+#docsEmpty { margin: 14vh 20px 0; text-align: center; color: var(--faint); }
+.doc-view { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.doc-view.doc-media-box { align-items: center; justify-content: center; padding: 8px; overflow: auto; }
+.doc-media { max-width: 100%; max-height: 100%; background: #000; }
+.doc-pdf { width: 100%; height: 100%; border: 0; background: #fff; }
+.doc-split { flex: 1; min-height: 0; display: flex; }
+.doc-split .ce-wrap { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; }
+.doc-split .ce { flex: 1; height: auto; min-height: 0; border-left: 0; border-right: 0; }
+.doc-split .doc-preview { flex: 1 1 0; min-width: 0; height: auto; max-height: none; border: 0; border-left: 1px solid var(--line); overflow-y: auto; }
+.doc-split.mode-edit .doc-preview { display: none; }
+.doc-split.mode-preview .doc-preview { border-left: 0; }
+.doc-view .tvask { margin: 6px 8px; }

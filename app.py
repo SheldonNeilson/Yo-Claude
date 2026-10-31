@@ -937,6 +937,14 @@ class Api:
             return {"error": missing(path, cwd)}
         return dict(workspace.read_file(os.path.dirname(full), os.path.basename(full)), full=full)
 
+    def file_mtime(self, path, cwd=None):
+        """When a file last changed (the file pane polls this to reload what Claude edits); 0 if it's gone."""
+        full = self._resolve(path, cwd)
+        try:
+            return os.path.getmtime(full) if full else 0
+        except OSError:
+            return 0
+
     def save_text(self, path, text, mtime=None, cwd=None):
         """Save a text file edited in the viewer."""
         full = self._resolve(path, cwd)

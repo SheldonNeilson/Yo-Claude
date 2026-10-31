@@ -358,6 +358,10 @@ function codeEditor({ text, path, readOnly, onInput, onSave, onCancel }) {
   return {
     el: wrap, ta, format,
     get value() { return ta.value; },
+    setValue(t) {   // replace the whole text (a reload): colour, numbers and scroll position carry on
+      clearBlock(); const st = ta.scrollTop, sl = ta.scrollLeft;
+      ta.value = t; paintHL(); paintStatus(); ta.scrollTop = st; ta.scrollLeft = sl; sync();
+    },
     focus() { ta.focus(); },
   };
 }

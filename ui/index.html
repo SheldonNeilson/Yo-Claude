@@ -16,7 +16,7 @@
     <button data-menu="options">Options</button><button data-menu="help">Help</button>
     <span class="spacer"></span>
     <span id="paneBtns" title="Which panes show beside the chat">
-      <button id="sideBtn" class="panebtn" title="Sessions list (Ctrl+Shift+B)"><b>◧</b> sessions</button><button id="focusBtn" class="panebtn" title="Just the chat: hide both panes, or bring them back"><b>▣</b> focus</button><button id="panelBtn" class="panebtn" title="Files, changes and git (Ctrl+B)"><b>◨</b> files</button>
+      <button id="sideBtn" class="panebtn" title="Sessions list (Ctrl+Shift+B)"><b>◧</b> sessions</button><button id="focusBtn" class="panebtn" title="Just the chat: hide both panes, or bring them back"><b>▣</b> focus</button><button id="chatBtn" class="panebtn on" title="Show or hide the chat"><b>▤</b> chat</button><button id="editorBtn" class="panebtn" title="Show or hide the file pane (files open here)"><b>▥</b> editor</button><button id="panelBtn" class="panebtn" title="Files, changes and git (Ctrl+B)"><b>◨</b> files</button>
     </span>
     <span id="limitsMeter" class="hidden"></span>
     <button id="updateBadge" class="hidden" title="A newer version is on GitHub: click to update"></button>
@@ -59,6 +59,7 @@
     </div>
   </aside>
 
+  <div id="middle">
   <main id="chat">
     <div id="sessionHead">
       <span id="sessionTitle">new session</span>
@@ -109,6 +110,13 @@
       </div>
     </div>
   </main>
+  <div id="docsGrip" title="Drag to resize · double-click to reset"></div>
+  <section id="docs">
+    <div id="docsTabs"></div>
+    <div id="docsBar"></div>
+    <div id="docsBody"><div id="docsEmpty">No file open. Click a file in the files tab, or a file path in the chat.</div></div>
+  </section>
+  </div>
 
   <aside id="panel"></aside>
 </div>
@@ -131,6 +139,7 @@
 <script src="panel.js"></script>
 <script src="gallery.js"></script>
 <script src="terminal.js"></script>
+<script src="docs.js"></script>
 <script src="tasks.js"></script>
 <script src="plan.js"></script>
 <script src="btw.js"></script>
