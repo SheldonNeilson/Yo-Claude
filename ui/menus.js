@@ -18,6 +18,17 @@ function conversationText() {
   return S.items.filter((it) => it && ["user", "assistant", "note"].includes(it.kind))
     .map((it) => (it.kind === "user" ? "> " : "") + (it.text || "")).join("\n\n");
 }
+// the layout back to how a fresh install looks: which panes are open, their sizes, the face's height, zoom, and which
+// groups are open. Sessions, files, terminals and every other setting are left alone.
+const LAYOUT_SETTINGS = ["side_open", "panel_open", "chat_open", "docs_open", "side_width", "panel_width", "docs_width", "face_height", "zoom", "tree_manual", "group_focus"];
+function resetWorkspace() {
+  if (typeof docs !== "undefined" && docs.dirty()) return alertBox("A file in the editor has unsaved changes: save or close it first, then reset.");
+  confirmBox("Reset the workspace to the default layout? Pane sizes, which panes are open, the face's height, zoom and which groups are open go back to how they start. Your sessions, files, terminals and other settings are not touched.", async () => {
+    await Promise.all(LAYOUT_SETTINGS.map((k) => api().set_setting(k, null)));
+    try { localStorage.removeItem("yoc.term.h"); } catch (_) { /* nothing saved */ }
+    location.reload();
+  });
+}
 function zoom(step) {
   const z = step === 0 ? 1 : Math.min(1.6, Math.max(0.7, (S.settings.zoom || 1) + step));
   document.body.style.zoom = z;
@@ -78,6 +89,8 @@ const MENUS = {
       ["Keep visible when idle", () => toggleSetting("bar_when_idle"), { checked: setting("bar_when_idle") }],
     ] }],
     ["Start Maximized", () => toggleSetting("start_maximized"), { checked: setting("start_maximized") }],
+    "-",
+    ["Reset Workspace to Default…", () => resetWorkspace()],
   ],
   session: () => {
     const s = activeSession(), a = S.active;
