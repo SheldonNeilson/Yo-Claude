@@ -2247,12 +2247,15 @@ class Router:
             infos = []
         meta = self.meta.data["sessions"]
         groups = self.meta.data["groups"]
-        home = self.default_group(cwd)   # (every session lives in a group: its own, or else its folder's)
+        # every session lives in a group: its own, or else its folder's. Only the folders in the sidebar (and chats) get a group
+        # made: a folder merely worked in, or opened at start-up, must not bring a removed group back.
+        listed = not cwd or any(same_folder(cwd, w) for w in self.meta.data["workspaces"])
+        home = self.default_group(cwd) if listed else None
         homed = False
         out, seen = [], set()
         for s in infos:
             m = meta.get(s.session_id, {})
-            if m.get("group") not in groups:
+            if home and m.get("group") not in groups:
                 m = self.meta.session(s.session_id)
                 m["group"] = home
                 homed = True
@@ -2891,6 +2894,9 @@ class Router:
                 m["group"] = None
         if folder:
             self.set_workspace(folder, False)
+            self.meta.data["recent_folders"] = [f for f in self.meta.data["recent_folders"] if not same_folder(f, folder)]
+            if self.folder and same_folder(self.folder, folder):   # (new sessions would start there and bring the folder back)
+                self.folder = None
         self.groups_changed()
 
     def move_group(self, name, delta):
