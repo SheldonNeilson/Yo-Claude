@@ -87,7 +87,9 @@ wrong idle makes every following clip "match".
 `think_tap_lips` = a straight finger on the lips, i.e. a shush: only for shushing, never idling or thinking. `listen_lean` (leans in
 with the mouth wide open) and `idle_s_swallow` (mouth open) look odd on repeat. They stay on disk. **Look at every new hand-near-face
 or wide-mouth clip before it joins the pool** (contact sheet of 8 frames per clip); a prompt like "taps her lips with one finger" gets
-drawn as a shush, so word hand prompts as a curled finger on the chin or cheek. `idle_sigh` also opens the mouth wide: watch it.
+drawn as a shush, so word hand prompts as a curled finger on the chin or cheek. `idle_sigh` also opens the mouth wide: hidden too. The user wants a listening lean with the mouth CLOSED and a sigh that is head-back
+and subtle: re-recording as `listen_lean_closed` (Female 1, Male 1) and `idle_sigh_soft` (Female 1) at the top of their wishlists
+(2026-11-01). When they land, check them by contact sheet, then add the other characters' versions.
 
 ### Open questions
 - Is the crude identity classifier good enough, or should a real face-embedding check go into `make_avatar_clips.py` (it only compares
