@@ -1348,6 +1348,7 @@ function fileMenuItems(path, cwd, apps) {
     ["sub:" + base(path)],
     ["preview", () => viewFile(path, cwd)],
     ["pop out in its own window", () => api().pop_out(path, cwd)],
+    ["show in the files tab", async () => { const m = await api().media(path, cwd); if (m?.path) revealInFiles(m.path); }],
     ["show in explorer", () => api().open_path(path, "reveal", cwd)],
     ...termMenuItems(path, cwd, "file"),
     ["copy path", async () => { const m = await api().media(path, cwd); copyText(m.path || path, "path copied"); }],
@@ -1405,7 +1406,7 @@ function mediaUnder(node, it) {
       c.oncontextmenu = (e) => {
         if (m.kind !== "dir") return showFileMenu(e, m.path, cwd);
         e.preventDefault(); e.stopPropagation();
-        showMenu(e, [["sub:" + m.name], ["open in explorer", () => api().open_path(m.path, "open")],
+        showMenu(e, [["sub:" + m.name], ["show in the files tab", () => revealInFiles(m.path)], ["open in explorer", () => api().open_path(m.path, "open")],
           ["open in vs code", () => api().open_path(m.path, "code")], ...termMenuItems(m.path, null, "dir"),
           ["copy path", () => copyText(m.path, "path copied")]]);
       };

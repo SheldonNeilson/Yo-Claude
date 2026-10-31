@@ -4,7 +4,7 @@
 // audio and PDFs show in the same tabs. Files Claude changes on disk reload by themselves unless you have unsaved edits.
 "use strict";
 const docs = (() => {
-  const mid = $("#middle"), pane = $("#docs"), tabsEl = $("#docsTabs"), barEl = $("#docsBar"), bodyEl = $("#docsBody");
+  const mid = $("#middle"), pane = $("#docs"), tabsEl = $("#docsTabs"), barEl = $("#docsBar"), bodyEl = $("#docsBody"), pathEl = $("#docsPath");
   const tabs = [];
   let cur = null;
   const st = { chat: true, docs: false, w: 0, mdMode: "edit" };
@@ -64,7 +64,7 @@ const docs = (() => {
       b.append(name, x);
       b.oncontextmenu = (e) => {
         e.preventDefault(); e.stopPropagation();
-        showMenu(e, [["close", () => close(t)], ["close the others", () => tabs.filter((o) => o !== t).forEach((o) => close(o))],
+        showMenu(e, [["close", () => close(t)], ["show in the files tab", () => revealInFiles(t.m.path)], ["close the others", () => tabs.filter((o) => o !== t).forEach((o) => close(o))],
           ["close all", () => tabs.slice().forEach((o) => close(o))], "-", ["copy path", () => copyText(t.m.path, "path copied")]]);
       };
       tabsEl.appendChild(b);
@@ -104,7 +104,11 @@ const docs = (() => {
   function paintBar() {
     barEl.innerHTML = "";
     const t = cur;
+    pathEl.classList.toggle("hidden", !t);
     if (!t) return;
+    pathEl.textContent = t.m.path;   // (shown from its left end cut off, so the file name is always visible)
+    pathEl.title = "Where this file lives: click to show it in the files tab";
+    pathEl.onclick = () => revealInFiles(t.m.path);
     if (t.mdSeg) {
       for (const [m, label, tip] of [["edit", "edit", "Edit the Markdown source"], ["split", "split", "Source and the formatted result side by side"], ["preview", "preview", "The formatted result"]]) {
         const x = el("button", t.mdMode === m ? "on" : "", label);

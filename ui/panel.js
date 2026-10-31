@@ -587,3 +587,25 @@ function shortTime(t) {
     : d.toLocaleDateString([], { year: "numeric", month: "short", day: "numeric" });
   return `${day} ${time}`;
 }
+
+// Show a file or folder (full path) in the files tab: the built-in explorer. Opens the panel, browses to where it lives (the
+// folder being browsed, the session's folder, or else the file's own folder), selects it and flashes it.
+async function revealInFiles(full) {
+  full = String(full || "").replace(/\//g, "\\").replace(/[\\]+$/, "");
+  if (!full) return;
+  const norm = (p) => p.replace(/\//g, "\\").replace(/[\\]+$/, "").toLowerCase();
+  const under = (root) => root && root !== "::pc" && norm(full).startsWith(norm(root) + "\\");
+  const rel = (root) => full.slice(root.replace(/[\\/]+$/, "").length + 1).replace(/\\/g, "/");
+  $("#app").classList.add("with-panel"); api().set_setting("panel_open", true);
+  panel.tab = "files";
+  let r;
+  if (under(panel.cwd)) r = rel(panel.cwd);
+  else if (under(panel.session)) { await panel.goTo(null); r = rel(panel.session); }
+  else { const cut = full.lastIndexOf("\\"); await panel.goTo(full.slice(0, cut)); r = full.slice(cut + 1); }
+  panel.openPath(panel.parentOf(r));
+  await panel.load();
+  panel.select([r], r);
+  const row = panel.rows.get(r);
+  if (row) { row.scrollIntoView({ block: "center" }); row.classList.add("flash"); setTimeout(() => row.classList.remove("flash"), 2000); }
+  else toast("Couldn't find it in the files tab");
+}

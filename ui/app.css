@@ -840,3 +840,6 @@ button { white-space: nowrap; }
 .doc-split.mode-edit .doc-preview { display: none; }
 .doc-split.mode-preview .doc-preview { border-left: 0; }
 .doc-view .tvask { margin: 6px 8px; }
+
+#docsPath { flex: none; padding: 3px 10px; font-size: 11px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; direction: rtl; text-align: left; cursor: pointer; border-bottom: 1px solid var(--line); background: var(--bg); }
+#docsPath:hover { color: var(--orange); }
