@@ -78,8 +78,14 @@ The first time, a welcome tour explains everything and checks how well it hears 
   - Yo Claude's own commands: `/new`, `/chat`, `/model sonnet`, `/effort high`, `/context`, `/usage`, `/tasks`,
     `/files`, `/changes`, `/git`, `/stop`.
   - Claude Code's commands for the folder (`/compact`, your skills and custom commands) are listed too.
-- **AutoCorrect** fixes spelling and grammar as you pause typing (Ctrl+Z undoes it). A grey **suggested next
-  message** fills the empty box (Tab takes it), even while Claude is still working.
+- **AutoCorrect** fixes spelling and grammar (Ctrl+Z undoes it): words a few behind (or ahead of) the one you're
+  typing are fixed straight away, the rest at a short pause. **Typing prediction** shows the next word or three in
+  grey after the cursor as you type (Tab takes them). A grey **suggested next message** fills the empty box (Tab takes
+  it), even while Claude is still working.
+- **Local models**: AutoCorrect and predictions use Haiku by default, or a model on your own PC (Options → Writing →
+  Local Models…). The window offers a small one to download (Qwen 2.5 1.5B, through Ollama), lists whatever Ollama
+  already has, tests how quick each is, and adds your own: an Ollama model name, or any server with an OpenAI-style API
+  (LM Studio, llama.cpp). Pick one for each feature; if it fails the text is left as typed.
 - **Queue** messages while Claude is working:
   - Drag **⠿** to change their order; **✕ cancel** puts one back in the box.
   - **➤ send now** gives it to Claude at its next step; it stays pinned, marked sent, until Claude reads it.
@@ -102,14 +108,17 @@ The first time, a welcome tour explains everything and checks how well it hears 
 ### The window
 
 - **Menus** along the top (File, Edit, View, Session, Voice, Tools, Options, Help) have every setting, with keyboard
-  shortcuts (Help → Keyboard shortcuts). **Options** turns each of the extras on or off. Hover anything for a short
+  shortcuts (Help → Keyboard shortcuts). **Options** turns each of the extras on or off, in submenus. Hover anything for a short
   explanation.
 - **sessions · focus · files** at the top right show or hide the panes beside the chat (focus: just the chat). The
   window opens maximized (View → Start Maximized).
 - **Her face** (bottom left): ASCII video of a real person that listens, thinks and talks along with the voice (lip
   sync), with dozens of small mannerisms. New ones join while it runs.
 - **Bug Invaders**: an ASCII space-invaders comes up over the chat while Claude works, leaving a sliver of the chat in
-  view. Click it to play; Esc hides it until the next reply.
+  view. Click it to play; Esc hides it until the next reply. New enemies (heisenbugs that blink out, memory leaks that
+  drip, segfaults that dive), power-ups (`sudo`, `grep`, `pair prog`, `firewall`, `sleep`, `npm update` for weapon
+  levels), fake power-ups to shoot, a few Easter eggs, and a top-10 leaderboard where you sign your score with three
+  characters (it remembers your last).
 - **Model and effort** are picked per session, at the top of the conversation.
 - **Resize** the sessions list and the right-hand panel by dragging their edges (double-click resets).
 - **Compact mode**: close or minimise the window and a small bar stays at the bottom of the screen, with her face and a
