@@ -543,7 +543,9 @@ class App:
                 return
 
     def restart(self):
-        """Quit, and start again a few seconds later (once this one has let go)."""
+        """Quit, and start again a few seconds later (once this one has let go). It's back in about 25 s (the voice
+        models load first), so it says so: a closed window with no word looks like it's gone for good."""
+        self.notify(f"Restarting {self.name()}… back in about 20 seconds.")
         exe = os.path.join(HERE, ".venv", "Scripts", "pythonw.exe")
         subprocess.Popen(["powershell", "-NoProfile", "-WindowStyle", "Hidden", "-Command",
                           f"Start-Sleep -Seconds 4; Start-Process '{exe}' -ArgumentList '\"{os.path.join(HERE, 'app.py')}\"' "
