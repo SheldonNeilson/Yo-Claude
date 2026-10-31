@@ -7,10 +7,14 @@
 // Everything is inside this closure: the window's scripts share one global scope (app.js owns $, el, S, api...).
 (() => {
 "use strict";
+// window.INVADERS_STANDALONE (set by a page that isn't Yo Claude, like neilson.co.za/bug-invaders/) turns the "while you wait"
+// behaviour off: no auto-pop, no hiding, no chat, and it takes touch buttons through window.invaders.input(key, down).
+const STANDALONE = !!window.INVADERS_STANDALONE;
 const q = (s) => document.querySelector(s);
 const AUTO_DELAY = 4000, POLL_MS = 400, BANNER_MS = 2200, MAX_LIVES = 5, LH = 1.15;
 const PENDING_KINDS = new Set(["approval", "question", "checklist"]);
 const SPINNER = "·✢✳✶✻✽✻✶✳✢";
+const Who = () => (typeof globalThis.Who === "function" ? globalThis.Who() : typeof window.yocWho === "function" ? window.yocWho() : "Claude");
 const app = () => (typeof S !== "undefined" ? S : null);   // app.js's state (a global const, not on window)
 const callApi = (fn, ...a) => {
   try { const r = api()[fn](...a); if (r && r.catch) r.catch(() => {}); } catch (_) { /* no pywebview (tests) */ }
@@ -99,12 +103,13 @@ function readPalette() {
 // ---------- the cabinet ----------
 const root = document.createElement("div");
 root.id = "invaders"; root.tabIndex = 0;
+if (STANDALONE) root.dataset.standalone = "1";
 root.setAttribute("aria-label", `Bug Invaders: a game to play while ${Who()} works. Click to play, Esc hides it.`);
 root.innerHTML = '<span class="inv-tag inv-title">[ bug invaders<span class="inv-wait"> · while you wait...</span> ]</span>' +
   '<span class="inv-tag inv-ctl"><button data-act="peek"></button><button data-act="sound"></button><button data-act="auto"></button>' +
   '<button data-act="close" title="Hide until Claude\'s next reply (Esc)">[✕]</button></span>' +
   '<span class="inv-tag inv-status"></span>' +
-  '<span class="inv-tag inv-keys">[ ←→ move · space fire · P pause · M sound · L scores · Esc hide ]</span><canvas></canvas>';
+  `<span class="inv-tag inv-keys">[ ←→ move · space fire · P pause · M sound · L scores${STANDALONE ? "" : " · Esc hide"} ]</span><canvas></canvas>`;
 const cv = root.querySelector("canvas"), ctx = cv.getContext("2d");
 const mctx = document.createElement("canvas").getContext("2d");
 const btn = (a) => root.querySelector(`[data-act="${a}"]`), statusEl = root.querySelector(".inv-status");
@@ -861,7 +866,7 @@ function drawTitle() {
     y += 22;
   }
   y += drawPixelText("BUG INVADERS", cx, y, W * 0.75, 4, C.amber, C.orange) + 4;
-  txt(`something to shoot at while ${Who()} thinks`, cx, y, C.dim, 12, "center"); y += 20;
+  txt(STANDALONE ? "for when the build is taking forever" : `something to shoot at while ${Who()} thinks`, cx, y, C.dim, 12, "center"); y += 20;
   const legend = [["conflict", "merge conflict", "30 · takes two hits"], ["fail", "failing test", "20"], ["nan", "NaN", "20 · wobbly shots"],
     ["todo", "TODO", "10"], ["bug", "bug", "10"], ["heisen", "heisenbug", "40 · blinks out of reach"], ["leak", "memory leak", "15 · drips on death"],
     ["segv", "segfault", "50 · dives at you"], ["ufo", UFO_NAME, "??? · break; it"]];
@@ -883,9 +888,9 @@ function drawTitle() {
   }
   txt("collect npm update to level up your weapon · beware fake power-ups: their names are spelled with numbers", cx, y, C.faint, 10, "center"); y += 18;
   const blink = Math.floor(G.rt * 2.5) % 2 === 0;
-  if (isFocused()) txt("press SPACE to start · L: top 10", cx, y, C.amber, 14, "center", 6, blink ? 1 : 0.35);
+  if (isFocused()) txt(STANDALONE ? "press SPACE or tap to start · L: top 10" : "press SPACE to start · L: top 10", cx, y, C.amber, 14, "center", 6, blink ? 1 : 0.35);
   else txt("[ click here to play ]", cx, y, C.amber, 14, "center", 6, blink ? 1 : 0.35);
-  txt("the message box keeps the keyboard until you click in · Esc hides", cx, y + 20, C.faint, 11, "center");
+  txt(STANDALONE ? "←→ move · space fire · try the Konami code" : "the message box keeps the keyboard until you click in · Esc hides", cx, y + 20, C.faint, 11, "center");
 }
 function drawOver() {
   const W = view.W, H = view.H;
@@ -1002,6 +1007,7 @@ function frame(ts) {
 function startLoop() { if (!raf) { last = 0; raf = requestAnimationFrame(frame); } }
 function stopLoop() { if (raf) cancelAnimationFrame(raf); raf = 0; }
 function paintStatus() {
+  if (STANDALONE) { statusEl.textContent = `[ ${G.state === "play" ? `wave ${G.wave}` : "ready"} · hi ${pad(G.hi)} ]`; return; }
   const a = app()?.active, busy = !!a?.busy;
   const t = V.bannerUntil ? "✓ reply's in"
     : busy ? `${SPINNER[Math.floor(G.rt * 8) % SPINNER.length]} ${who()} is working · ${Math.floor((performance.now() - V.busySince) / 1000)}s`
@@ -1009,7 +1015,7 @@ function paintStatus() {
   statusEl.textContent = `[ ${t} ]`;
 }
 const autoOn = () => app()?.settings?.invaders !== false;
-const peekOn = () => app()?.settings?.invaders_peek !== false;
+const peekOn = () => !STANDALONE && app()?.settings?.invaders_peek !== false;
 function paintCtl() {
   btn("peek").textContent = peekOn() ? "[▤ chat]" : "[  chat]";
   btn("peek").title = peekOn() ? `A strip of the chat shows under the game (${Who()}'s latest). Click to hide it.` : "Click to show a strip of the chat under the game.";
@@ -1057,7 +1063,7 @@ function eggKey(e) {
 }
 root.addEventListener("keydown", (e) => {
   if (e.ctrlKey || e.altKey || e.metaKey) return;   // the app's shortcuts keep working
-  if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); hideNow(true); return; }
+  if (e.key === "Escape") { if (STANDALONE) return; e.preventDefault(); e.stopPropagation(); hideNow(true); return; }
   if (G.state === "entry" && e.target === root && !V.bannerUntil) { e.preventDefault(); e.stopPropagation(); entryKey(e); return; }
   if (e.target === root && !e.repeat) eggKey(e);
   const k = KEYMAP[e.key];
@@ -1123,7 +1129,7 @@ ctl.addEventListener("click", (e) => {
 
 // ---------- when it shows: Claude busy a few seconds, no card waiting on you ----------
 const V = { visible: false, manual: false, dismissed: false, sid: undefined, wasBusy: false, busySince: 0, bannerUntil: 0,
-  bannerTimer: 0, resume: false, pendingAt: 0, forceFocus: false, shownAt: 0 };
+  bannerTimer: 0, resume: false, pendingAt: 0, forceFocus: STANDALONE, shownAt: 0 };
 function pendingCard() {
   const s = app();
   if (!s) return false;
@@ -1186,7 +1192,7 @@ function hideNow(dismiss) {
   if (hadFocus) { const inp = q("#input"); if (inp && !inp.disabled) inp.focus({ preventScroll: true }); }   // hand the keyboard back
 }
 readPalette();
-setInterval(poll, POLL_MS);
+if (!STANDALONE) setInterval(poll, POLL_MS);
 const tr = q("#transcript");
 if (tr && window.ResizeObserver) new ResizeObserver(() => { if (V.visible) layout(); }).observe(tr);
 window.addEventListener("resize", () => { if (V.visible) layout(); });
@@ -1206,6 +1212,8 @@ window.invaders = {
     return V.visible ? (root.focus({ preventScroll: true }), true) : showNow(true, true);
   },
   hide() { if (V.visible) hideNow(true); },
+  // touch buttons (standalone pages): input("left", true) on press, input("left", false) on release; keys: left, right, fire, pause
+  input(k, down) { if (down) { keys.add(k); press(k); } else keys.delete(k); },
   toggle() { return V.visible ? this.hide() : this.show(); },
   get visible() { return V.visible; },
   // for tests: drive the game without real time or focus

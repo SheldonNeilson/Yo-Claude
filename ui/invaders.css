@@ -31,3 +31,6 @@
 /* the [👾] button in the composer's row */
 #invadersBtn { filter: grayscale(.35); }
 #invadersBtn:hover { filter: none; }
+
+/* standalone pages (neilson.co.za/bug-invaders/): no chat sliver, auto-pop or hide buttons */
+#invaders[data-standalone] [data-act="peek"], #invaders[data-standalone] [data-act="auto"], #invaders[data-standalone] [data-act="close"] { display: none; }
