@@ -473,15 +473,21 @@ async def tidy_text(text, context="", model=None):
 WARM_PREDICT = WarmHaiku()
 WARM_PREDICT.FRESH_AFTER = 20
 PREDICT_SYSTEM = ("You predict what someone is about to type next in a chat with an AI coding assistant. You get what they've "
-                  "typed so far in <typed> tags (and the assistant's last message, for context). Reply with ONLY the text "
-                  "that comes next, usually 1 to 3 words, nothing else: no quotes, no explanation, never an answer to them. "
-                  "If their last word is unfinished, start with the missing letters of it. If it is finished, start with a "
-                  "space. If nothing sensible comes next, reply with nothing.")
+                  "typed so far in <typed> tags, exactly as it is, including any trailing space (and the assistant's last "
+                  "message, for context). Continue their text the way they most likely will: finish the sentence they're in "
+                  "and, when it ends naturally, add the next short sentence too, about 20 words in all at most. Reply with "
+                  "ONLY <next>the continuation</next>: no quotes, no explanation, never an answer to them. Spacing is kept "
+                  "exactly as written inside the tags: if their last word is unfinished, start with just its missing letters; "
+                  "if their text already ends with a space, start directly with the next word; if their last word is "
+                  "finished and there is no trailing space, start with ONE space. If nothing sensible comes next, reply "
+                  "<next></next>.")
+PREDICT_WORDS, PREDICT_CHARS = 24, 160   # a sentence or so
 
 
 def clean_prediction(text, out):
-    """The model's reply as text to append to `text` (at most three words, no repeats), or "" if it isn't usable."""
-    out = re.sub(r"</?typed>", "", out or "").replace(chr(13), "").split(chr(10))[0]
+    """The model's reply as text to append to `text` (a sentence or so, spacing kept), or "" if it isn't usable."""
+    m = re.search(r"<next>(.*?)(?:</next>|$)", out or "", re.S)   # (inside the tags a leading space survives)
+    out = (m.group(1) if m else re.sub(r"</?typed>", "", out or "")).replace(chr(13), "").split(chr(10))[0]
     if len(out) > 1 and out.strip()[:1] in "\"“'" and out.strip()[-1:] in "\"”'":
         out = out.strip()[1:-1]
     if not out.strip() or "�" in out or '"' in out.strip():
@@ -493,9 +499,9 @@ def clean_prediction(text, out):
         if frag and not out[:1].isspace() and out.lower().startswith(frag.lower()):
             out = out[len(frag):]   # (it gave the whole word, not just the rest)
     lead = " " if out[:1].isspace() else ""
-    words = out.split()[:3]
+    words = out.split()[:PREDICT_WORDS]
     out = lead + " ".join(words)
-    if not words or len(out) > 48 or out.strip().lower() == (text.split() or [""])[-1].lower():
+    if not words or len(out) > PREDICT_CHARS or out.strip().lower() == (text.split() or [""])[-1].lower():
         return ""
     return out
 
@@ -572,7 +578,7 @@ async def predict_text(text, context="", model=None, kind="chat", name=""):
     prompt = (f"Assistant's last message, for context:\n{context}\n\n" if context else "") + f"<typed>{text}</typed>"
     try:
         if model:
-            out = await asyncio.to_thread(localai.generate, model, PREDICT_SYSTEM, prompt, 14, 4)
+            out = await asyncio.to_thread(localai.generate, model, PREDICT_SYSTEM, prompt, 60, 6)
         else:
             opts = sdk.ClaudeAgentOptions(model=VOICE_NOTE_MODEL, tools=[], cwd=CHAT_DIR, setting_sources=["project"],
                                           max_turns=1, thinking={"type": "disabled"}, system_prompt=PREDICT_SYSTEM,

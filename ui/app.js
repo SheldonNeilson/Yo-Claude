@@ -1325,10 +1325,11 @@ async function predictNow() {
   pred.base = now; pred.add = add; ghostPaint();
   if (pred.again || (now !== v && !add)) { pred.again = false; predictSoon(); }
 }
-function predAccept() {
+function predAccept(oneWord) {   // Tab takes all of it; Ctrl+→ takes the next word
   const box = $("#input");
   box.focus(); box.setSelectionRange(box.value.length, box.value.length);
-  document.execCommand("insertText", false, pred.add);   // one edit (Ctrl+Z takes it back); the input event asks for the next words
+  const part = oneWord ? (pred.add.match(/^\s*\S+/) || [pred.add])[0] : pred.add;
+  document.execCommand("insertText", false, part);   // one edit (Ctrl+Z takes it back); the input event asks for the next words
 }
 
 // ---------- files and media: chips, thumbnails, previews under replies, the viewer, open with… ----------
@@ -1789,6 +1790,7 @@ $("#input").addEventListener("keydown", (e) => {
     return;
   }
   if (e.key === "Tab" && !e.shiftKey && !e.ctrlKey && !e.altKey && pred.shown) { e.preventDefault(); predAccept(); return; }
+  if (e.key === "ArrowRight" && e.ctrlKey && !e.shiftKey && !e.altKey && pred.shown) { e.preventDefault(); predAccept(true); return; }
   if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
 });
 $("#input").addEventListener("input", () => { autosize(); composer.autocomplete(); });
