@@ -173,7 +173,8 @@ function renderName() {
   if (avatar.el) avatar.el.dataset.tip = `${appName()} · click to talk`;
 }
 function renderAwake() {
-  $("#faceBtn")?.classList.toggle("on", S.settings?.avatar === true);   // (the face button under the sessions)   // ☕ in the menu bar: lit while the PC is kept awake always
+  const fb = $("#faceBtn"), faceOn = S.settings?.avatar === true;   // (the button under the sessions: show or hide the face)
+  if (fb) { fb.classList.toggle("on", faceOn); fb.textContent = `${faceOn ? "hide" : "show"} ${Who()}`; }   // ☕ in the menu bar: lit while the PC is kept awake always
   const b = $("#awakeBtn"), on = S.settings?.keep_awake !== false;
   b.classList.toggle("on", on);
   b.textContent = on ? "[staying awake]" : "[stay awake]";   // (text only, like the other buttons up there)
