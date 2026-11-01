@@ -69,7 +69,7 @@ wrong idle makes every following clip "match".
 - All recordings finished (the sequential retry ended 08:46). Clips in the app: Female 1 103, Male 1 51, Male 2 34, Female 2 33, Female 3 33, Male 3 33.
   `audit_ids.py`: every clip is the right person (clean diagonal). Every character now has `talking_calm`, `talking_calm2` and `listen_lean_closed`.
   Contact sheet of the four new lean and talking sets: mouths closed in the leans (Female 3's lips purse slightly in one frame: acceptable).
-  Five recorders at once swamped ComfyUI (`D:\Temp\yoclaude-scratch\retry_sequential.ps1`).
+  Five recorders at once swamped ComfyUI (VRAM full, timeouts); **run them one after another**: `D:\Temp\yoclaude-scratch\retry_sequential.ps1`.
   Start jobs from a script file, never an inline command. Only Female 1 has `idle_sigh_soft` (head back, subtle).
 - Reviewed by contact sheet: `listen_lean_closed` and `idle_sigh_soft` are good (the sigh parts the lips a little: acceptable). `idle_yawn` (wide
   mouth, hand over it) and `idle_wave` are kept; `idle_thumbs_up` is hidden (meaningless as an idle gesture).
