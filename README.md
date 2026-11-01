@@ -171,6 +171,10 @@ The first time, a welcome tour explains everything and checks how well it hears 
   it, remove it, or **show only this group**, so you can share your screen without showing everything.
 - **Chats come first.** Under **Recent** sits the permanent **Chats** group: conversations with no folder, which can't be
   removed. Right-click it → *new group inside Chats…* to sort chats into groups of their own, nested inside it.
+- **Groups inside groups**: right-click any group → *new group inside…*, or *put inside…* to move one into another
+  (or back to the top level). Right-click → *move all sessions to the trash…* clears a group in one go (restorable).
+- **View → Reset Workspace to Default…** puts the pane layout, sizes, zoom and group open/closed state back to how a fresh
+  install starts (sessions, files and other settings are untouched).
 - A group made from a folder also has that folder's actions: **new session here** (or hover it and click `+`), open in VS
   Code, show in Explorer, terminal. Removing it takes the folder out of the list (its files and sessions are untouched).
 - `+ folder` adds a folder (and its group). Or paste or type a folder path into the box at the top and press Enter.
