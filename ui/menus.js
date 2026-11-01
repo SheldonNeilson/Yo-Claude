@@ -122,7 +122,7 @@ const MENUS = {
     [`Listen for “${appName()}”`, () => toggleSetting("listening"), { checked: setting("listening") }],
     ["Read replies aloud", () => toggleSetting("voice_replies"), { checked: setting("voice_replies") }],
     ["More", null, { sub: [
-      [`Say Hello After “Yo ${Who()}” (Else a Beep)`, () => toggleSetting("greeting", false), { checked: setting("greeting", false) }],
+      [`Say Hello After “Yo ${Who()}” (Else a Beep)`, () => toggleSetting("greeting", true), { checked: setting("greeting", true) }],
       ["Say when a session is done", () => toggleSetting("notify_done", true), { checked: setting("notify_done", true) }],
       ["Say a Quick “On It” During Long Waits", () => toggleSetting("voice_ack", true), { checked: setting("voice_ack", true) }],
       [`Wake on just “${Who()}” (no “Yo”)`, () => toggleSetting("short_wake", false), { checked: setting("short_wake", false) }],

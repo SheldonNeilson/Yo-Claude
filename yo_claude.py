@@ -61,7 +61,7 @@ VOICES = {"female": (NEURAL_VOICE, "+0Hz"), "male": ("en-US-ChristopherNeural", 
 NEURAL_RATE = "+5%"
 TEXT_HOLD_S = 12             # how long a reply stays on the bar when voice replies are off
 
-DEFAULT_SETTINGS = {"listening": True, "voice_replies": True, "pc_control": True, "bar_when_idle": True,
+DEFAULT_SETTINGS = {"listening": True, "greeting": True, "voice_replies": True, "pc_control": True, "bar_when_idle": True,
                     "launch_at_login": True, "show_bar": True, "show_window": True, "onboarded": False,
                     "accurate_speech": False}
 
@@ -528,7 +528,7 @@ class Assistant:
         """After "yo claude": a beep and straight to listening (you can talk at once, nothing's missed); or, with
         Voice > Say hello after the wake word, a spoken greeting first (what you say while it plays is lost)."""
         self.mic.start()
-        if self.settings.get("greeting", False):
+        if self.settings.get("greeting", True):
             self.say(random.choice(GREETINGS), lambda _: self.listen())
         else:
             # (a real tone: the system "default beep" is silent when the Windows sound scheme is "No Sounds")
