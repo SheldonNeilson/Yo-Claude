@@ -421,7 +421,9 @@ class App:
             return False
         busy = self.display not in ("idle", "paused")
         held = self.voice_text and self.voice_hold and self.voice_state in ("idle", "paused")
-        return self.settings.get("bar_when_idle", True) or busy or bool(held)
+        if busy or held:
+            self.bar_snoozed = False   # (minimised: it comes back when there is something to show)
+        return (self.settings.get("bar_when_idle", True) and not getattr(self, "bar_snoozed", False)) or busy or bool(held)
 
     def update_bar_visibility(self):
         want = self.bar_wanted()
@@ -1297,8 +1299,8 @@ class Api:
         self._app.show_main()
 
     def bar_minimise(self):
-        self.set_setting("bar_when_idle", False)
         a = self._app
+        a.bar_snoozed = True   # hides it until there's something to show: the "keep visible when idle" setting stays as it was (on by default)
         a.bar_shown = False
         a.bar.hide()
 
