@@ -851,3 +851,17 @@ button { white-space: nowrap; }
 .gfocus { display: flex; align-items: center; gap: 6px; padding: 5px 8px; color: var(--amber); border-bottom: 1px solid var(--line2); background: #1c1710; }
 .gfocus button { padding: 0 8px; font-size: 11px; }
 .session[draggable="true"] { cursor: pointer; }
+
+/* narrow panes: toolbars and button rows wrap onto another line instead of running off the edge */
+.ptabs, .ptabs .tabs, .phead, .phead.pnav { flex-wrap: wrap; }
+.ptabs button, .sidehead .row button, .sidefoot button { min-width: 0; }
+.sidehead .row { flex-wrap: wrap; } .sidehead .row button { flex: 1 1 auto; white-space: nowrap; }
+.sidefoot { flex-wrap: wrap; } .sidefoot button { white-space: nowrap; }
+.sidefoot #faceBtn { margin-left: 0; margin-right: 0; }
+#docsBar { flex-wrap: wrap; } #docsBar button { white-space: nowrap; }
+#docsPath { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.phead input { min-width: 90px; }
+#sessionHead { flex-wrap: wrap; row-gap: 4px; }
+#sessionTitle { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1 1 120px; }
+#sessionHead select { min-width: 74px; }
+#extraDirs { flex-wrap: wrap; }
