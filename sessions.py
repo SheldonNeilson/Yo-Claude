@@ -2312,7 +2312,7 @@ class Router:
         snips = {tail, tail.replace("/", chr(92)), tail.replace(chr(92), "/")}
         env = dict(os.environ, YC_SNIPS="\n".join(sorted(snips)))
         ps = ("$s = $env:YC_SNIPS -split \"`n\"; Get-CimInstance Win32_Process | Where-Object { $c = $_.CommandLine; $c -and "
-              "(($s | Where-Object { $c.Contains($_) }).Count -gt 0) } | Select-Object ProcessId,Name,CommandLine | ConvertTo-Json -Compress")
+              "(($s | Where-Object { $c.Contains($_) }).Count -gt 0) } | Select-Object ProcessId,ParentProcessId,Name,CommandLine | ConvertTo-Json -Compress")
         try:
             r = subprocess.run(["powershell", "-NoProfile", "-Command", ps], capture_output=True, text=True, timeout=20, env=env,
                                creationflags=subprocess.CREATE_NO_WINDOW)
@@ -2325,9 +2325,11 @@ class Router:
         def around(line, found):   # the part of the command line that matched, not its shared start
             at = min((line.find(z) for z in found if z in line), default=0)
             return ("…" if at > 40 else "") + line[max(0, at - 40):at + 140]
+        ids = {int(x["ProcessId"]) for x in rows}
+        rows = [x for x in rows if int(x.get("ParentProcessId") or 0) not in ids]   # the top of each chain: ending it ends the rest
         out = [{"pid": int(x["ProcessId"]), "name": x["Name"], "cmd": around(" ".join(str(x["CommandLine"]).split()), snips)}
                for x in rows if int(x["ProcessId"]) != os.getpid() and "pythonw" not in str(x["Name"]).lower()]
-        if len(out) > 4:   # that many matches means the text isn't particular enough: better to end nothing than the wrong things
+        if len(out) > 3:   # that many matches means the text isn't particular enough: better to end nothing than the wrong things
             out = []
         self._killable = {x["pid"] for x in out}
         return out
