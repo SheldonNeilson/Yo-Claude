@@ -1118,7 +1118,48 @@ class Session:
             sess.router.send(text, sid=sess.id, queued_by="claude")
             return reply("Queued: it goes after your current reply (and survives a restart).")
 
-        tools = [show_folder, show_file, show_diff, show_panel, queue_message, type_in_terminal]
+        async def ask_window(op, **args):
+            fut = sess.router.ui_call(sess, op, **args)
+            try:
+                return reply(await asyncio.wait_for(asyncio.wrap_future(fut), 10))
+            except asyncio.TimeoutError:
+                sess.router.ui_forget(fut)
+                return reply("The window didn't answer (it may be closed or busy).")
+
+        @sdk.tool("ui_state", "Read what Yo Claude's window is showing right now, as JSON: the conversation open, which panes are "
+                  "shown (sessions list, files panel, chat, editor, terminal, face), the files panel's tab, folder, selection, "
+                  "changed files and tasks, the editor's open tabs, the session list's groups (nested) with their sessions and "
+                  "whether each is open, the filter, and the on/off switches. Look at this before changing the view, and after "
+                  "if you want to check it worked.", {"type": "object", "properties": {}})
+        async def ui_state(a):
+            return await ask_window("state")
+
+        @sdk.tool("ui_control", "Change what Yo Claude's window shows and move around inside it, for the user. One call, one 'op':\n"
+                  "- show / hide / toggle, target = sessions | files_panel | chat | editor | terminal | face | bug_invaders\n"
+                  "- focus_chat (hide everything but the chat) | reset_layout (back to the default layout) | zoom, value = in|out|reset\n"
+                  "- panel_tab, value = files|changes|git|tasks|media | panel_search, text = what to search the shown tab for ('' clears)\n"
+                  "- select_files, text = relative paths (one per line) to point at in the files tab | open_change, target = changed file "
+                  "(shows its diff) | open_task, target = task description or key\n"
+                  "- session_search, text = filter the session list ('' clears) | open_session, target = session id or title | "
+                  "new_session, target = folder path ('' for a plain chat)\n"
+                  "- expand_group / collapse_group, target = group name or 'all' | focus_group, target = group name ('' shows all)\n"
+                  "- editor_tab / close_tab, target = file name (close_tab also 'all') | markdown_view, value = edit|split|preview\n"
+                  "- scroll, target = chat|panel|sessions, value = top|bottom|up|down\n"
+                  "- switch, target = mic|voice_replies|keep_awake|prediction|autocorrect|suggest_next|learn_from_messages|say_when_done, "
+                  "value = on|off\n"
+                  "To open a file or folder use show_file / show_folder. Opening another session moves the window off this "
+                  "conversation, so later UI calls from here won't act. PC control, permissions and approvals can't be changed with this.",
+                  {"type": "object", "properties": {
+                      "op": {"type": "string", "description": "What to do (see the list)"},
+                      "target": {"type": "string", "description": "What it applies to (element, group, session, file, folder)"},
+                      "value": {"type": "string", "description": "A value such as in/out, top/bottom, on/off, a tab or a view name"},
+                      "text": {"type": "string", "description": "Text for a search, or paths for select_files"}},
+                   "required": ["op"]})
+        async def ui_control(a):
+            args = {k: a.get(k) for k in ("target", "value", "text") if a.get(k) is not None}
+            return await ask_window(str(a.get("op") or ""), **args)
+
+        tools = [show_folder, show_file, show_diff, show_panel, queue_message, type_in_terminal, ui_state, ui_control]
         if sess.router.settings.get("checklist_tool", True):
             tools.append(checklist)
         return sdk.create_sdk_mcp_server(UI_SERVER, tools=tools)
@@ -1936,6 +1977,7 @@ class Router:
         self.settings = settings
         self._emit = emit
         self.meta = Meta()
+        self.ui_waiting = {}   # token -> Future: questions put to the window by Claude's ui tools, waiting for the answer
         self.writing = writing.Writing()   # how you write, for predictions (writing.py)
         self.live = {}                      # session id -> Session (open in the app this run)
         self.active = None                  # the session voice and the input box talk to
@@ -2554,6 +2596,28 @@ class Router:
         item["text"] = fixed
         s.changed(item)
         s.save_pending()
+
+    def ui_call(self, s, op, **args):
+        """Claude reading or driving the window (Session.ui_tools: ui_state, ui_control): the window runs `op` (ui/selfctl.js) and
+        reports back with ui_report. A concurrent Future with the answer text."""
+        import concurrent.futures
+        fut = concurrent.futures.Future()
+        if self.active is not s:
+            fut.set_result("Not done: the user has another conversation open in Yo Claude right now.")
+            return fut
+        token = uuid.uuid4().hex[:12]
+        fut.token = token
+        self.ui_waiting[token] = fut
+        self.emit("ui", action="ctl", op=op, args=args, token=token)
+        return fut
+
+    def ui_report(self, token, text):
+        fut = self.ui_waiting.pop(token, None)
+        if fut is not None and not fut.done():
+            fut.set_result(str(text))
+
+    def ui_forget(self, fut):
+        self.ui_waiting.pop(getattr(fut, "token", None), None)
 
     def ui_action(self, s, action, **args):
         """Claude showing the user something in the window (see Session.ui_tools). Returns what happened."""

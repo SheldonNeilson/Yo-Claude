@@ -155,6 +155,11 @@ The first time, a welcome tour explains everything and checks how well it hears 
 - **Resize** the sessions list and the right-hand panel by dragging their edges (double-click resets).
 - **Compact mode**: close or minimise the window and a small bar stays at the bottom of the screen, with her face and a
   few lines on what's happening (your messages, Claude's thoughts, its replies). `[⤢]` opens the window again.
+- **Claude can drive the window**: it can read what's showing (`ui_state`) and show or hide the sessions list, files panel,
+  chat, editor, terminal and face, move between the files panel's tabs, search them, open sessions, groups, editor tabs and
+  diffs, scroll, zoom and reset the layout (`ui_control`), plus open files and folders for you (`show_file`, `show_folder`).
+  Ask it ("hide the sessions list", "show me the changes", "open the satire session"). It can't turn PC control on or
+  change permissions.
 - **Keep PC awake**: the **[staying awake]** button (and Options → Power) stops Windows sleeping or locking the screen,
   and keeps the display on, while Yo Claude runs.
 - **Tray icon** (bottom right; its colour and movement show what Yo Claude is doing): the wake word, voice replies, PC control, the floating bar, launch with Windows,

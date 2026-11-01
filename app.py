@@ -1082,6 +1082,10 @@ class Api:
     def move_group(self, name, delta):
         self._app.router.move_group(name, delta)
 
+    def ui_report(self, token, text):
+        """The window's answer to one of Claude's ui_state / ui_control calls (ui/selfctl.js)."""
+        self._app.router.ui_report(token, text)
+
     def set_group_parent(self, name, parent=None):
         return self._app.router.set_group_parent(name, parent)
 

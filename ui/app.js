@@ -1589,6 +1589,7 @@ async function showForClaude(e) {
     }
     return viewFile(e.path, S.active?.cwd);
   }
+  if (e.action === "ctl") return selfctl.reply(e.token, e.op, e.args);   // Claude reading or driving the window (selfctl.js)
   if (e.action === "diff") { open("changes"); await panel.load(); return showDiff(e.rel); }
   if (e.action === "terminal") return e.window ? (copyText(e.text, "command copied: paste it in the terminal window"), term.external(e.folder, null)) : term.prefill(e.text, e.folder);
 }

@@ -25,6 +25,7 @@ https://github.com/SheldonNeilson/Yo-Claude (private); their installs update fro
 | `sessions.py` | Claude sessions on the Agent SDK: router, transcript items, approvals, background tasks |
 | `yo_claude.py` | voice engine: wake word (Vosk), speech detection (Silero), Whisper, voice (edge-tts) |
 | `workspace.py` | files, git, per-session change snapshots |
+| `ui/selfctl.js` | Claude's own hands on the window: the `ui_state` / `ui_control` tools (`Session.ui_tools`, `Router.ui_call`) run here and answer through `api().ui_report` |
 | `terminal.py` | shells on a pseudo-console (pywinpty) for the terminal pane (`ui/terminal.js`, xterm.js in `ui/vendor/`) |
 | `media.py`, `taskbar.py`, `icons.py` | local file links, taskbar state, mascot icons |
 | `ui/` | the window and the floating bar (plain HTML/JS, no build step) |
@@ -70,8 +71,8 @@ wrong idle makes every following clip "match".
 - Second batch (06:53 to 08:14): Male 1 got both talking clips; Female 3 both talking clips; Male 2, Female 2, Male 3 got `talking_calm` only.
   Still missing: `talking_calm2` for Male 2, Female 2, Male 3 and `listen_lean_closed` for Male 2, Female 2, Female 3, Male 3. Five recorders at once
   swamped ComfyUI (VRAM full, "still running after 1800s" and read timeouts, prompts left behind in its queue). **Run them one after another**:
-  `D:\Temp\yoclaude-scratchetry_sequential.ps1` waits for ComfyUI's queue to be empty, then runs professor, female2, male3, female3 in turn
-  (started 08:20; writes `D:\Temp\yoclaude-facesetry-done.txt` when finished). Start jobs from a script file, never an inline command.
+  `D:\Temp\yoclaude-scratch\retry_sequential.ps1` waits for ComfyUI's queue to be empty, then runs professor, female2, male3, female3 in turn
+  (started 08:20; writes `D:\Temp\yoclaude-faces\retry-done.txt` when finished). Start jobs from a script file, never an inline command.
   Female 1 and Male 1 already have `listen_lean_closed`; Female 1 also `idle_sigh_soft` (head back, subtle).
 - Reviewed by contact sheet: `listen_lean_closed` and `idle_sigh_soft` are good (the sigh parts the lips a little: acceptable). `idle_yawn` (wide
   mouth, hand over it) and `idle_wave` are kept; `idle_thumbs_up` is hidden (meaningless as an idle gesture).

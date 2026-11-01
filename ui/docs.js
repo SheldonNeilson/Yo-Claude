@@ -289,5 +289,11 @@ const docs = (() => {
   });
   render();
 
-  return { open, show, toggleDocs, toggleChat, setLayout, chatOn: () => st.chat, docsOn: () => st.docs, tabs: () => tabs, dirty: () => tabs.some(isDirty) };
+  // for Claude's own controls (selfctl.js): a tab by file name or path, which is showing, and the Markdown view
+  const find = (what) => { const w = String(what || "").toLowerCase(); return tabs.find((t) => t.name.toLowerCase() === w || norm(t.m.path) === norm(what)) || tabs.find((t) => t.name.toLowerCase().includes(w)); };
+  return {
+    open, show, toggleDocs, toggleChat, setLayout, chatOn: () => st.chat, docsOn: () => st.docs, tabs: () => tabs, dirty: () => tabs.some(isDirty),
+    current: () => cur, find, select, close,
+    setMd(m) { if (!cur?.mdSeg) return false; cur.setMd(m); st.mdMode = m; api().set_setting("md_mode", m); paintBar(); return true; },
+  };
 })();
