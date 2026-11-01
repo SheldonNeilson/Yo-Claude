@@ -2306,7 +2306,10 @@ class Router:
         self._killable = set()
         if len(command) < 8:
             return []
-        snips = {command[:150], command[:150].replace("/", chr(92)), command[:150].replace(chr(92), "/")}
+        tail = command[-120:].strip()   # the end is what's particular to this command: the start is shell boilerplate every command shares
+        if len(tail) < 20:
+            return []
+        snips = {tail, tail.replace("/", chr(92)), tail.replace(chr(92), "/")}
         env = dict(os.environ, YC_SNIPS="\n".join(sorted(snips)))
         ps = ("$s = $env:YC_SNIPS -split \"`n\"; Get-CimInstance Win32_Process | Where-Object { $c = $_.CommandLine; $c -and "
               "(($s | Where-Object { $c.Contains($_) }).Count -gt 0) } | Select-Object ProcessId,Name,CommandLine | ConvertTo-Json -Compress")
@@ -2320,6 +2323,8 @@ class Router:
         rows = [rows] if isinstance(rows, dict) else rows
         out = [{"pid": int(x["ProcessId"]), "name": x["Name"], "cmd": " ".join(str(x["CommandLine"]).split())[:200]}
                for x in rows if int(x["ProcessId"]) != os.getpid() and "pythonw" not in str(x["Name"]).lower()]
+        if len(out) > 4:   # that many matches means the text isn't particular enough: better to end nothing than the wrong things
+            out = []
         self._killable = {x["pid"] for x in out}
         return out
 
