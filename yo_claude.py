@@ -531,7 +531,8 @@ class Assistant:
         if self.settings.get("greeting", False):
             self.say(random.choice(GREETINGS), lambda _: self.listen())
         else:
-            winsound.MessageBeep(winsound.MB_OK)
+            # (a real tone: the system "default beep" is silent when the Windows sound scheme is "No Sounds")
+            threading.Thread(target=lambda: winsound.Beep(880, 140), daemon=True).start()
             self.listen()
 
     def stop(self):
