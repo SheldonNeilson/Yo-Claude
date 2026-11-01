@@ -10,7 +10,8 @@ const docs = (() => {
   const st = { chat: true, docs: false, w: 0, mdMode: "edit" };
   const norm = (p) => String(p || "").replace(/\//g, "\\").toLowerCase();
   const stamp = () => new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
-  const isDirty = (t) => !!t.ce && !t.ce.readOnly && t.ce.value !== t.text;
+  // (the text box hands back CRLF files with plain LF, so compare with line endings evened out: opening a Windows file is not an edit)
+  const isDirty = (t) => !!t.ce && !t.ce.readOnly && t.ce.value !== t.text.replace(/\r\n?/g, "\n");
 
   // ---------- layout: chat | divider | files ----------
   function minChat() { return 320; }
