@@ -279,10 +279,17 @@ async function loadLists() {
 }
 // A folder is open when it has recent activity (busy, unseen reply, changed in the last day, or holds the session
 // you're in), closed otherwise. Opening or closing one yourself wins until something new happens in it.
+// "Now" must not be re-read on every render, or a group holding a busy/unseen/active session always looks newer than
+// your last click and springs back open (e.g. closing every group, then opening one reopened its neighbour). So the
+// moment a session starts being live is remembered, and only that moment counts as activity.
+const liveSince = new Map();
 function lastActivity(sessions) {
   let t = 0;
   for (const s of sessions) {
-    if (S.busy.has(s.id) || s.unseen || (S.active && s.id === S.active.id)) return Date.now();
+    if (S.busy.has(s.id) || s.unseen) {
+      if (!liveSince.has(s.id)) liveSince.set(s.id, Date.now());
+      t = Math.max(t, liveSince.get(s.id));
+    } else liveSince.delete(s.id);
     t = Math.max(t, s.modified || 0);
   }
   return t;

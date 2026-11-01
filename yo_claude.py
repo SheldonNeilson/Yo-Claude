@@ -272,7 +272,14 @@ class Transcriber:
         segments, _ = self.model.transcribe(audio, language="en", beam_size=1, condition_on_previous_text=False)
         text = " ".join(s.text.strip() for s in segments if s.no_speech_prob < 0.6).strip()
         log.info("Heard (%.1fs): %r", time.time() - t, text)
+        if NOT_SPEECH.fullmatch(text):   # Whisper "hears" these in silence and noise: not something the user said
+            log.info("Ignored as noise: %r", text)
+            return ""
         return text
+
+
+NOT_SPEECH = re.compile(r"[\W_]*(?:(?:you|thank you|thanks|thanks for watching|uh|um|hmm+|mm+|oh)[\W_]*)?",
+                        re.I)   # nothing but punctuation, or one of Whisper's usual phantom phrases
 
 
 def strip_wake_words(text, alternates=()):

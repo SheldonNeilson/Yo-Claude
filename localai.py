@@ -10,6 +10,7 @@ import logging
 import os
 import shutil
 import subprocess
+import threading
 import time
 
 import requests
@@ -26,6 +27,57 @@ SUGGESTED = [
 ]
 NO_WINDOW = 0x08000000
 NEW_GROUP = 0x00000200
+
+
+_hiding = False
+
+
+def _exe_of(pid):
+    import ctypes
+    k = ctypes.windll.kernel32
+    h = k.OpenProcess(0x1000, False, pid)   # PROCESS_QUERY_LIMITED_INFORMATION
+    if not h:
+        return ""
+    try:
+        buf, n = ctypes.create_unicode_buffer(520), ctypes.c_uint(520)
+        return os.path.basename(buf.value if k.QueryFullProcessImageNameW(h, 0, buf, ctypes.byref(n)) else "").lower()
+    finally:
+        k.CloseHandle(h)
+
+
+def hide_ollama_windows(seconds=15):
+    """Ollama starts a console for each model runner it launches (llama-server.exe), and on this PC they show as terminal
+    windows. For a few seconds after the server or a model starts, hide any window of Ollama's processes. (Windows only.)"""
+    global _hiding
+    if os.name != "nt" or _hiding:
+        return
+    _hiding = True
+    import ctypes
+    from ctypes import wintypes
+    u = ctypes.windll.user32
+    proc = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+
+    def sweep():
+        def each(hwnd, _):
+            if u.IsWindowVisible(hwnd):
+                pid = wintypes.DWORD()
+                u.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+                if _exe_of(pid.value) in ("ollama.exe", "llama-server.exe", "ollama app.exe", "ollama_llama_server.exe"):
+                    u.ShowWindow(hwnd, 0)   # SW_HIDE
+            return True
+        u.EnumWindows(proc(each), 0)
+
+    def loop():
+        global _hiding
+        end = time.time() + seconds
+        try:
+            while time.time() < end:
+                sweep()
+                time.sleep(0.05)
+        except Exception:
+            pass
+        _hiding = False
+    threading.Thread(target=loop, daemon=True, name="hide-ollama-windows").start()
 
 
 def _norm(name):
@@ -58,6 +110,7 @@ def ensure_ollama(url=OLLAMA_URL, wait=20):
     exe = ollama_exe()
     if not exe or url != OLLAMA_URL:
         return False
+    hide_ollama_windows(wait + 10)
     try:
         # (hidden console only: with DETACHED_PROCESS Ollama's model-runner children each open a console window of their own)
         subprocess.Popen([exe, "serve"], creationflags=NEW_GROUP | NO_WINDOW, stdin=subprocess.DEVNULL,
@@ -176,6 +229,8 @@ def generate(m, system, prompt, max_tokens=64, timeout=6):
         url = m.get("url") or OLLAMA_URL
         if not up(url) and not ensure_ollama(url):
             raise RuntimeError("Ollama isn't running")
+        if url == OLLAMA_URL:
+            hide_ollama_windows(timeout + 5)   # (the model's runner may open a console while it loads)
         r = requests.post(url + "/api/chat", timeout=timeout, json={
             "model": m["model"], "stream": False, "keep_alive": "20m", "think": False,
             "messages": [{"role": "system", "content": system}, {"role": "user", "content": prompt}],

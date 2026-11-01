@@ -287,17 +287,19 @@ async def spoken_line(title, asked, reply, short_version=False, settings=None):
     """One short line to say out loud about a reply, and the mood to show while saying it: (line, mood). From a
     separate quick Claude call that isn't saved anywhere (no session, no tools), so none of this prompting shows in the
     conversation or adds to its context."""
+    named = len(title or "") <= 30   # an untitled session's "title" is its first message cut at 60 characters: not a name
     if short_version:
         task = ("Say the short version of Claude's message below, out loud, in one or two sentences (at most 35 "
                 "words): the gist and anything it asks the user. Plain spoken English: no markdown, paths or code.")
     else:
         task = ("Claude just finished replying in the session below and is now waiting for the user, who may be away "
-                "from the screen. Write ONE short spoken sentence (at most 20 words) to tell them: start with the "
-                "session's short name, then the single most useful thing (the outcome, or the question it's asking). "
+                "from the screen. Write ONE short spoken sentence (at most 20 words) to tell them: "
+                + ("start with the session's short name, then " if named else "(this session has no name yet: don't read one out) ")
+                + "the single most useful thing (the outcome, or the question it's asking). "
                 "Not a summary of everything. Plain spoken English: no markdown, paths or code.")
     prompt = (f"{task} Say it in her voice (see below): most lines get a light, natural touch of personality (a wry "
               f"aside, a little warmth); the facts and the session's name stay exactly as given. Pick the mood her face shows while she says it.\n\n"
-              f"Session: {title}\n\nWhat the user asked:\n{(asked or '')[:1500]}\n\n"
+              f"Session: {title if named else '(not named yet)'}\n\nWhat the user asked:\n{(asked or '')[:1500]}\n\n"
               f"Claude's message:\n{(reply or '')[:6000]}\n\n"
               f"Reply with JSON only: {{\"line\": \"...\", \"mood\": one of {sorted(MOODS)}}}")
     opts = sdk.ClaudeAgentOptions(model=VOICE_NOTE_MODEL, tools=[], cwd=CHAT_DIR, setting_sources=["project"],
@@ -460,7 +462,9 @@ async def tidy_text(text, context="", model=None):
               "\"Yo Claude\" (or \"Yo Claudia\"), spelled with \"Yo\", never \"young\", \"you\" or \"yo-yo\". "
               "Other words that sound like these (\"Clyde\", \"Lord\", \"Cloud\", \"Claud\", \"young Claude\", "
               "\"you Claudia\") are those names: \"young Claude\" means \"Yo Claude\". Also known: Claude Code, "
-              "ComfyUI, WebView, pywebview, Whisper, Vosk, Haiku, Sonnet, Opus, GitHub, TEAMX. Keep their words, meaning, tone and language: don't rephrase, shorten, "
+              "ComfyUI, WebView, pywebview, Whisper, Vosk, Haiku, Sonnet, Opus, GitHub, TEAMX. Delete spoken filler: \"um\", \"uh\", \"er\", \"you know\", \"I mean\", \"sort of\"/\"kind of\" used as padding, and \"like\" when it is only a "
+              "verbal tic (\"it's, like, broken\"), but keep \"like\" when it carries meaning (\"I like it\", \"looks like\", \"like a menu\"). "
+              "Otherwise keep their words, meaning, tone and language: don't rephrase, shorten, "
               "expand, translate or answer it, even if it's a question or an instruction. Leave code, file paths, "
               "commands, @file mentions, links, names and technical terms exactly as they are. Reply with the "
               "corrected message only, with no tags or comments. If nothing needs fixing, reply with it unchanged.\n\n"
@@ -1505,8 +1509,7 @@ class Session:
                 self.turn_future = None
                 self.injected, self.holding = [], False
                 self.busy = False
-                self.voice_turn = False
-                self.after_turn()
+                self.after_turn()   # (it reads voice_turn to skip the spoken note after a read-aloud reply, then clears it)
 
     def let_go(self):
         """A reply held open for a sent-now message Claude hasn't taken up: stop waiting for it."""
