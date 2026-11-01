@@ -865,3 +865,5 @@ button { white-space: nowrap; }
 #sessionTitle { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1 1 120px; }
 #sessionHead select { min-width: 74px; }
 #extraDirs { flex-wrap: wrap; }
+
+.node.task { position: relative; } .node.task .tstop { margin-left: auto; padding: 0 6px; flex: none; }

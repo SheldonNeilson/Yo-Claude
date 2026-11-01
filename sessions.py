@@ -2241,7 +2241,7 @@ class Router:
                 out.append({**base, "key": f"{sid}:{t['task_id']}", "kind": "shell", "task_id": t["task_id"],
                             "description": t.get("description") or "background command", "status": t["status"],
                             "started": t.get("started"), "ended": t.get("ended"), "summary": t.get("summary"),
-                            "detached": bool(t.get("detached")), "output_file": t.get("output_file")})
+                            "detached": bool(t.get("detached")), "output_file": t.get("output_file"), "command": t.get("command")})
             ids = {t.get("tool_use_id"): t["task_id"] for t in shells if t.get("tool_use_id")}
             for a in agents:
                 a["task_id"] = ids.get(a["tool_use_id"])   # background agents can be stopped like commands
@@ -2297,6 +2297,45 @@ class Router:
         except OSError as e:
             return {"error": f"Couldn't read its transcript: {e}"}
         return {"items": items, "text": agent_steps(t["agent_file"]), "path": t["agent_file"]}
+
+    def task_processes(self, key):
+        """Processes that look like a running background command (found by its command line), for ending one Yo Claude no longer
+        has a handle on (it started before a restart). The pids are remembered: only these can be ended with kill_processes."""
+        t = next((x for x in self.tasks_list() if x["key"] == key), None)
+        command = " ".join(str((t or {}).get("command") or "").split())
+        self._killable = set()
+        if len(command) < 8:
+            return []
+        snips = {command[:150], command[:150].replace("/", chr(92)), command[:150].replace(chr(92), "/")}
+        env = dict(os.environ, YC_SNIPS="\n".join(sorted(snips)))
+        ps = ("$s = $env:YC_SNIPS -split \"`n\"; Get-CimInstance Win32_Process | Where-Object { $c = $_.CommandLine; $c -and "
+              "(($s | Where-Object { $c.Contains($_) }).Count -gt 0) } | Select-Object ProcessId,Name,CommandLine | ConvertTo-Json -Compress")
+        try:
+            r = subprocess.run(["powershell", "-NoProfile", "-Command", ps], capture_output=True, text=True, timeout=20, env=env,
+                               creationflags=subprocess.CREATE_NO_WINDOW)
+            rows = json.loads(r.stdout) if r.stdout.strip() else []
+        except Exception as e:
+            log.info("Couldn't look for the task's process: %s", e)
+            return []
+        rows = [rows] if isinstance(rows, dict) else rows
+        out = [{"pid": int(x["ProcessId"]), "name": x["Name"], "cmd": " ".join(str(x["CommandLine"]).split())[:200]}
+               for x in rows if int(x["ProcessId"]) != os.getpid() and "pythonw" not in str(x["Name"]).lower()]
+        self._killable = {x["pid"] for x in out}
+        return out
+
+    def kill_processes(self, pids):
+        """End (with everything they started) the processes task_processes listed. Returns the ones that couldn't be."""
+        failed = []
+        for pid in pids or []:
+            if int(pid) not in getattr(self, "_killable", set()):
+                failed.append(pid)
+                continue
+            r = subprocess.run(["taskkill", "/PID", str(int(pid)), "/T", "/F"], capture_output=True, text=True,
+                               creationflags=subprocess.CREATE_NO_WINDOW)
+            if r.returncode:
+                failed.append(pid)
+        self._killable = set()
+        return failed
 
     def stop_task(self, sid, task_id):
         s = self.live.get(sid)

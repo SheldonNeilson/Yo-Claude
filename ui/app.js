@@ -1984,7 +1984,7 @@ function ask(title, value, done) {
 }
 function confirmBox(text, done) {
   const d = dialog("Are you sure?");
-  d.appendChild(el("div", "", esc(text)));
+  { const t = el("div", "", esc(text)); t.style.whiteSpace = "pre-wrap"; d.appendChild(t); }
   addButtons(d, [["cancel", closeModal], ["yes", () => { closeModal(); done(); }, "danger"]]);
 }
 function alertBox(text) { const d = dialog(appName()); d.appendChild(el("div", "", esc(text))); addButtons(d, [["ok", closeModal, "primary"]]); }

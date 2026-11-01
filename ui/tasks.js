@@ -5,6 +5,32 @@ window.tasks = {
   list: [], open: null, output: null, seen: null, timer: null, scope: "session",
 
   running() { return this.list.filter((t) => t.status === "running"); },
+  // Stopping. A command or agent Yo Claude holds a handle on is stopped through it; a subagent without one by interrupting its
+  // session's reply; a command that outlived a restart by finding its process (by its command line) and ending it, after
+  // showing what will be ended.
+  stopPrompt(list, what) {
+    const running = list.filter((t) => t.status === "running");
+    if (!running.length) return toast("Nothing is running.");
+    const names = running.slice(0, 6).map((t) => "• " + (t.description || "task")).join("\n") + (running.length > 6 ? `\n… and ${running.length - 6} more` : "");
+    confirmBox(`Stop ${what || (running.length === 1 ? "this" : `these ${running.length}`)}?\n\n${names}\n\nWhat they have done so far stays; the work in progress is cut off.`, () => this.stopTasks(running));
+  },
+  async stopTasks(running) {
+    const handle = (t) => t.task_id && !t.detached;
+    const attached = running.filter(handle);
+    const loose = running.filter((t) => !handle(t) && t.kind === "agent");
+    const orphans = running.filter((t) => !handle(t) && t.kind === "shell");
+    for (const t of attached) { const err = await api().stop_task(t.session, t.task_id); if (err) toast(err, "error"); }
+    for (const sid of new Set(loose.map((t) => t.session))) await api().stop_session(sid);
+    const found = [];
+    for (const t of orphans) for (const p of (await api().task_processes(t.key)) || []) if (!found.some((f) => f.pid === p.pid)) found.push(p);
+    if (orphans.length && !found.length) toast("Couldn't find its process: it may have ended already.");
+    else if (found.length) {
+      const lines = found.slice(0, 6).map((p) => `• ${p.name} (${p.pid}): ${p.cmd.slice(0, 90)}`).join("\n");
+      confirmBox(`Yo Claude lost track of ${orphans.length === 1 ? "this command" : "these commands"} when it restarted. End ${found.length === 1 ? "this process" : `these ${found.length} processes`} and everything they started?\n\n${lines}`,
+        async () => { const failed = await api().kill_processes(found.map((p) => p.pid)); toast(failed && failed.length ? `Couldn't end ${failed.length}` : "Ended", failed && failed.length ? "error" : undefined); this.poll(); });
+    }
+    this.poll();
+  },
   // Another conversation was opened: don't leave a different session's subagent on screen; show this one's tasks.
   sessionChanged() {
     const t = this.open && this.list.find((x) => x.key === this.open);
@@ -69,6 +95,14 @@ window.tasks = {
       b.onclick = () => { this.scope = scope; this.render(); };
       bar.appendChild(b);
     }
+    const live = (this.scope === "session" ? mine : this.list).filter((x) => x.status === "running");
+    if (live.length) {
+      bar.appendChild(el("span", "spacer"));
+      const all = el("button", "danger", `stop all <i>${live.length}</i>`);
+      all.title = this.scope === "session" ? "Stop everything running in this session" : "Stop everything running in every session";
+      all.onclick = () => this.stopPrompt(live, `${live.length === 1 ? "the task" : `all ${live.length} running tasks`} ${this.scope === "session" ? "in this session" : "in every session"}`);
+      bar.appendChild(all);
+    }
     body.appendChild(bar);
     body.appendChild(panel.filterBar("tasks", "search the tasks…", () => panel.domFilter(body, "tasks")));
     const shown = this.scope === "session" ? mine : this.list;
@@ -102,6 +136,12 @@ window.tasks = {
           `<div class="tmain"><div class="tdesc">${esc(x.description)}</div>` +
           `<div class="tmeta">${x.kind === "agent" ? `agent${x.agent_type && x.agent_type !== "general-purpose" ? " · " + esc(x.agent_type) : ""}` : "command"}` +
           ` · ${esc(elapsed(x))}</div></div>`;
+        if (x.status === "running") {
+          const k = el("button", "tstop danger", "✕");
+          k.title = "Stop it";
+          k.onclick = (e) => { e.stopPropagation(); this.stopPrompt([x]); };
+          row.appendChild(k);
+        }
         row.title = `${x.description}
 ${statusWord(x)} · in “${x.title}”
 Click to see its output`;
@@ -130,9 +170,9 @@ Click to see its output`;
       go.onclick = () => api().open_session(t.session, t.cwd);
       bar.appendChild(go);
     }
-    if (t.status === "running" && t.task_id && !t.detached) {
+    if (t.status === "running") {
       const stop = el("button", "danger", "stop");
-      stop.onclick = async () => { const err = await api().stop_task(t.session, t.task_id); if (err) toast(err, "error"); };
+      stop.onclick = () => this.stopPrompt([t]);
       bar.appendChild(stop);
     }
     const copy = el("button", "", "copy");

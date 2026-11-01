@@ -1393,6 +1393,16 @@ class Api:
         if force or not a.replying():
             threading.Thread(target=a.quit, daemon=True).start()
 
+    def task_processes(self, key):
+        return self._app.router.task_processes(key)
+
+    def kill_processes(self, pids):
+        return self._app.router.kill_processes(pids)
+
+    def stop_session(self, sid):
+        """Interrupt what one session is doing now (a subagent with no handle is stopped by stopping its reply)."""
+        self._app.router.interrupt(sid)
+
     def stop_task(self, sid, task_id):
         return self._app.router.stop_task(sid, task_id)
 

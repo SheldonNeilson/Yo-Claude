@@ -108,6 +108,7 @@ const MENUS = {
       ["Move to trash…", () => confirmBox(`Move “${s.title}” to the trash?`, async () => { const e = await api().delete(s.id, s.cwd); if (e) alertBox(e); }), { disabled: !s }],
       "-",
       ["Stop", () => api().stop(), { kbd: "Esc" }],
+      ["Stop all background tasks and agents…", () => tasks.stopPrompt(tasks.list, `all ${tasks.running().length} running task${tasks.running().length === 1 ? "" : "s"}, in every session`), { disabled: !tasks.running().length }],
       "-",
       ["Model", null, { sub: pick(MODELS, a ? a.model : S.settings.model, (v) => { $("#modelSel").value = v; $("#modelSel").onchange({ target: $("#modelSel") }); }) }],
       ["Effort", null, { sub: pick(EFFORTS, a ? a.effort : S.settings.effort, (v) => { $("#effortSel").value = v; $("#effortSel").onchange({ target: $("#effortSel") }); }) }],
