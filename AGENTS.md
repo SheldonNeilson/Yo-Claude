@@ -67,10 +67,12 @@ wrong idle makes every following clip "match".
 ### Status at last update (2026-11-01 morning)
 - First full run finished 2026-11-01 ~03:10. Clips on disk (in the app): Female 1 103, Male 1 49, Male 2 31, Female 2 30, Female 3 30, Male 3 30.
   `audit_ids.py` found every clip to be the right person (a clean diagonal).
-- Second batch running from 06:53: `talking_calm` + `talking_calm2` for Male 1, Male 2, Female 2, Female 3, Male 3 (Female 1 has them), and
-  `listen_lean_closed` (closed-mouth listening lean) for Male 2, Female 2, Female 3, Male 3. Female 1 and Male 1 already have `listen_lean_closed`;
-  Female 1 also has `idle_sigh_soft` (head back, subtle). Start jobs with a PowerShell script file (`D:\Temp\yoclaude-scratch\start_jobs.ps1`),
-  not an inline command (path quoting breaks).
+- Second batch (06:53 to 08:14): Male 1 got both talking clips; Female 3 both talking clips; Male 2, Female 2, Male 3 got `talking_calm` only.
+  Still missing: `talking_calm2` for Male 2, Female 2, Male 3 and `listen_lean_closed` for Male 2, Female 2, Female 3, Male 3. Five recorders at once
+  swamped ComfyUI (VRAM full, "still running after 1800s" and read timeouts, prompts left behind in its queue). **Run them one after another**:
+  `D:\Temp\yoclaude-scratchetry_sequential.ps1` waits for ComfyUI's queue to be empty, then runs professor, female2, male3, female3 in turn
+  (started 08:20; writes `D:\Temp\yoclaude-facesetry-done.txt` when finished). Start jobs from a script file, never an inline command.
+  Female 1 and Male 1 already have `listen_lean_closed`; Female 1 also `idle_sigh_soft` (head back, subtle).
 - Reviewed by contact sheet: `listen_lean_closed` and `idle_sigh_soft` are good (the sigh parts the lips a little: acceptable). `idle_yawn` (wide
   mouth, hand over it) and `idle_wave` are kept; `idle_thumbs_up` is hidden (meaningless as an idle gesture).
 - % target rule used for the lists (REVIEW-new-lists.md): per category (resting / thinking / talking / other) aim for the average % of
