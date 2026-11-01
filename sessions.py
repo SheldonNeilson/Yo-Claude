@@ -2321,7 +2321,11 @@ class Router:
             log.info("Couldn't look for the task's process: %s", e)
             return []
         rows = [rows] if isinstance(rows, dict) else rows
-        out = [{"pid": int(x["ProcessId"]), "name": x["Name"], "cmd": " ".join(str(x["CommandLine"]).split())[:200]}
+
+        def around(line, found):   # the part of the command line that matched, not its shared start
+            at = min((line.find(z) for z in found if z in line), default=0)
+            return ("…" if at > 40 else "") + line[max(0, at - 40):at + 140]
+        out = [{"pid": int(x["ProcessId"]), "name": x["Name"], "cmd": around(" ".join(str(x["CommandLine"]).split()), snips)}
                for x in rows if int(x["ProcessId"]) != os.getpid() and "pythonw" not in str(x["Name"]).lower()]
         if len(out) > 4:   # that many matches means the text isn't particular enough: better to end nothing than the wrong things
             out = []
