@@ -11,7 +11,7 @@ const AW = 128;                // the analysis grid frames are decoded to (colum
 // clips that read wrongly when they play at random: kept on disk, never played. think_tap_lips is a straight finger on the
 // lips (a shush: for shushing only, never idling); listen_lean leans in with the mouth wide open, and idle_s_swallow opens it
 // too, which looks odd when it comes round again and again; idle_sigh opens it wide (a sigh should be head back, subtle).
-const HIDDEN = ["think_tap_lips", "listen_lean", "idle_s_swallow", "idle_sigh"];   // (listen_lean_closed and idle_sigh_soft replace two of them)
+const HIDDEN = ["think_tap_lips", "listen_lean", "idle_s_swallow", "idle_sigh", "idle_thumbs_up"];   // (listen_lean_closed and idle_sigh_soft replace two of them)
 const PACE_ABOVE = 1.35;       // a clip peaking this many times above the typical clip's peak speed is slowed to match
 const COLS = 64;               // characters across, whatever the panel's width
 const VIEW = [0, 0, 1, 1];     // the part of the clip shown: left, top, right, bottom (fractions; see frameView)

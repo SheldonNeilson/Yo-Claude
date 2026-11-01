@@ -64,24 +64,23 @@ are the right people. Female 1 (35) and Male 1 (28) lost the clips that came out
 **If you ever see a wrong face again, check uploads and `first-idle.mp4` first**: the same-person guard compares with `idle.mp4`, so a
 wrong idle makes every following clip "match".
 
-### Status at last update
-- Running now: all six jobs (12 python processes), started about 18:00 on 2026-10-31 with the fixed uploader.
-- Clips on disk (raw = in the app): Female 1 71, Male 1 9, Male 2 3, Female 2 3, Female 3 3, Male 3 3.
-- Remaining to record on the active lists: about 190 clips (Female 1 ~34, Male 1 ~43, the other four ~30 each), about 12 hours at the
-  current rate. Check the real numbers from the folders, not from this note.
+### Status at last update (2026-11-01 morning)
+- First full run finished 2026-11-01 ~03:10. Clips on disk (in the app): Female 1 103, Male 1 49, Male 2 31, Female 2 30, Female 3 30, Male 3 30.
+  `audit_ids.py` found every clip to be the right person (a clean diagonal).
+- Second batch running from 06:53: `talking_calm` + `talking_calm2` for Male 1, Male 2, Female 2, Female 3, Male 3 (Female 1 has them), and
+  `listen_lean_closed` (closed-mouth listening lean) for Male 2, Female 2, Female 3, Male 3. Female 1 and Male 1 already have `listen_lean_closed`;
+  Female 1 also has `idle_sigh_soft` (head back, subtle). Start jobs with a PowerShell script file (`D:\Temp\yoclaude-scratch\start_jobs.ps1`),
+  not an inline command (path quoting breaks).
+- Reviewed by contact sheet: `listen_lean_closed` and `idle_sigh_soft` are good (the sigh parts the lips a little: acceptable). `idle_yawn` (wide
+  mouth, hand over it) and `idle_wave` are kept; `idle_thumbs_up` is hidden (meaningless as an idle gesture).
 - % target rule used for the lists (REVIEW-new-lists.md): per category (resting / thinking / talking / other) aim for the average % of
-  the characters not at 100%, never above the highest % below 100; nobody is taken to 100%. Talking has 1 to 2 entries per
-  character (all done), so it has no target.
+  the characters not at 100%, never above the highest % below 100; nobody is taken to 100%.
 
 ### Next steps
-1. Let the jobs finish (progress: count the `*.mp4` in each `clips\` folder against `wishlist.json`; per-state tables are quick to
-   recompute: `idle*` / `think*` / `talk*` / other).
-2. When a character's job ends, run `audit_ids.py` and look at a contact sheet of its clips; quarantine anything that isn't them.
-3. Add a few more `talking_*` variants for every character (the thinnest state), and check the lip sync works with them.
-4. Make Male 1's resting clips match the others (his list asks for 101, about 14 exist at best; the trimmed list asks for 48).
-5. After each run: update the status block above, and commit any `ui/avatar/**` clips and `clips.json` (a push needs a `VERSION` bump).
-6. Female 1's mannerisms: `ui/avatar.js` slows clips that move much faster than the typical one (`paceAll`, `PACE_ABOVE`); ask the
-   user which, if any, still look wrong rather than guessing again.
+1. When the second batch ends: `audit_ids.py`, contact sheet of the new talking and lean clips, commit `ui/avatar/**`.
+2. `idle_sigh_soft` (and any other missing mannerism) for the four characters that lack it, if the user wants it.
+3. Look at every new hand-near-face or wide-mouth clip before it joins the pool (see below).
+4. After each run: update this status block and commit the clips and `clips.json` (a push needs a `VERSION` bump).
 
 ### Clips that must not play at random (`HIDDEN` in `ui/avatar.js`, all characters)
 `think_tap_lips` = a straight finger on the lips, i.e. a shush: only for shushing, never idling or thinking. `listen_lean` (leans in
