@@ -471,11 +471,7 @@ async def tidy_text(text, context="", model=None):
               + (f"Claude's last message, for context:\n{context}\n\n" if context else "")
               + f"<message>\n{text}\n</message>")
     if model:   # a local model chosen in the settings (localai.py): nothing leaves the PC; if it fails the text is left as typed
-        try:
-            out = await asyncio.to_thread(localai.generate, model, TIDY_SYSTEM, prompt, min(1024, len(text) // 2 + 64), 12)
-        except Exception as e:
-            log.info("AutoCorrect on %s failed: %s", model.get("model"), e)
-            return text
+        return await tidy_local(text, model)
     else:
         out = await haiku_tidy(prompt)
     out = re.sub(r"^\s*<message>\s*|\s*</message>\s*$", "", out.strip()).strip()
@@ -484,6 +480,66 @@ async def tidy_text(text, context="", model=None):
     if any(k not in out for k in TIDY_KEEP.findall(text)):
         return text
     return out
+
+
+TIDY_FEWSHOT = (
+    "Fix only spelling mistakes, capital letters and punctuation. Keep every word the same otherwise: never rephrase, never add "
+    "or remove ideas, never answer.\n\n"
+    "Text: i dont think the buton works\nFixed: I don't think the button works.\n\n"
+    "Text: can you also make the sidebar remember wich groups are open\nFixed: Can you also make the sidebar remember which groups are open?\n\n"
+    "Text: why does it stop listening when im not finnished talking\nFixed: Why does it stop listening when I'm not finished talking?\n\n"
+    "Text: Add a toggle at the top, defaulted on.\nFixed: Add a toggle at the top, defaulted on.\n\n")
+TIDY_FILLER = {"um", "uh", "er", "erm", "uhm", "hmm"}
+TIDY_SMALL = {"a", "an", "the", "to", "of", "is", "are", "it", "i"}
+TIDY_WORD = re.compile(r"[A-Za-z0-9_@/\\'’-]+(?:[.:][A-Za-z0-9_@/\\'’-]+)*")   # (a word, or a file name / address: no trailing punctuation)
+
+
+def meaning_kept(orig, fixed):
+    """True if `fixed` only corrects `orig`: words may be respelled (close to the original), filler (um, uh) may go and one tiny
+    word may be added, but no word is swapped for a different one, nothing is added or dropped, and no more than a quarter of
+    the words change. A small model that rephrases fails this, and its text is thrown away."""
+    import difflib
+    a = [w.lower() for w in TIDY_WORD.findall(orig)]
+    b = [w.lower() for w in TIDY_WORD.findall(fixed)]
+    if not a or not b:
+        return False
+    changed = 0
+    for tag, i1, i2, j1, j2 in difflib.SequenceMatcher(None, a, b, autojunk=False).get_opcodes():
+        x, y = a[i1:i2], b[j1:j2]
+        if tag == "equal":
+            continue
+        changed += max(len(x), len(y))
+        if tag == "delete":
+            if not all(w in TIDY_FILLER for w in x):
+                return False
+        elif tag == "insert":
+            if len(y) > 1 or not all(w in TIDY_SMALL for w in y):
+                return False
+        else:   # replace: respelled words only
+            if len(x) == len(y):
+                if not all(difflib.SequenceMatcher(None, p, q).ratio() >= 0.6 for p, q in zip(x, y)):
+                    return False
+            elif difflib.SequenceMatcher(None, "".join(x), "".join(y)).ratio() < 0.85:   # (words joined or split)
+                return False
+    return changed <= max(3, len(a) // 3)
+
+
+async def tidy_local(text, model):
+    """AutoCorrect with a small local model: each line done on its own as a plain few-shot continuation, and any line the model
+    changed in meaning (see meaning_kept) is left as the user wrote it."""
+    out_lines = []
+    for line in text.split("\n"):
+        if len(line.split()) < 2 or line.lstrip().startswith(("/", "@", "`", "-", "#", ">")) or TIDY_KEEP.search(line):
+            out_lines.append(line)   # (code, paths, links and list lines are left alone)
+            continue
+        try:
+            fixed = await asyncio.to_thread(localai.complete, model, TIDY_FEWSHOT + f"Text: {line}\nFixed:", min(200, len(line) // 2 + 40), 12, ("\n",), 0)
+        except Exception as e:
+            log.info("AutoCorrect on %s failed: %s", model.get("model"), e)
+            return text
+        fixed = fixed.strip()
+        out_lines.append(fixed if fixed and meaning_kept(line, fixed) else line)
+    return "\n".join(out_lines)
 
 
 WARM_PREDICT = WarmHaiku()
@@ -503,6 +559,31 @@ PREDICT_SYSTEM = ("You are the autocomplete in the message box of a chat app. Th
                   "the project's subject (never wander to an unrelated topic), and prefer the words, phrases and habits of "
                   "their earlier messages.")
 PREDICT_WORDS, PREDICT_CHARS = 24, 160   # a sentence or so
+
+
+def clean_continuation(text, out, known=None):
+    """A raw continuation of `text` (it may start mid-word, or with a space) as text to append, or "" if it isn't usable.
+    `known`: words this user has written or seen; a word the model finishes must be one of those or an English word."""
+    out = (out or "").replace(chr(13), "").split(chr(10))[0]
+    if not out.strip() or "�" in out or re.search(r"\b(User|Assistant):", out):
+        return ""
+    if text[-1:].isspace():
+        out = out.lstrip()
+    elif out[:1] and not out[:1].isspace():   # it carries on the word being typed: is the finished word a real one?
+        done = re.split(r"\s", text)[-1] + re.split(r"\s", out)[0]
+        word = re.sub(r"^\W+|\W+$", "", done).lower()
+        dic = writing.dictionary()
+        if word and dic and word not in dic and word not in (known or ()) and not re.search(r"[/\\@.]", word):
+            return ""
+    words = out.split()
+    if not words:
+        return ""
+    lead = " " if out[:1].isspace() else ""
+    out = lead + " ".join(words[:PREDICT_WORDS])
+    end = re.search(r"[.?!](?=\s|$)", out)   # (one sentence: a small model's second one wanders off the subject)
+    if end:
+        out = out[:end.end()]
+    return out[:PREDICT_CHARS].rstrip() if len(out) > PREDICT_CHARS else out
 
 
 def clean_prediction(text, out):
@@ -572,7 +653,7 @@ def clean_code_prediction(text, out):
     return out[:80] if out.strip() else ""
 
 
-async def predict_text(text, context="", model=None, kind="chat", name="", profile=""):
+async def predict_text(text, context="", model=None, kind="chat", name="", profile="", examples=None, project="", known=None):
     """What you're likely to type next after `text`: 1 to 3 words to show grey after the cursor (Tab takes them), from
     Haiku (a warm session) or a local model. kind "code" (the file editor, with the file's `name`) offers the rest of the
     line instead. "" when there's nothing to offer or the call fails."""
@@ -595,6 +676,18 @@ async def predict_text(text, context="", model=None, kind="chat", name="", profi
         return clean_code_prediction(text, out)
     if len(text.strip()) < 2 or text.lstrip().startswith(("/", "@")):
         return ""
+    if model and examples is not None:   # a small local model: carry on a log of this user's own messages, not follow instructions
+        log_lines = [f"User: {' '.join(e.split())[:200]}" for e in examples[-10:]]
+        gist = " ".join((context or "").split())[:240]
+        doc = (f"A chat log between a developer (User) and an AI coding assistant{f', in the project {project!r}' if project else ''}. "
+               "The user writes short, plain messages: requests, questions and corrections.\n\n" + "\n".join(log_lines)
+               + (f"\nAssistant: {gist}" if gist else "") + f"\nUser: {text}")
+        try:
+            out = await asyncio.to_thread(localai.complete, model, doc, 32, 6, ("\n",), 0)
+        except Exception as e:
+            log.info("Prediction failed (%s): %s", model.get("model"), e or type(e).__name__)
+            return ""
+        return clean_continuation(text, out, set(known or ()) | set(re.findall(r"[a-z']+", " ".join([*examples, context or "", text, project]).lower())))
     partial = "" if text[-1:].isspace() else re.split(r"\s", text)[-1]
     context = (context or "").strip()
     context = context if len(context) <= 900 else "…" + context[-900:]
@@ -2605,8 +2698,25 @@ class Router:
             async def none():
                 return ""
             return self.run(none())
-        profile = self.prediction_profile(s, text, extra) if kind == "chat" else ""
-        return self.run(predict_text(text, context, localai.find(self.settings, "predict_model"), kind, name, profile))
+        model = localai.find(self.settings, "predict_model")
+        profile, examples, project = "", None, ""
+        if kind == "chat":
+            if model:   # a small local model carries on a log of this user's own messages (their own, from this project, best fits last)
+                cwd = s.cwd if s is not None else None
+                project = os.path.basename((cwd or "").rstrip(chr(92) + "/"))
+                ex = []
+                if self.settings.get("predict_learn", True):
+                    try:
+                        self.writing.bootstrap(cwd or "", sdk.project_key_for_directory(cwd or CHAT_DIR))
+                        ex = list(reversed(self.writing.examples(text, cwd, 8)))
+                    except Exception as e:
+                        log.debug("writing examples failed: %s", e)
+                recent = [" ".join(x.get("text", "").split()) for x in (s.items if s is not None else []) if x.get("kind") == "user" and x.get("text")][-3:]
+                examples = [m for m in ex + recent if m]
+            else:
+                profile = self.prediction_profile(s, text, extra)
+        known = self.writing.known_words() if (kind == "chat" and model and self.settings.get("predict_learn", True)) else None
+        return self.run(predict_text(text, context, model, kind, name, profile, examples, project, known))
 
     # --- /btw: side questions that never land in the conversation (see side_chat) ---
     def btw_ask(self, sid, question, bid=None):

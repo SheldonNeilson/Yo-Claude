@@ -19,6 +19,28 @@ STOP = set("the and for you that this with have are was but not can all from you
            "would could should into then them been were than also some more very".split())
 
 
+_dictionary = None
+
+
+def dictionary():
+    """English words, from the speech model's own vocabulary (whole-word entries: about 30,000), read once. A small model's
+    half-typed-word guess ("g" -> "pt-3.5-turbo") is thrown away unless the finished word is one of these, one this user has
+    written, or one in the conversation. Empty if the speech model isn't on this PC (then nothing is filtered)."""
+    global _dictionary
+    if _dictionary is None:
+        _dictionary = set()
+        hub = os.path.join(os.path.expanduser("~"), ".cache", "huggingface", "hub")
+        for p in glob.glob(os.path.join(hub, "models--Systran--faster-whisper-*en", "snapshots", "*", "vocabulary.txt")):
+            try:
+                with open(p, encoding="utf-8") as f:
+                    _dictionary |= {t[1:].lower() for t in (line.rstrip(chr(10)) for line in f) if t[:1] in (chr(0x120), " ") and t[1:].isalpha()}
+            except OSError:
+                continue
+            if _dictionary:
+                break
+    return _dictionary
+
+
 def words(text):
     return [w for w in re.findall(r"[a-z0-9_.\-/\\]{3,}", (text or "").lower()) if w not in STOP]
 
@@ -122,6 +144,11 @@ class Writing:
             if len(out) >= k:
                 break
         return out
+
+    def known_words(self, extra=""):
+        """Words this person has written, plus those of `extra`, as a set (lower case)."""
+        out = set(re.findall(r"[a-z']+", " ".join(d["t"] for d in self.items).lower()))
+        return out | set(re.findall(r"[a-z']+", (extra or "").lower()))
 
     def forget(self):
         with self.lock:

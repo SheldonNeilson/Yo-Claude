@@ -245,6 +245,27 @@ def generate(m, system, prompt, max_tokens=64, timeout=6):
     return r.json()["choices"][0]["message"]["content"]
 
 
+def complete(m, prompt, max_tokens=40, timeout=6, stop=("\n",), temperature=0.3):
+    """The text that continues `prompt` (raw completion, no chat template): small models are far better at carrying on a text
+    than at following instructions about it. Stops at a newline. Raises on failure."""
+    if m["backend"] == "ollama":
+        url = m.get("url") or OLLAMA_URL
+        if not up(url) and not ensure_ollama(url):
+            raise RuntimeError("Ollama isn't running")
+        if url == OLLAMA_URL:
+            hide_ollama_windows(timeout + 5)
+        r = requests.post(url + "/api/generate", timeout=timeout, json={
+            "model": m["model"], "prompt": prompt, "raw": True, "stream": False, "keep_alive": "20m",
+            "options": {"temperature": temperature, "top_p": 0.9, "num_predict": max_tokens, "stop": list(stop)}})
+        r.raise_for_status()
+        return r.json().get("response", "")
+    url = (m.get("url") or "").rstrip("/")
+    r = requests.post(url + "/completions", timeout=timeout, json={
+        "model": m["model"], "prompt": prompt, "temperature": temperature, "max_tokens": max_tokens, "stop": list(stop), "stream": False})
+    r.raise_for_status()
+    return r.json()["choices"][0].get("text", "")
+
+
 def warm(m):
     """Load the model into memory ahead of the first keystroke."""
     try:
