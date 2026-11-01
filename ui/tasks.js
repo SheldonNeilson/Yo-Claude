@@ -11,6 +11,7 @@ window.tasks = {
   stopPrompt(list, what) {
     const running = list.filter((t) => t.status === "running");
     if (!running.length) return toast("Nothing is running.");
+    if (running.every((t) => !(t.task_id && !t.detached) && t.kind === "shell")) return this.stopTasks(running);   // only the process list's own confirmation, once
     const names = running.slice(0, 6).map((t) => "• " + (t.description || "task")).join("\n") + (running.length > 6 ? `\n… and ${running.length - 6} more` : "");
     confirmBox(`Stop ${what || (running.length === 1 ? "this" : `these ${running.length}`)}?\n\n${names}\n\nWhat they have done so far stays; the work in progress is cut off.`, () => this.stopTasks(running));
   },
