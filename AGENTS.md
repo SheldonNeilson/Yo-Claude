@@ -35,7 +35,7 @@ https://github.com/SheldonNeilson/Yo-Claude (private); their installs update fro
 ## Avatar training plan (the six faces): status, next steps, open questions
 
 **Keep this section up to date after every training run** (counts, what was changed, what you learned), so the next session can
-carry on without re-reading the history. Last updated: 2026-10-31 evening.
+carry on without re-reading the history. Last updated: 2026-11-01 morning.
 
 ### What it is
 Each character is a real-looking face: short clips (5 s, 12 fps, ASCII-rendered live by `ui/avatar.js`) made with ComfyUI image-to-video
@@ -65,22 +65,19 @@ are the right people. Female 1 (35) and Male 1 (28) lost the clips that came out
 **If you ever see a wrong face again, check uploads and `first-idle.mp4` first**: the same-person guard compares with `idle.mp4`, so a
 wrong idle makes every following clip "match".
 
-### Status at last update (2026-11-01 morning)
-- First full run finished 2026-11-01 ~03:10. Clips on disk (in the app): Female 1 103, Male 1 49, Male 2 31, Female 2 30, Female 3 30, Male 3 30.
-  `audit_ids.py` found every clip to be the right person (a clean diagonal).
-- Second batch (06:53 to 08:14): Male 1 got both talking clips; Female 3 both talking clips; Male 2, Female 2, Male 3 got `talking_calm` only.
-  Still missing: `talking_calm2` for Male 2, Female 2, Male 3 and `listen_lean_closed` for Male 2, Female 2, Female 3, Male 3. Five recorders at once
-  swamped ComfyUI (VRAM full, "still running after 1800s" and read timeouts, prompts left behind in its queue). **Run them one after another**:
-  `D:\Temp\yoclaude-scratch\retry_sequential.ps1` waits for ComfyUI's queue to be empty, then runs professor, female2, male3, female3 in turn
-  (started 08:20; writes `D:\Temp\yoclaude-faces\retry-done.txt` when finished). Start jobs from a script file, never an inline command.
-  Female 1 and Male 1 already have `listen_lean_closed`; Female 1 also `idle_sigh_soft` (head back, subtle).
+### Status at last update (2026-11-01 ~09:00)
+- All recordings finished (the sequential retry ended 08:46). Clips in the app: Female 1 103, Male 1 51, Male 2 34, Female 2 33, Female 3 33, Male 3 33.
+  `audit_ids.py`: every clip is the right person (clean diagonal). Every character now has `talking_calm`, `talking_calm2` and `listen_lean_closed`.
+  Contact sheet of the four new lean and talking sets: mouths closed in the leans (Female 3's lips purse slightly in one frame: acceptable).
+  Five recorders at once swamped ComfyUI (VRAM full, timeouts); **run them one after another** (`D:\Temp\yoclaude-scratchetry_sequential.ps1`).
+  Start jobs from a script file, never an inline command. Only Female 1 has `idle_sigh_soft` (head back, subtle).
 - Reviewed by contact sheet: `listen_lean_closed` and `idle_sigh_soft` are good (the sigh parts the lips a little: acceptable). `idle_yawn` (wide
   mouth, hand over it) and `idle_wave` are kept; `idle_thumbs_up` is hidden (meaningless as an idle gesture).
 - % target rule used for the lists (REVIEW-new-lists.md): per category (resting / thinking / talking / other) aim for the average % of
   the characters not at 100%, never above the highest % below 100; nobody is taken to 100%.
 
 ### Next steps
-1. When the second batch ends: `audit_ids.py`, contact sheet of the new talking and lean clips, commit `ui/avatar/**`.
+1. (done 2026-11-01) second batch audited and reviewed.
 2. `idle_sigh_soft` (and any other missing mannerism) for the four characters that lack it, if the user wants it.
 3. Look at every new hand-near-face or wide-mouth clip before it joins the pool (see below).
 4. After each run: update this status block and commit the clips and `clips.json` (a push needs a `VERSION` bump).
