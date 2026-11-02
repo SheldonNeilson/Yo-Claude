@@ -13,6 +13,12 @@ haven't read), the conversation in ASCII speech bubbles with Claude's steps fold
 everything the session changed on the right. The meters at the top show how full this conversation is and how much
 of your plan's limits you've used.
 
+![The face pane made large: an ASCII video of a real person, here Yo Claudia, under the session list](docs/screenshots/face.png)
+
+**A face to talk to.** Drag the top edge of the face up (or double-click it to reset) and she fills the left side: an ASCII
+video of a real person who listens, thinks and talks along with the voice. Six characters to pick from (Options → Face),
+each with their own voice and 60 to 100 short clips of resting, thinking, listening and talking.
+
 ![The chat, a Markdown file in split edit and preview, and a terminal, side by side](docs/screenshots/workspace.png)
 
 **Everything on one screen.** The middle of the window is shared by the chat, a file pane (text files straight in the
