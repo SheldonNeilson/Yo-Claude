@@ -236,7 +236,7 @@ $("#folderBtn").onclick = (e) => {
     ["sub:new session in…"],
     ...S.workspaces.map((f) => ["  " + f, () => api().new_session(f)]),
     ["  chat (no folder)", () => api().new_session(null)],
-    "-", ["add a folder…", () => api().add_folder()],
+    "-", ["add a folder…", () => addFolderFlow()],
   ]);
 };
 $("#tListen").onclick = () => api().set_setting("listening", !(S.settings.listening !== false));
@@ -485,7 +485,7 @@ function sessionMenu(e, s) {
   ].filter(Boolean));
 }
 $("#search").oninput = (e) => { S.filter = e.target.value; renderTree(); };
-$("#addFolderBtn").onclick = () => api().add_folder();
+$("#addFolderBtn").onclick = () => addFolderFlow();
 $("#newChatBtn").onclick = () => api().new_session(null);
 $("#cleanBtn").onclick = async () => {   // suggested stale sessions, all ticked, moved to the (restorable) trash
   const d = dialog("Clean up stale conversations");

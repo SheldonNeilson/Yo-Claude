@@ -49,7 +49,7 @@ const MENUS = {
   file: () => [
     ["New session", () => api().new_session(), { kbd: "Ctrl+N" }],
     ["New chat (no folder)", () => api().new_session(null), { kbd: "Ctrl+Shift+N" }],
-    ["Add a folder…", () => api().add_folder()],
+    ["Add a folder…", addFolderFlow],
     ["Open a folder by path…", () => { $("#folderPath").focus(); $("#folderPath").select(); }, { kbd: "Ctrl+L" }],
     "-",
     ["Show folder in Explorer", () => api().open_path(S.active?.cwd, "open"), { disabled: !S.active?.cwd }],
@@ -241,6 +241,22 @@ function renderUpdate(u) {
 $("#updateBadge").onclick = () => confirmBox(`Update to Yo Claude ${S.update.latest}? It restarts; background tasks keep running.`,
   () => api().check_updates());
 
+// A folder was picked (Explorer) or typed: start a new session there (the usual intent), or move the conversation you're in
+// there. The folder is in the tree either way.
+async function folderChoice(path) {
+  if (!path) return;
+  const done = (err) => err && alertBox(err);
+  if (!S.active) return done(await api().open_folder_path(path, true));
+  const d = dialog("Another folder");
+  const q = el("div", "", esc(`${path}
+
+Start a new session there, or move this conversation to that folder?`));
+  q.style.whiteSpace = "pre-wrap"; d.appendChild(q);
+  const go = (fresh) => async () => { closeModal(); done(await api().open_folder_path(path, fresh)); };
+  addButtons(d, [["just add it", closeModal], ["move this session", go(false)], ["new session", go(true), "primary"]]);
+}
+async function addFolderFlow() { const f = await api().add_folder(); if (f) folderChoice(f); }
+
 // ---------- the folder field: select/copy the path, or paste/type one and press Enter ----------
 $("#folderPath").addEventListener("focus", (e) => setTimeout(() => e.target.select(), 0));
 $("#folderPath").addEventListener("keydown", async (e) => {
@@ -249,14 +265,7 @@ $("#folderPath").addEventListener("keydown", async (e) => {
   const v = e.target.value.trim();
   if (!v || sameFolder(v, S.active ? S.active.cwd : S.folder)) return e.target.blur();
   e.target.blur();
-  if (!S.active) { const err = await api().open_folder_path(v); return err && alertBox(err); }
-  const d = dialog("Another folder");
-  const q = el("div", "", esc(`${v}
-
-Start a new session there, or move this conversation to that folder?`));
-  q.style.whiteSpace = "pre-wrap"; d.appendChild(q);
-  const go = (fresh) => async () => { closeModal(); const err = await api().open_folder_path(v, fresh); if (err) alertBox(err); };
-  addButtons(d, [["cancel", closeModal], ["move this session", go(false)], ["new session", go(true), "primary"]]);
+  folderChoice(v);
 });
 $("#folderPath").addEventListener("blur", () => setTimeout(renderFolder, 150));
 $("#folderCopy").onclick = () => copyText(S.active?.cwd || S.folder, "path copied");
