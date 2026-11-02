@@ -19,6 +19,12 @@ of your plan's limits you've used.
 video of a real person who listens, thinks and talks along with the voice. Six characters to pick from (Options → Face),
 each with their own voice and 60 to 100 short clips of resting, thinking, listening and talking.
 
+![Bug Invaders, an ASCII space-invaders over the chat while Claude works: failing tests, TODOs and stack traces to shoot, with coffee power-ups](docs/screenshots/bug-invaders.png)
+
+**Something to do while Claude thinks.** Bug Invaders comes up over the chat when a reply takes a while (or from the 👾 button
+next to the message box): shoot failing tests, TODOs and segfaults, grab coffee and `npm update` power-ups, and it steps
+aside the moment Claude needs you. Esc hides it.
+
 ![The chat, a Markdown file in split edit and preview, and a terminal, side by side](docs/screenshots/workspace.png)
 
 **Everything on one screen.** The middle of the window is shared by the chat, a file pane (text files straight in the
