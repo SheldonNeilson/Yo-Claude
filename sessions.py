@@ -137,6 +137,13 @@ UI_PROMPT = (
     "type_in_terminal: it opens Yo Claude's terminal pane and types the command at the prompt WITHOUT pressing Enter, "
     "so they read it and run it. You can't see the terminal's output: ask them to paste it back if you need it."
 )
+LINKS_PROMPT = (
+    " Make everything you mention in the chat linkable, so the user can click it. Files and folders: write the full "
+    "path in `inline code` (a path inside a code block is not a link); a click previews it in Yo Claude's file pane, "
+    "and images, video, audio and PDFs are shown under the reply. Pull requests, issues, work items, builds and web "
+    "pages: give the full https URL as a markdown link, e.g. [PR #12](https://github.com/org/repo/pull/12), never a "
+    "bare number or name. Do this every time you mention one, not only the first."
+)
 CHECKLIST_PROMPT = (   # (with the checklist tool: Options > Tick Lists)
     " When the user should pick several things from a list (which to do, keep, include or fix), use the yo-claude "
     "checklist tool (mcp__yo-claude__checklist) instead of writing the list out: they tick yes or no for each item and "
@@ -916,21 +923,28 @@ class Session:
         return None
 
     def load_history(self):
-        """Transcript of an existing session, from its JSONL."""
+        """Transcript of an existing session, from its JSONL (with the transcripts before a /clear, as one conversation)."""
+        before = self.router.chain_before(self.id)
+        for pid in before:
+            self.load_transcript(pid, None)
+            self.add({"kind": "note", "text": "Context cleared"})
+        self.load_transcript(self.id, self.rewind_mark())
+        self.restore_spoken()
+
+    def load_transcript(self, sid, mark):
         try:
-            messages = sdk.get_session_messages(self.id, directory=self.cwd or CHAT_DIR)
+            messages = sdk.get_session_messages(sid, directory=self.cwd or CHAT_DIR)
         except Exception as e:
-            log.warning("Couldn't read session %s: %s", self.id, e)
+            log.warning("Couldn't read session %s: %s", sid, e)
             return
-        mark = self.rewind_mark()
-        stamps = message_times(self.router.session_file(self.id, self.cwd)[1])
-        self.folded = folded_prompts(self.router.session_file(self.id, self.cwd)[1])
+        path = self.router.session_file(sid, self.cwd)[1]
+        stamps = message_times(path)
+        self.folded = folded_prompts(path)
         self.loading_history = True
         try:
             self.load_messages(messages, mark, stamps)
         finally:
             self.loading_history, self.history_ts, self.folded = False, None, {}
-        self.restore_spoken()
 
     def load_messages(self, messages, mark, stamps):
         for m in messages:
@@ -1006,7 +1020,7 @@ class Session:
         if PC_CONTROL_SERVER in servers:
             system += PC_CONTROL_PROMPT
         servers[UI_SERVER] = self.ui_tools()
-        system += UI_PROMPT   # (the Options menu: tick lists, advisor notes; from the session's next start)
+        system += UI_PROMPT + LINKS_PROMPT   # (the Options menu: tick lists, advisor notes; from the session's next start)
         if r.settings.get("checklist_tool", True):
             system += CHECKLIST_PROMPT
         if r.settings.get("advisor_relay", True):
@@ -1272,6 +1286,17 @@ class Session:
             self.router.evict(keep=self)
             asyncio.ensure_future(self.learn_commands())
 
+    async def warm(self):
+        """Start Claude Code for this session before its first message, so the context meter and the MCP / skills
+        list (Context window dialog) work straight away instead of after the first reply."""
+        if self.client is not None or self.busy:
+            return
+        try:
+            await self.connect()
+            await self.measure_context()
+        except Exception as e:
+            log.debug("warm %s: %s", self.id, e)
+
     def loading_history_flag(self):
         return bool(getattr(self, "loading_history", False))
 
@@ -1457,6 +1482,9 @@ class Session:
                                            "send your message again (or ↻ retry) to carry on."})
 
     def dispatch(self, m):
+        new_id = m.session_id if isinstance(m, sdk.ResultMessage) else             (m.data or {}).get("session_id") if isinstance(m, sdk.SystemMessage) and m.subtype == "init" else None
+        if new_id and new_id != self.id:   # /clear (or anything else that starts a new transcript): still the same conversation
+            self.router.rekey(self, new_id)
         if isinstance(m, (sdk.TaskStartedMessage, sdk.TaskProgressMessage, sdk.TaskUpdatedMessage,
                           sdk.TaskNotificationMessage)):
             return self.on_task(m)
@@ -2425,6 +2453,96 @@ class Router:
                 log.warning("PC control is on but its server isn't installed (run install.ps1)")
         return servers
 
+    # --- one conversation, however many transcripts ---
+    # Claude Code starts a new transcript (a new session id) on /clear. To you that is the same conversation: it keeps its
+    # place, title, group and pin, and the older transcript is hidden from the list (never a second entry). Nothing is
+    # branched unless you ask for it (fork, rewind).
+    KEEP_ON_CLEAR = ("title", "group", "pinned", "source", "cwd", "extra_dirs", "cost_total", "unseen")
+
+    def rekey(self, s, new_id):
+        old = s.id
+        om = self.meta.session(old)
+        nm = self.meta.session(new_id)
+        for k in self.KEEP_ON_CLEAR:
+            if k in om and k not in nm:
+                nm[k] = om[k]
+        nm["cwd"] = s.cwd
+        nm["predecessor"] = old
+        om["successor"] = new_id
+        self.meta.save()
+        self.live.pop(old, None)
+        self.live[new_id] = s
+        s.id = new_id
+        s.resumed = True
+        if old in self.work:
+            self.work[new_id] = self.work.pop(old)
+        if old in self.detached:
+            self.detached[new_id] = self.detached.pop(old)
+        log.info("Session %s continues as %s (new transcript)", old, new_id)
+        self.emit("session_rekeyed", old=old, new=new_id, session=self.describe(s))
+        self.sessions_changed(s.cwd)
+
+    def change_folder(self, sid, folder):
+        """Point a conversation at another folder (None = chat). It stays the same session: same id, transcript, title, pin
+        and group (unless it was in its old folder's own group, then it follows to the new folder's). Claude Code keeps
+        transcripts per folder, so the files move there, and it reconnects from the new folder on the next message."""
+        s = self.live.get(sid)
+        if s is None:
+            return "Open the session first."
+        if s.busy or sid in self.work:
+            return "It's still working: change the folder when it has finished."
+        old = s.cwd
+        if same_folder(old, folder):
+            return None
+        ids = self.chain_before(sid) + [sid]
+        src_dir, _ = self.session_file(sid, old)
+        dst_dir, _ = self.session_file(sid, folder)
+        os.makedirs(dst_dir, exist_ok=True)
+        for i in ids:
+            if os.path.exists(os.path.join(dst_dir, f"{i}.jsonl")):
+                return "That folder already has a session with the same id."
+        for i in ids:
+            for name in (f"{i}.jsonl", i):   # the transcript, and its subagent transcripts
+                src = os.path.join(src_dir, name)
+                if os.path.exists(src):
+                    shutil.move(src, os.path.join(dst_dir, name))
+        if folder:
+            self.meta.add_folder(folder)
+            if not any(same_folder(folder, w) for w in self.meta.data["workspaces"]):
+                self.set_workspace(folder, True)
+        gc = self.meta.data.get("group_cwd", {})
+        for i in ids:
+            m = self.meta.session(i)
+            m["cwd"] = folder
+            if any(g == m.get("group") and same_folder(c, old) for g, c in gc.items()):
+                m["group"] = None   # (its old folder's own group: the list files it under the new folder's)
+            m.pop("baseline", None)
+            m.pop("baseline_kind", None)
+        self.meta.save()
+        s.cwd = folder
+        s.extra_dirs = [d for d in s.extra_dirs if not same_folder(d, folder)]
+        s.baseline = s.baseline_kind = None
+        self.folder = folder
+        if s.client:
+            self.run(s.disconnect())   # resumes from the new folder with the next message
+        s.resumed = True
+        self.ensure_baseline(s, "opened")
+        self.emit("session_info", session=self.describe(s))
+        self.emit("folder", folder=self.folder, folders=self.meta.data["recent_folders"])
+        self.sessions_changed(old)
+        self.sessions_changed(folder)
+        return None
+
+    def chain_before(self, sid):
+        """The earlier transcripts of a conversation, oldest first."""
+        out, seen = [], {sid}
+        p = self.meta.data["sessions"].get(sid, {}).get("predecessor")
+        while p and p not in seen:
+            out.insert(0, p)
+            seen.add(p)
+            p = self.meta.data["sessions"].get(p, {}).get("predecessor")
+        return out
+
     # --- sessions list ---
     def list(self, cwd):
         """Sessions for a folder (None = chats), newest first, merged with our metadata."""
@@ -2443,6 +2561,9 @@ class Router:
         out, seen = [], set()
         for s in infos:
             m = meta.get(s.session_id, {})
+            if m.get("successor"):   # an older transcript of a conversation that went on after /clear: one entry only
+                seen.add(s.session_id)
+                continue
             if home and m.get("group") not in groups:
                 m = self.meta.session(s.session_id)
                 m["group"] = home
@@ -2457,7 +2578,7 @@ class Router:
                         "live": s.session_id in self.live, "busy": s.session_id in self.work})
         for s in self.live.values():   # brand-new sessions not written to disk yet
             if s.id not in seen and same_folder(s.cwd, cwd):
-                out.append({"id": s.id, "title": "New session", "modified": s.last_used * 1000,
+                out.append({"id": s.id, "title": self.meta.data["sessions"].get(s.id, {}).get("title") or "New session", "modified": s.last_used * 1000,
                             "created": s.last_used * 1000, "cwd": cwd, "source": "yoclaude", "pinned": False,
                             "group": (self.meta.data["sessions"].get(s.id) or {}).get("group") if (self.meta.data["sessions"].get(s.id) or {}).get("group") in groups else home,
                             "live": True, "busy": s.id in self.work})
@@ -2498,6 +2619,7 @@ class Router:
         self.ensure_baseline(s, "start")
         self.emit("opened", session=self.describe(s), items=[])
         self.sessions_changed(cwd)
+        self.run(s.warm())
         return s
 
     def open(self, sid, cwd):
@@ -2528,6 +2650,7 @@ class Router:
             self.sessions_changed(cwd)
         self.ensure_baseline(s, "opened")
         self.emit("opened", session=self.describe(s), items=s.items)
+        self.run(s.warm())
         return s
 
     def remember_last(self, s):
@@ -3187,8 +3310,9 @@ class Router:
         return folder, os.path.join(folder, f"{sid}.jsonl")
 
     def stale(self):
-        """Sessions worth cleaning up, oldest first: empty ones, short ones a week old, and anything untouched for
-        STALE_DAYS. Never pinned, open, busy, or touched in the last QUIET_DAYS."""
+        """Sessions worth cleaning up, oldest first: empty ones, short ones a week old, anything untouched for STALE_DAYS,
+        and the older copies of a duplicated session (same folder, same first message) however recent. Never pinned, open
+        or busy, and, apart from duplicates, never touched in the last QUIET_DAYS."""
         now = time.time() * 1000
         out = []
         for cwd in [None] + self.workspaces():
@@ -3197,15 +3321,23 @@ class Router:
             except Exception as e:
                 log.warning("list_sessions failed for %s: %s", cwd, e)
                 continue
+            newest = {}   # first message -> the newest session that began with it (that one is kept)
+            for s in infos:
+                key = " ".join((s.first_prompt or "").split()).lower()
+                if key and not self.meta.data["sessions"].get(s.session_id, {}).get("successor")                         and (key not in newest or (s.last_modified or 0) > (newest[key].last_modified or 0)):
+                    newest[key] = s
             for s in infos:
                 m = self.meta.data["sessions"].get(s.session_id, {})
-                if m.get("pinned") or s.session_id in self.live or s.session_id in self.work:
+                if m.get("pinned") or m.get("successor") or s.session_id in self.live or s.session_id in self.work:
                     continue
                 days = (now - (s.last_modified or now)) / 86_400_000
-                if days < QUIET_DAYS:
-                    continue
                 size = s.file_size or 0
-                if size < EMPTY_BYTES or not (s.first_prompt or s.custom_title or s.summary):
+                key = " ".join((s.first_prompt or "").split()).lower()
+                if key and newest[key] is not s and size >= EMPTY_BYTES:
+                    reason = "older copy of a duplicate session"
+                elif days < QUIET_DAYS:
+                    continue
+                elif size < EMPTY_BYTES or not (s.first_prompt or s.custom_title or s.summary):
                     reason = "empty"
                 elif size < SMALL_BYTES:
                     reason = f"short, untouched for {int(days)} days"
@@ -3233,14 +3365,25 @@ class Router:
 
     def delete(self, sid, cwd, notify=True):
         """Move a session to Yo Claude's trash (restorable). Refused while it's busy or was written in the last minute,
-        which probably means it's open in another Claude Code window."""
+        which probably means it's open in another Claude Code window. The transcripts before a /clear go with it."""
+        err = self.delete_one(sid, cwd)
+        if err:
+            return err
+        for old in self.chain_before(sid):
+            if self.delete_one(old, cwd, force=True) is None:
+                self.meta.session(old).pop("successor", None)   # (restored alone, it is a session of its own again)
+        if notify:
+            self.sessions_changed(cwd)
+        return None
+
+    def delete_one(self, sid, cwd, force=False):
         s = self.live.get(sid)
         if s and s.busy:
             return "It's still working."
         folder, path = self.session_file(sid, cwd)
         if not os.path.exists(path):
             return "Couldn't find that session's file."
-        if time.time() - os.path.getmtime(path) < 60 and not s:
+        if time.time() - os.path.getmtime(path) < 60 and not s and not force:
             return "It changed in the last minute, so it may be open somewhere else."
         if s:
             self.run(s.disconnect()).result(10)
@@ -3253,8 +3396,6 @@ class Router:
         if os.path.isdir(os.path.join(folder, sid)):   # its subagent transcripts
             shutil.move(os.path.join(folder, sid), os.path.join(dest, sid))
         self.meta.update(sid, deleted={"at": time.time(), "from": folder}, cwd=cwd)
-        if notify:
-            self.sessions_changed(cwd)
         return None
 
     def trash(self):

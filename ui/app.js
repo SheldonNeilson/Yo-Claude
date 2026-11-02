@@ -61,7 +61,7 @@ function ago(ms) {
   return new Date(ms).toLocaleDateString();
 }
 function el(tag, cls, html) { const e = document.createElement(tag); if (cls) e.className = cls; if (html != null) e.innerHTML = html; return e; }
-const allSessions = () => Object.values(S.lists).flat();
+const allSessions = () => [...new Map(Object.values(S.lists).flat().map((s) => [s.id, s])).values()];   // (one entry per conversation, even if two folder lists hold it)
 const findSession = (id) => allSessions().find((s) => s.id === id);
 
 // ---------- events from Python ----------
@@ -122,6 +122,12 @@ function handle(e) {
                  "Quitting now cuts it off (background tasks keep running and are picked up after a restart).",
                  () => api().quit(true));
       break;
+    case "session_rekeyed":   // /clear: the same conversation continues under a new id
+      if (S.active && S.active.id === e.old) S.active.id = e.new;
+      for (const k of ["busy", "bg"]) if (S[k].delete(e.old)) S[k].add(e.new);
+      if (S.work[e.old]) { S.work[e.new] = S.work[e.old]; delete S.work[e.old]; }
+      if (window.btw?.session === e.old) btw.session = e.new;
+      break;
     case "work":
       S.work[e.session] = e.session_state;
       setTimeout(showDisplay, 0);
@@ -140,7 +146,7 @@ function handle(e) {
     case "update": renderUpdate(e); break;
     case "notice": toast(e.text); break;
     case "session_info":
-      if (S.active && e.session.id === S.active.id) { Object.assign(S.active, e.session); renderExtraDirs(); }
+      if (S.active && e.session.id === S.active.id) { Object.assign(S.active, e.session); renderExtraDirs(); renderFolder(); renderHead(); renderTree(); }
       break;
     case "context":
       if (S.active && e.session === S.active.id) { S.active.context = e.context; renderContext(); }

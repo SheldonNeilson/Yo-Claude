@@ -240,7 +240,7 @@ It's **on** after install. When you ask ("open YouTube and play lo-fi music"), C
 your mouse and keyboard, as you, with your logins.
 
 - **Ctrl+Alt+X** stops it instantly. Slamming the mouse into a screen corner also aborts.
-- Switch it off with `[pc control]` at the top of the window, in the Voice menu, or in the tray menu.
+- Switch it off with `[pc control]` at the top of the window, in Options > Claude, or in the tray menu.
 - It asks before anything hard to undo (sending, deleting, buying), but don't leave it unattended on anything
   sensitive.
 - Its tools take about 11k tokens of every conversation (screenshots add more; the **ctx** meter shows it), so turn
@@ -269,7 +269,7 @@ Your conversations stay in Claude Code.
 
 ## Troubleshooting
 
-- **It doesn't hear me**: tray → *Training mode* checks your mic level and how it hears "yo claude", and can learn
+- **It doesn't hear me**: tray → *Train the wake word* checks your mic level and how it hears "yo claude", and can learn
   how you say it.
 - **It mishears what I say**: Voice → *More accurate speech recognition*.
 - **A reply failed**: click **↻ retry** on the error.

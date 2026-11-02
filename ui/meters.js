@@ -23,7 +23,7 @@ function renderContext() {
   if (!S.active) return;
   if (!c) {
     m.innerHTML = `ctx ${meterBar(0)} <span class="dim">—</span>`;
-    m.dataset.tip = "Context window\nMeasured after the next reply in this session.";
+    m.dataset.tip = "Context window\nMeasured when the session starts, and after each reply.";
     return;
   }
   const pct = c.percentage || 0;
@@ -36,7 +36,7 @@ function showContext() {
   const c = S.active?.context;
   const d = dialog("Context window");
   d.classList.add("wide", "ctxview");
-  if (!c) { d.appendChild(el("div", "dim", "Not measured yet: it's measured after each reply in this session.")); addButtons(d, [["close", closeModal, "primary"]]); return; }
+  if (!c) { d.appendChild(el("div", "dim", "Still measuring: Claude Code is starting for this session. Reopen this in a moment.")); addButtons(d, [["close", closeModal, "primary"]]); return; }
   const cats = c.categories.filter((x) => x.tokens > 0);
   let seg = "", i = 0;
   for (const x of cats) {
@@ -58,7 +58,7 @@ function showContext() {
   const tips = [];
   if (c.percentage >= 60) tips.push("It's getting full: replies get slower and costlier. Compact it, or start a new session (Ctrl+N).");
   const pcTok = (c.mcp || []).filter((t) => /screen-control/.test(t.server || t.name)).reduce((a, t) => a + t.tokens, 0);
-  if (pcTok > 2000) tips.push(`PC control's tools take about ${fmtTok(pcTok)} here. Turn it off in the Voice menu when you don't need it.`);
+  if (pcTok > 2000) tips.push(`PC control's tools take about ${fmtTok(pcTok)} here. Turn it off in Options > Claude when you don't need it.`);
   if ((b.toolResultTokens || 0) > c.total * 0.4) tips.push("Most of it is tool results (files read, command output, screenshots).");
   d.appendChild(el("div", "", `<p><b>${fmtTok(c.total)}</b> of ${fmtTok(c.max)} tokens used (<b class="${meterLevel(c.percentage)}">${c.percentage.toFixed(1)}%</b>)` +
     `<span class="dim"> · ${esc(c.model || "")}${c.autocompact ? ` · auto-compacts near ${fmtTok(c.autocompact)}` : ""}</span></p>` +

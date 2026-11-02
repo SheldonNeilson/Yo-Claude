@@ -65,7 +65,7 @@ DEFAULT_SETTINGS = {"listening": True, "greeting": True, "voice_replies": True, 
                     "launch_at_login": True, "show_bar": True, "show_window": True, "onboarded": False,
                     "accurate_speech": False}
 
-GREETINGS = ["Yeah?", "Yo!", "Go ahead.", "What's up?", "Mm-hm?"]   # short: you can start talking sooner
+GREETINGS = ["Yeah?", "Yo!", "Go ahead.", "What's up?", "Yes?"]   # short: you can start talking sooner
 PREROLL_S = 1.0      # audio kept from before speech is detected (soft first words)
 START_ON = 0.4       # speech probability that starts a request (a little more sensitive than the wake word's)
 TARGET_RMS = 3000    # quiet requests are brought up to about this loudness before transcribing
@@ -751,12 +751,13 @@ class Assistant:
             return
         self.set_state(THINKING, "")
         self.wake.reset(); self.recent.clear()   # listening for "yo claude" again meanwhile (to queue): start clean
-        self.job = (self.generation, self.worker.submit(self.think, pcm, self.generation, self.utterance.strip_wake))
+        self.job = (self.generation, self.worker.submit(self.think, pcm, self.generation, self.utterance.strip_wake,
+                                                        self.utterance.followup))
         if self.backlog:   # queued behind the reply(s) still coming: answered in the order you asked
             self.backlog.append(self.job)
             self.job = self.backlog.pop(0)
 
-    def think(self, pcm, generation, strip_wake=False):
+    def think(self, pcm, generation, strip_wake=False, followup=False):
         """Worker thread: transcribe, run voice commands or ask Claude, render the voice.
         Returns (reply, next step, pcm)."""
         heard = self.stt(pcm)
@@ -764,8 +765,8 @@ class Assistant:
             heard = strip_wake_words(heard, self.settings.get("wake_alternates", []))
             if len(heard.split()) < 2:   # it was only the wake word after all: greet and listen as usual
                 return None, "greet", None
-        if not heard:
-            return DIDNT_CATCH, "idle", None
+        if not heard:   # a noise after a reply you didn't answer: say nothing; after the wake word, say so
+            return (None, "quiet", None) if followup else (DIDNT_CATCH, "idle", None)
         if is_stop(heard):
             return OKAY, "idle", None
         command = voice_command(heard)
@@ -864,6 +865,8 @@ class Assistant:
         reply, step, pcm = result
         if step == "greet":
             self.start_conversation()
+        elif step == "quiet":
+            self.go_idle()
         elif step == "idle":
             self.say(reply, lambda _: self.go_idle())
         elif self.backlog:   # more queued replies to come: straight on to the next, no follow-up pause

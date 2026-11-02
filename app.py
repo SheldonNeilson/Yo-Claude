@@ -477,7 +477,7 @@ class App:
             pystray.MenuItem("Launch with Windows", toggle("launch_at_login", set_launch_at_login),
                              checked=checked("launch_at_login")),
             pystray.Menu.SEPARATOR,
-            pystray.MenuItem("Training mode…", lambda: self.open_training()),
+            pystray.MenuItem("Train the wake word…", lambda: self.open_training()),
             pystray.MenuItem("Check for updates…",
                              lambda: threading.Thread(target=self.check_updates, daemon=True).start()),
             pystray.MenuItem("Open log", lambda: os.startfile(LOG_PATH)),
@@ -1355,11 +1355,14 @@ class Api:
             win32clipboard.CloseClipboard()
 
     def open_folder_path(self, path):
-        """A folder typed or pasted into the folder field: start a session there (and add it to the tree)."""
+        """A folder typed or pasted into the folder field: the session you're in moves there (and it is added to the tree)."""
         path = os.path.normpath(os.path.expandvars(os.path.expanduser((path or "").strip().strip('"'))))
         if not os.path.isdir(path):
             return f"No such folder: {path}"
-        self._app.router.set_workspace(path, True)
+        r = self._app.router
+        r.set_workspace(path, True)
+        if r.active:   # the conversation you're in moves to that folder: it is not a new session
+            return r.change_folder(r.active.id, path)
         self.new_session(path)
         return None
 
