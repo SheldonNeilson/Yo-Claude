@@ -35,7 +35,7 @@ https://github.com/SheldonNeilson/Yo-Claude (private); their installs update fro
 ## Avatar training plan (the six faces): status, next steps, open questions
 
 **Keep this section up to date after every training run** (counts, what was changed, what you learned), so the next session can
-carry on without re-reading the history. Last updated: 2026-11-01 morning.
+carry on without re-reading the history. Last updated: 2026-11-02 morning.
 
 ### What it is
 Each character is a real-looking face: short clips (5 s, 12 fps, ASCII-rendered live by `ui/avatar.js`) made with ComfyUI image-to-video
@@ -65,12 +65,13 @@ are the right people. Female 1 (35) and Male 1 (28) lost the clips that came out
 **If you ever see a wrong face again, check uploads and `first-idle.mp4` first**: the same-person guard compares with `idle.mp4`, so a
 wrong idle makes every following clip "match".
 
-### Status at last update (2026-11-01 ~09:00)
-- All recordings finished (the sequential retry ended 08:46). Clips in the app: Female 1 103, Male 1 51, Male 2 34, Female 2 33, Female 3 33, Male 3 33.
-  `audit_ids.py`: every clip is the right person (clean diagonal). Every character now has `talking_calm`, `talking_calm2` and `listen_lean_closed`.
-  Contact sheet of the four new lean and talking sets: mouths closed in the leans (Female 3's lips purse slightly in one frame: acceptable).
-  Five recorders at once swamped ComfyUI (VRAM full, timeouts); **run them one after another**: `D:\Temp\yoclaude-scratch\retry_sequential.ps1`.
-  Start jobs from a script file, never an inline command. Only Female 1 has `idle_sigh_soft` (head back, subtle).
+### Status at last update (2026-11-02 morning)
+- Round two finished (`D:\Temp\yoclaude-scratch\round_robin.ps1`: one clip per character in turn, `YC_MAX_CLIPS=1` in `gen_char.py`/`gen_male.py`; the lists were
+  topped up to 61 each). Clips in the app: Female 1 103; Male 1, Male 2, Female 2, Female 3, Male 3 61 each. `audit_ids.py`: all the right person.
+  Contact sheets of the 140 new clips: no hands near faces, no shush. `idle_breathe_deep` (wide open mouth, odd neck) and `idle_curious`
+  (pucker, wide eyes) are in `HIDDEN`. Watch `idle_v_content` / `idle_v_smile_half` (Male 1): broad teeth grins as a resting clip.
+  Run recorders **one after another** (parallel swamped ComfyUI); about 4 minutes a clip alone, some time out after 1800 s and the
+  driver retries them. Start jobs from a script file, never an inline command. Only Female 1 has `idle_sigh_soft`.
 - Reviewed by contact sheet: `listen_lean_closed` and `idle_sigh_soft` are good (the sigh parts the lips a little: acceptable). `idle_yawn` (wide
   mouth, hand over it) and `idle_wave` are kept; `idle_thumbs_up` is hidden (meaningless as an idle gesture).
 - % target rule used for the lists (REVIEW-new-lists.md): per category (resting / thinking / talking / other) aim for the average % of
