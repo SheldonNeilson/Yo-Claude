@@ -1354,14 +1354,15 @@ class Api:
         finally:
             win32clipboard.CloseClipboard()
 
-    def open_folder_path(self, path):
-        """A folder typed or pasted into the folder field: the session you're in moves there (and it is added to the tree)."""
+    def open_folder_path(self, path, new_session=False):
+        """A folder typed or pasted into the folder field (and added to the tree): a new session starts there, or, when asked
+        (new_session False), the session you're in moves there."""
         path = os.path.normpath(os.path.expandvars(os.path.expanduser((path or "").strip().strip('"'))))
         if not os.path.isdir(path):
             return f"No such folder: {path}"
         r = self._app.router
         r.set_workspace(path, True)
-        if r.active:   # the conversation you're in moves to that folder: it is not a new session
+        if r.active and not new_session:   # the conversation you're in moves to that folder: it is not a new session
             return r.change_folder(r.active.id, path)
         self.new_session(path)
         return None

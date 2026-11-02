@@ -248,8 +248,15 @@ $("#folderPath").addEventListener("keydown", async (e) => {
   if (e.key !== "Enter") return;
   const v = e.target.value.trim();
   if (!v || sameFolder(v, S.active ? S.active.cwd : S.folder)) return e.target.blur();
-  const err = await api().open_folder_path(v);
-  if (err) alertBox(err); else e.target.blur();
+  e.target.blur();
+  if (!S.active) { const err = await api().open_folder_path(v); return err && alertBox(err); }
+  const d = dialog("Another folder");
+  const q = el("div", "", esc(`${v}
+
+Start a new session there, or move this conversation to that folder?`));
+  q.style.whiteSpace = "pre-wrap"; d.appendChild(q);
+  const go = (fresh) => async () => { closeModal(); const err = await api().open_folder_path(v, fresh); if (err) alertBox(err); };
+  addButtons(d, [["cancel", closeModal], ["move this session", go(false)], ["new session", go(true), "primary"]]);
 });
 $("#folderPath").addEventListener("blur", () => setTimeout(renderFolder, 150));
 $("#folderCopy").onclick = () => copyText(S.active?.cwd || S.folder, "path copied");
