@@ -1532,6 +1532,11 @@ class Session:
             self.router.meta.update(self.id, unseen=True)
         self.router.set_work(self, "background" if self.running_tasks() else "idle")
         self.router.sessions_changed(self.cwd)
+        # (Claude Code writes the session's generated title to its file a few seconds after the reply: look again then, or the
+        # list keeps showing the first words of the message until something else refreshes it)
+        loop = asyncio.get_event_loop()
+        for delay in (4, 12, 40):
+            loop.call_later(delay, lambda cwd=self.cwd: self.router.sessions_changed(cwd))
 
     # --- background tasks ---
     def running_tasks(self):
