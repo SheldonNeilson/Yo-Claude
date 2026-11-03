@@ -158,6 +158,31 @@ PC_CONTROL_PROMPT = (
 LIKED_NOTE = re.compile(r"\n\n\[Yo Claude\] The user gave a thumbs-up to your repl(?:y|ies):.*$", re.S)
 
 
+def end_leftover_claudes(sid):
+    """Claude processes of Yo Claude's own (the SDK's bundled claude.exe) still running conversation `sid` with their
+    Yo Claude gone: left running by a restart so its background work could carry on. Left alone, that process is a
+    second Claude in the same conversation (it reacts when its agents finish, messages other sessions, writes to the
+    same transcript), so it's ended before this run's process for the conversation starts. Its shell commands are
+    separate processes and keep running (Yo Claude follows them); its subagents stop, and are started again by the
+    notice the restart sends."""
+    import consoles
+    procs = consoles.processes()
+    orphans = [pid for pid, (parent, exe) in procs.items() if exe == "claude.exe" and parent not in procs]
+    if not orphans:
+        return
+    ps = ("Get-CimInstance Win32_Process -Filter \"Name='claude.exe'\" | Select-Object ProcessId,CommandLine | "
+          "ConvertTo-Json -Compress")
+    r = subprocess.run(["powershell", "-NoProfile", "-Command", ps], capture_output=True, text=True, timeout=20,
+                       creationflags=subprocess.CREATE_NO_WINDOW)
+    rows = json.loads(r.stdout) if r.stdout.strip() else []
+    rows = [rows] if isinstance(rows, dict) else rows
+    for x in rows:
+        pid, cmd = int(x.get("ProcessId") or 0), str(x.get("CommandLine") or "")
+        if pid in orphans and "claude_agent_sdk" in cmd and re.search(rf"--resume[= ]\"?{re.escape(sid)}", cmd):
+            subprocess.run(["taskkill", "/PID", str(pid), "/F"], capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
+            log.info("Ended a Claude process left over from before the restart for %s (pid %d): one Claude per conversation", sid, pid)
+
+
 def like_key(text):
     return hashlib.sha1(" ".join((text or "").split()).encode("utf-8", "replace")).hexdigest()[:16]
 
@@ -1308,6 +1333,10 @@ class Session:
     async def connect(self):
         if self.client is None:
             self.client = sdk.ClaudeSDKClient(options=self.options())
+            try:
+                await asyncio.to_thread(end_leftover_claudes, self.id)
+            except Exception as e:
+                log.debug("leftover check %s: %s", self.id, e)
             # Claude Code's cost total covers the whole session, earlier connections included: start from the total
             # Yo Claude last saw for it (None when it doesn't know, e.g. a session also used elsewhere)
             self.cost_seen = 0.0 if not self.resumed else self.router.meta.session(self.id).get("cost_total")
@@ -2090,6 +2119,7 @@ class Router:
         self.ui_waiting = {}   # token -> Future: questions put to the window by Claude's ui tools, waiting for the answer
         self.writing = writing.Writing()   # how you write, for predictions (writing.py)
         self.live = {}                      # session id -> Session (open in the app this run)
+        self.live_lock = threading.RLock()  # making a Session for a conversation: one at a time (see resumed)
         self.active = None                  # the session voice and the input box talk to
         self.folder = None                  # folder new sessions use; None = chat
         self.work = {}                      # session id -> "thinking" | "using_pc" | "awaiting_approval" | "background"
@@ -2259,11 +2289,7 @@ class Router:
             return f"\"{name}\" {ended}" + (f", output: {t['output_file']}" if t.get("output_file") else "")
         names = "; ".join(how(t) for t in tasks)
         log.info("Background task(s) of %s ended after the restart: %s", sid, names)
-        s = self.live.get(sid)
-        if s is None:
-            s = Session(self, cwd, sid, resumed=True)
-            s.load_history()
-            self.live[sid] = s
+        s = self.resumed(sid, cwd)
         s.add({"kind": "note", "text": f"Background task ended while Yo Claude was restarting: {names}"})
         cut = [t for t in tasks if t.get("exit_code") is None]   # (no exit marker: ended by the restart, not finished)
         again = (" The ones that were stopped, not finished, were cut off by the restart: start each of them again now, "
@@ -2707,9 +2733,15 @@ class Router:
         self.run(s.warm())
         return s
 
-    def open(self, sid, cwd):
-        s = self.live.get(sid)
-        if s is None:
+    def resumed(self, sid, cwd):
+        """The Session of an existing conversation, made (history, restored task cards, queued messages) the first time
+        it's needed. Only ever one per conversation: after a restart the window (reopening your last conversation) and
+        the event loop (a background task's notice) can ask at the same moment, and two Sessions meant two Claude
+        processes answering every message."""
+        with self.live_lock:
+            s = self.live.get(sid)
+            if s is not None:
+                return s
             s = Session(self, cwd, sid, resumed=True)
             s.load_history()
             for t in self.detached.get(sid, []):   # from before a restart: still running, or finished since
@@ -2726,6 +2758,10 @@ class Router:
                     files = p.get("attachments") or []
                     context = "\n\n".join(workspace.attachment_text(s.cwd, f) for f in files) if s.cwd else ""
                     self.send(p.get("text", ""), sid=sid, context=context, attachments=files)
+            return s
+
+    def open(self, sid, cwd):
+        s = self.resumed(sid, cwd)
         s.picked = True
         self.active = s
         self.folder = s.cwd

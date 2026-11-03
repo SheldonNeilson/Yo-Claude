@@ -9,7 +9,9 @@ https://github.com/SheldonNeilson/Yo-Claude (private); their installs update fro
   GitHub's to show "update available". `hooks/pre-push` refuses a push to `main` with an unchanged `VERSION`; enable
   it in a clone with `git config core.hooksPath hooks`.
 - **Before restarting Yo Claude**, read `~/.yoclaude/status.json`: it lists sessions mid-reply and background tasks.
-  Restarting cuts off replies in progress (background tasks survive and are picked up again).
+  Restarting cuts off replies in progress. Background shell commands survive and are picked up again; background
+  subagents stop (the old Claude process is ended when the conversation reconnects, so there is only ever one Claude
+  per conversation: `end_leftover_claudes`), and the restart notice tells Claude to start them again.
 - **To restart Yo Claude**, create the empty file `~/.yoclaude/restart-request` (or File → Restart). It waits until
   no session is mid-reply, quits the normal way and starts again; don't kill its process (that ends background tasks
   with it). Tasks a restart cut off are reported to their session, which starts them again.
