@@ -165,6 +165,7 @@ const MENUS = {
         tog("Tick Lists", "checklist_tool"),
         tog("Show Advisor Notes", "advisor_relay"),
         tog("Remember Queued Messages", "keep_queue"),
+        tog("Send Queued Messages Together", "batch_queue"),
         "-",
         tog("PC Control (Screen, Keyboard, Mouse)", "pc_control"),
       ] }],

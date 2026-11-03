@@ -61,7 +61,7 @@ VOICES = {"female": (NEURAL_VOICE, "+0Hz"), "male": ("en-US-ChristopherNeural", 
 NEURAL_RATE = "+5%"
 TEXT_HOLD_S = 12             # how long a reply stays on the bar when voice replies are off
 
-DEFAULT_SETTINGS = {"listening": True, "greeting": True, "voice_replies": True, "pc_control": True, "bar_when_idle": True,
+DEFAULT_SETTINGS = {"listening": True, "greeting": True, "batch_queue": True, "voice_replies": True, "pc_control": True, "bar_when_idle": True,
                     "launch_at_login": True, "show_bar": True, "show_window": True, "onboarded": False,
                     "accurate_speech": False}
 

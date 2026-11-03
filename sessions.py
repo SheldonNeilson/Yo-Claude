@@ -874,6 +874,7 @@ class Session:
         self.order = []                     # queued messages (indexes), in the order they go: you can drag them
         self.injected = []                  # [(item, text)] sent now into the reply in progress, not yet taken up
         self.joined = {}                    # sent-now message index -> the turn future of the reply it joined
+        self.batch_futs = {}                # queued message index -> the reply of the message that took it along (sent together)
         self.holding = False                # that reply ended, but Claude still has a sent-now message to answer
         self.heard = 0                      # messages from Claude Code so far (a held reply lets go if this stops)
         self.unsolicited = False            # Claude is replying by itself (a background task finished)
@@ -1627,12 +1628,15 @@ class Session:
             self.order.append(item["i"])
             self.save_pending()
             try:   # in line: it goes when it's first (you can reorder the line) and the reply before it is done
-                while not (item.get("cancelled") or item.get("sent_now")
+                while not (item.get("cancelled") or item.get("sent_now") or item.get("batched") is not None
                            or (self.order[0] == item["i"] and not self.lock.locked())):
                     await asyncio.sleep(0.15)
             finally:
                 self.order.remove(item["i"])
                 self.save_pending()
+        if item is not None and item.get("batched") is not None:   # went along with an earlier queued message: that reply is its reply
+            fut = self.batch_futs.pop(item["i"], None)
+            return await fut if fut is not None else None
         async with self.lock:
             if item is not None:   # (what it says now: Haiku may have fixed it while it waited, see Router.tidy_queued)
                 prompt = self.waiting.pop(item["i"], (prompt,))[0]
@@ -1650,6 +1654,21 @@ class Session:
             if item is not None and item.pop("queued", None):
                 item["at"] = len(self.items)   # shown from here on, below what came while it waited
                 self.changed(item)
+            batch_fut = None
+            if item is not None and self.batchable(item, prompt):   # the messages queued right behind it go in the same prompt
+                mates = self.take_batch()
+                if mates:
+                    batch_fut = asyncio.get_running_loop().create_future()
+                    parts = [prompt] + [self.waiting.pop(c["i"])[0] for c in mates]
+                    prompt = (f"I sent {len(parts)} messages while you were busy. They are below, in order: answer them together.\n\n"
+                              + "\n\n".join(f"({n}) {p}" for n, p in enumerate(parts, 1)))
+                    for c in mates:
+                        self.batch_futs[c["i"]] = batch_fut
+                        c["batched"] = item["i"]
+                        c.pop("queued", None)
+                        c["at"] = len(self.items)
+                        self.changed(c)
+                    self.save_pending()
             self.last_used = time.time()
             self.voice_turn = voice
             self.busy = True
@@ -1666,7 +1685,10 @@ class Session:
                     asked = (item or {}).get("text") or (text if isinstance(text, str) else prompt if isinstance(prompt, str) else "")
                     asyncio.ensure_future(self.acknowledge(self.turn_future, re.sub(r"^\[voice\]\s*", "", asked or "")))
                 await self.client.query(prompt)
-                return await self.turn_future or ""
+                reply = await self.turn_future or ""
+                if batch_fut is not None and not batch_fut.done():
+                    batch_fut.set_result(reply)
+                return reply
             except Exception as e:
                 log.exception("Turn failed")
                 if "Resume rejected" in str(e):   # a rewind that no longer fits: drop it, a retry carries on as usual
@@ -1675,10 +1697,27 @@ class Session:
                 await self.disconnect()
                 return None
             finally:
+                if batch_fut is not None and not batch_fut.done():
+                    batch_fut.set_result(None)
                 self.turn_future = None
                 self.injected, self.holding = [], False
                 self.busy = False
                 self.after_turn()   # (it reads voice_turn to skip the spoken note after a read-aloud reply, then clears it)
+
+    def batchable(self, item, prompt):
+        """Plain typed (or spoken) messages from you go together; commands, images and Claude's own reminders go alone."""
+        return (self.router.settings.get("batch_queue", True) and item.get("kind") == "user" and not item.get("queued_by")
+                and isinstance(prompt, str) and not prompt.lstrip().startswith("/"))
+
+    def take_batch(self):
+        """The messages waiting right behind the one now going out, as far as the line stays all batchable."""
+        mates = []
+        for j in self.order:
+            c, w = self.items[j], self.waiting.get(j)
+            if w is None or c.get("cancelled") or c.get("sent_now") or not self.batchable(c, w[0]):
+                break
+            mates.append(c)
+        return mates
 
     def let_go(self):
         """A reply held open for a sent-now message Claude hasn't taken up: stop waiting for it."""
