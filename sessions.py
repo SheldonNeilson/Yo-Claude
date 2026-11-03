@@ -161,6 +161,8 @@ _open_process = anyio.open_process
 
 async def _open_process_no_window(*args, **kwargs):
     kwargs.setdefault("creationflags", subprocess.CREATE_NO_WINDOW)
+    if kwargs.get("stderr") is None:   # (inheriting this windowless process's stderr can fail with "WinError 6: the handle is invalid")
+        kwargs["stderr"] = subprocess.DEVNULL
     return await _open_process(*args, **kwargs)
 
 
