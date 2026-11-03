@@ -1474,6 +1474,8 @@ def main():
         return
 
     ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(APP_ID)   # own taskbar button, not Python's
+    import consoles
+    consoles.start()   # console windows of commands Claude runs: hidden as they appear, so they can't take the keyboard
     app = App(args)
     # A new port each launch: on pywebview's fixed default (42001) the window's cache can serve an old interface
     # after an update.
