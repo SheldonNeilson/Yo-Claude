@@ -869,3 +869,7 @@ button { white-space: nowrap; }
 .node.task { position: relative; } .node.task .tstop { margin-left: auto; padding: 0 6px; flex: none; }
 .waitline { margin: 6px 16px 10px; color: var(--dim, #9a948a); font-size: 12px; }
 .waitline .wl-t { color: var(--faint); margin-left: 4px; }
+.msg.assistant .likebtn { position: absolute; bottom: -0.6em; right: 2ch; padding: 0 6px; font-size: 11px; opacity: .35; background: var(--bg2); }
+.msg.assistant:hover .likebtn { opacity: 1; }
+.msg.assistant .likebtn.on { opacity: 1; color: var(--orange); border-color: var(--orange); }
+.thought.bg { font-style: normal; }

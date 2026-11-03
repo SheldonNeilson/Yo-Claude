@@ -155,6 +155,31 @@ PC_CONTROL_PROMPT = (
     "(deleting, sending, posting, buying, submitting), ask the user to confirm and wait for their reply."
 )
 
+LIKED_NOTE = re.compile(r"\n\n\[Yo Claude\] The user gave a thumbs-up to your repl(?:y|ies):.*$", re.S)
+
+
+def like_key(text):
+    return hashlib.sha1(" ".join((text or "").split()).encode("utf-8", "replace")).hexdigest()[:16]
+
+
+def background_note(text):
+    """A message Claude Code took in that you didn't write: another session's message, a background task's notice.
+    A short line for the chat (shown as a thought), or None for your own messages."""
+    t = (text or "").strip()
+    def inner(tag):
+        m = re.search(rf"<{tag}[^>]*>(.*?)(?:</{tag}>|$)", t, re.S)
+        return " ".join(re.sub(r"<[^>]+>", " ", m.group(1)).split()) if m else ""
+    if "<cross-session-message" in t:
+        body = inner("cross-session-message")
+        return "📨 A message from another Claude session" + (f": {body[:240]}" if body else ".")
+    if "<task-notification" in t:
+        what = inner("summary") or inner("status") or inner("task-notification")
+        return "⚙ A background task reported back" + (f": {what[:240]}" if what else ".")
+    if t.startswith("Another Claude session sent a message"):
+        return "📨 " + " ".join(re.sub(r"<[^>]+>", " ", t).split())[:260]
+    return None
+
+
 # claude.exe is a console program: under pythonw each start would flash a console window.
 _open_process = anyio.open_process
 
@@ -932,6 +957,10 @@ class Session:
             self.load_transcript(pid, None)
             self.add({"kind": "note", "text": "Context cleared"})
         self.load_transcript(self.id, self.rewind_mark())
+        likes = set(self.router.meta.session(self.id).get("likes") or [])
+        for it in self.items if likes else []:
+            if it.get("kind") == "assistant" and like_key(it.get("text")) in likes:
+                it["liked"] = True
         self.restore_spoken()
 
     def load_transcript(self, sid, mark):
@@ -964,12 +993,14 @@ class Session:
                 if not isinstance(b, dict):
                     continue
                 t = b.get("type")
-                if t == "text" and role == "user" and system_note(b.get("text", "")):
+                if t == "text" and role == "user" and "<task-notification" not in b.get("text", "")[:400]                         and background_note(b.get("text", "")):   # another session's message: a thought, as it was live
+                    self.add({"kind": "thinking", "text": background_note(b["text"]), "background": True})
+                elif t == "text" and role == "user" and system_note(b.get("text", "")):
                     self.add({"kind": "note", "text": system_note(b["text"])})
                 elif t == "server_tool_use" and b.get("name") == "advisor":
                     self.add({"kind": "advisor", "id": b.get("id"), "text": "", "status": "heard"})
                 elif t == "text" and b.get("text", "").strip() and not is_noise(b["text"]):
-                    text = self.advisor_said(b["text"]) if role == "assistant" else b["text"]
+                    text = self.advisor_said(b["text"]) if role == "assistant" else LIKED_NOTE.sub("", b["text"])
                     if not text.strip():
                         continue
                     voice = role == "user" and text.startswith("[voice] ")
@@ -1862,6 +1893,11 @@ class Session:
                 said = m.content if isinstance(m.content, str) else \
                     next((b.text for b in m.content if isinstance(b, sdk.TextBlock)), "")
                 said = " ".join(said.split())[:200]
+                note = background_note(m.content if isinstance(m.content, str) else
+                                       next((b.text for b in m.content if isinstance(b, sdk.TextBlock)), ""))
+                if note:   # not from you: shown as one of Claude's thoughts, so you can see what it's busy with
+                    self.add({"kind": "thinking", "text": note, "background": True})
+                    return None
                 sent = next((x for x in self.injected if x[1][:200] == said), None)
                 if sent:   # a message sent now: Claude has taken it up
                     self.injected.remove(sent)
@@ -2781,6 +2817,11 @@ class Router:
                           "image_paths": [save_image(s.id, mt, data) for mt, data in images],
                           **({"queued": True} if s.busy or (s.lock and s.lock.locked()) or s.order else {})})
         prompt = (f"[voice] {text}" if voice else text) + (f"\n\n{context}" if context else "")
+        news = [x for x in getattr(s, "liked_news", []) if x.get("liked")] if origin == "user" else []
+        if news:
+            s.liked_news = []
+            quoted = "; ".join('"' + " ".join((x.get("text") or "").split())[:90] + '…"' for x in news[-3:])
+            prompt += f"\n\n[Yo Claude] The user gave a thumbs-up to your {'reply' if len(news) == 1 else 'replies'}: {quoted}"
         if origin == "system":
             prompt = f"[Yo Claude] {text}"
         said = prompt
@@ -2891,6 +2932,21 @@ class Router:
             self.emit("ui", action="diff", rel=rel)
             return f"Showing the changes in {rel}."
         return "Unknown action."
+
+    def like(self, sid, i, on=True):
+        """👍 on one of Claude's replies: marked (and kept, by its text), and Claude is told with your next message, so
+        it knows what you were happy with."""
+        s = self.live.get(sid)
+        if s is None or not (0 <= i < len(s.items)) or s.items[i].get("kind") != "assistant":
+            return {"error": "That reply isn't open."}
+        it = s.items[i]
+        it["liked"] = bool(on)
+        s.changed(it)
+        key = like_key(it.get("text"))
+        likes = [k for k in self.meta.session(sid).get("likes") or [] if k != key] + ([key] if on else [])
+        self.meta.update(sid, likes=likes[-200:])
+        s.liked_news = [x for x in getattr(s, "liked_news", []) if x is not it] + ([it] if on else [])
+        return {"liked": bool(on)}
 
     def say_short(self, sid, i):
         """The short spoken version of Claude's message `i`: said out loud and shown as a voice bubble under it."""

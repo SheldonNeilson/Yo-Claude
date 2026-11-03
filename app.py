@@ -760,6 +760,11 @@ class Api:
             log.warning("format %s failed: %s", path, e)
             return {"error": "Couldn't format that file."}
 
+    def like(self, i, on=True):
+        """The 👍 under Claude's messages: Claude hears about it with your next message."""
+        r = self._app.router
+        return r.like(r.active.id, i, on) if r.active else {"error": "Open a session first."}
+
     def say_short(self, i):
         """The 🔊 button on Claude's messages: the short spoken version of message `i` in the open session."""
         r = self._app.router

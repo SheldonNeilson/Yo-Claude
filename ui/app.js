@@ -914,6 +914,14 @@ function addCopyButtons(node, it) {
         if (r?.error) toast(r.error, "error");
       };
       node.appendChild(v);
+      const like = el("button", "likebtn" + (it.liked ? " on" : ""), it.liked ? "👍 liked" : "👍");
+      like.dataset.tip = it.liked ? "You liked this (click to take it back)" : `Like this: ${who()} hears about it with your next message`;
+      like.onclick = async (e) => {
+        e.stopPropagation();
+        const r = await api().like(it.i, !it.liked);
+        if (r?.error) toast(r.error, "error");
+      };
+      node.appendChild(like);
     }
   }
   node.querySelectorAll("pre").forEach((pre) => {
@@ -1584,7 +1592,7 @@ async function viewFileModal(path, cwd, opts = {}) {   // (the old pop-up viewer
 
 // Claude's thinking: the last two sentences while it thinks (and once done), all of it when you click
 function thoughtBubble(it) {
-  const n = el("div", "thought" + (it.streaming ? " live" : ""));
+  const n = el("div", "thought" + (it.streaming ? " live" : "") + (it.background ? " bg" : ""));
   const text = (it.text || "").trim();
   const sentences = text.match(/[^.!?\n]+[.!?]*\s*/g) || [];
   const tail = sentences.slice(-2).join("").trim();
