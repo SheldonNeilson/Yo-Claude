@@ -82,7 +82,7 @@ const avatar = {
   },
   // Some generated mannerisms move far faster than the rest (a head turn that is over in a blink: it looks like fast
   // forward). Each clip's peak speed is measured from its frames (how much the picture changes from frame to frame, at
-  // its fastest 10%); any clip peaking well above the typical one plays slower, in proportion (this.pace[name], 0.4 to 1).
+  // its fastest 10%); any clip peaking well above the typical one plays slower, in proportion (this.pace[name], 0.3 to 1).
   paceAll() {
     const cache = (this.motion ||= new Map()), peak = {};
     for (const [name, frames] of Object.entries(this.clips)) {
@@ -105,7 +105,7 @@ const avatar = {
     const typical = Math.min(PACE_TYPICAL, vals[Math.floor(vals.length / 2)] || 0);
     this.pace = {};
     if (!typical) return;
-    for (const [name, m] of Object.entries(peak)) this.pace[name] = m > typical * PACE_ABOVE ? Math.max(0.4, (typical * PACE_ABOVE) / m) : 1;
+    for (const [name, m] of Object.entries(peak)) this.pace[name] = m > typical * PACE_ABOVE ? Math.max(0.3, (typical * PACE_ABOVE) / m) : 1;
   },
   // frame `f`, or if that's in a blink, the first frame past it going `dir` (past back-to-back blinks too)
   stepPast(f, dir, frames) {
