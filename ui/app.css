@@ -867,3 +867,5 @@ button { white-space: nowrap; }
 #extraDirs { flex-wrap: wrap; }
 
 .node.task { position: relative; } .node.task .tstop { margin-left: auto; padding: 0 6px; flex: none; }
+.waitline { margin: 6px 16px 10px; color: var(--dim, #9a948a); font-size: 12px; }
+.waitline .wl-t { color: var(--faint); margin-left: 4px; }

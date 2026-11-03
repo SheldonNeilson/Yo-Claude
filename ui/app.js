@@ -78,12 +78,12 @@ function handle(e) {
     case "term_exit": term.exited(e.id, e.code); break;
     case "item":
       if (S.active && e.session === S.active.id) {
-        S.items[e.item.i] = e.item; renderItem(e.item); gallery.touch();
+        S.items[e.item.i] = e.item; renderItem(e.item); gallery.touch(); waitLine.touch();
         if (planBox.isPlanItem(e.item)) planBox.update();
       }
       break;
     case "delta":
-      if (S.active && e.session === S.active.id && S.items[e.i]) { S.items[e.i].text += e.text; scheduleRender(e.i); }
+      if (S.active && e.session === S.active.id && S.items[e.i]) { S.items[e.i].text += e.text; scheduleRender(e.i); waitLine.touch(); }
       break;
     case "sessions":
       S.lists[keyOf(e.cwd)] = e.sessions;
@@ -95,7 +95,7 @@ function handle(e) {
       loadLists().then(renderTree);
       break;
     case "opened": {
-      S.active = e.session; S.items = e.items || []; S.folder = e.session.cwd;
+      S.active = e.session; S.items = e.items || []; S.folder = e.session.cwd; waitLine.touch();
       const s = findSession(S.active.id); if (s) s.unseen = false;
       renderTranscript(); renderHead(); renderTree();   // its folder opens by itself (it holds the active session)
       gallery.session = null; gallery.entries = []; gallery.count = 0; gallery.touch();
@@ -130,6 +130,7 @@ function handle(e) {
       break;
     case "work":
       S.work[e.session] = e.session_state;
+      if (S.active && e.session === S.active.id) waitLine.touch();
       setTimeout(showDisplay, 0);
       if (e.session_state === "idle") S.busy.delete(e.session); else S.busy.add(e.session);
       if (e.session_state === "background") S.bg.add(e.session); else S.bg.delete(e.session);
@@ -1305,6 +1306,32 @@ function fmtElapsed(ms) {
   const s = Math.max(0, Math.floor(ms / 1000));
   return s < 60 ? `${s}s` : s < 3600 ? `${Math.floor(s / 60)}m ${s % 60}s` : `${Math.floor(s / 3600)}h ${Math.floor(s / 60) % 60}m`;
 }
+// ---------- a "waiting…" line at the bottom of the chat: the session is working but nothing has come back for a few seconds
+// (Claude starting up, a slow or busy API, a long command). It says what it's waiting on and for how long. ----------
+const waitLine = {
+  last: Date.now(), el: null,
+  touch() { this.last = Date.now(); this.paint(); },
+  paint() {
+    const a = S.active, quiet = Date.now() - this.last;
+    const working = a && a.busy && ["thinking", "using_pc"].includes(S.work[a.id]);   // (not while it waits on you to approve)
+    if (!working || quiet < 2500) { if (this.el) { this.el.remove(); this.el = null; } return; }
+    const tr = $("#transcript");
+    const near = tr.scrollHeight - tr.scrollTop - tr.clientHeight < 80;
+    if (!this.el) this.el = el("div", "waitline");
+    if (tr.lastElementChild !== this.el) tr.appendChild(this.el);
+    const last = [...(S.items || [])].reverse().find((x) => x && x.kind !== "advisor");
+    const tool = last && last.kind === "tool" && last.result == null ? last.name : "";
+    const s = Math.round(quiet / 1000), t = fmtElapsed(quiet);
+    const what = tool ? `running ${esc(tool)}…`
+      : s < 25 ? `waiting for ${esc(who())}…`
+      : s < 90 ? `still waiting for ${esc(who())}…`
+      : `no word from ${esc(who())} for a while: the service may be slow or busy (Esc stops this reply)`;
+    this.el.innerHTML = `<span class="spin">✻</span> ${what} <span class="wl-t">${t}</span>`;
+    if (near) tr.scrollTop = tr.scrollHeight;
+  },
+};
+setInterval(() => waitLine.paint(), 500);
+
 function renderBusy() {
   const box = $("#input"), hint = S.suggest && S.settings.suggest_next !== false ? S.suggest : "";
   box.classList.toggle("suggesting", !!hint);   // a suggested next message, grey in the empty box: Tab takes it
