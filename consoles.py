@@ -7,6 +7,7 @@ import ctypes
 import logging
 import os
 import threading
+import time
 from ctypes import wintypes
 
 log = logging.getLogger("yo_claude")
@@ -14,6 +15,9 @@ log = logging.getLogger("yo_claude")
 EVENT_SYSTEM_FOREGROUND, EVENT_OBJECT_SHOW = 0x0003, 0x8002
 WINEVENT_OUTOFCONTEXT, OBJID_WINDOW = 0x0000, 0
 CONSOLE_CLASSES = {"ConsoleWindowClass"}
+typing_at = 0        # when you last typed in the message box (app.Api.typing), 0 = not typing
+TYPING_S = 1.5       # a window that appears and takes the foreground this soon after a key in the box gives it back
+NEW_WINDOW_S = 2.0   # ...if it appeared (was shown) this recently: a popup, not a window you switched to
 
 
 class PROCESSENTRY32W(ctypes.Structure):
@@ -69,11 +73,45 @@ def _run():
                                 wintypes.DWORD, wintypes.DWORD)
     me = os.getpid()
     checked = {}   # hwnd -> verdict (a window is checked once)
+    shown = {}     # hwnd -> when it was shown
+    last_mine = [None]   # this app's window that last had the foreground
+
+    def pid_of(hwnd):
+        pid = wintypes.DWORD()
+        u.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+        return pid.value
+
+    def give_back(thief):
+        """A window popped up while you typed in Yo Claude: put Yo Claude back in front (the keys you type next go there)."""
+        ours = last_mine[0]
+        if not ours or not u.IsWindow(ours):
+            return
+        k = ctypes.windll.kernel32
+        fg_thread = u.GetWindowThreadProcessId(thief, None)
+        me_thread = k.GetCurrentThreadId()
+        attached = fg_thread and fg_thread != me_thread and u.AttachThreadInput(me_thread, fg_thread, True)
+        try:
+            u.SetForegroundWindow(ours)
+        finally:
+            if attached:
+                u.AttachThreadInput(me_thread, fg_thread, False)
+        title = ctypes.create_unicode_buffer(120)
+        u.GetWindowTextW(thief, title, 120)
+        log.info("A window popped up while you typed and took the keyboard: gave it back to Yo Claude (%s)", title.value[:80])
 
     def on_event(hook, event, hwnd, obj, child, thread, ms):
         try:
             if obj != OBJID_WINDOW or not hwnd:
                 return
+            if event == EVENT_OBJECT_SHOW and not u.GetParent(hwnd):
+                shown[hwnd] = time.time()
+                if len(shown) > 2000:
+                    shown.clear()
+            if event == EVENT_SYSTEM_FOREGROUND:
+                if pid_of(hwnd) == me:
+                    last_mine[0] = hwnd
+                elif typing_at and time.time() - typing_at < TYPING_S and time.time() - shown.get(hwnd, 0) < NEW_WINDOW_S:
+                    give_back(hwnd)
             cls = ctypes.create_unicode_buffer(64)
             u.GetClassNameW(hwnd, cls, 64)
             if cls.value not in CONSOLE_CLASSES or not u.IsWindowVisible(hwnd):

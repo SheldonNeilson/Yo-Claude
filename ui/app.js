@@ -2035,7 +2035,25 @@ function alertBox(text) { const d = dialog(appName()); d.appendChild(el("div", "
 (() => {
   let typedAt = 0;
   const mine = (n) => n && (n.id === "input" || n.id === "btwInput");
-  document.addEventListener("keydown", (e) => { if (mine(e.target)) typedAt = Date.now(); }, true);
+  const focus = HTMLElement.prototype.focus;
+  let toldAt = 0;
+  document.addEventListener("keydown", (e) => {
+    if (mine(e.target)) {
+      typedAt = Date.now();
+      // tell Python you're typing (consoles.py: a window that pops up meanwhile doesn't get to keep the keyboard)
+      if (e.key === "Enter" && !e.shiftKey) { api().typing(false); toldAt = 0; }
+      else if (Date.now() - toldAt > 400) { toldAt = Date.now(); api().typing(true); }
+      return;
+    }
+    // a key typed while nothing has the keyboard (you clicked on the chat's text, or a popup took the focus and went):
+    // it goes into the message box, not nowhere
+    const nothing = !document.activeElement || document.activeElement === document.body;
+    if (nothing && e.key.length === 1 && !e.ctrlKey && !e.altKey && !e.metaKey && $("#modal").classList.contains("hidden")
+        && !window.invaders?.visible && !$("#input").disabled) {
+      focus.call($("#input"));
+    }
+  }, true);
+  document.addEventListener("mousedown", () => { if (toldAt) { toldAt = 0; api().typing(false); } }, true);   // (a click: what opens next is yours)
   // and when the box loses the keyboard anyway while you type: log where it went (api().focus_lost: the element, or the
   // other window that took it), to find what does it
   const name = (n) => (n ? `${n.tagName.toLowerCase()}${n.id ? "#" + n.id : ""}${typeof n.className === "string" && n.className ? "." + n.className.split(" ")[0] : ""}` : null);
@@ -2045,7 +2063,6 @@ function alertBox(text) { const d = dialog(appName()); d.appendChild(el("div", "
     setTimeout(() => api().focus_lost({ from: name(e.target), to: related, now: name(document.activeElement),
                                         page_has_focus: document.hasFocus(), since_key_ms: since }), 30);
   }, true);
-  const focus = HTMLElement.prototype.focus;
   HTMLElement.prototype.focus = function (...a) {
     if (mine(document.activeElement) && this !== document.activeElement && Date.now() - typedAt < 2500 && !(window.event && window.event.isTrusted)) return;
     return focus.apply(this, a);

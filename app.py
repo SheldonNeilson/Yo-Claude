@@ -1089,6 +1089,12 @@ class Api:
     def move_group(self, name, delta):
         self._app.router.move_group(name, delta)
 
+    def typing(self, on):
+        """You're typing in the message box (ui/app.js), or stopped (sent it, clicked something). consoles.py hands the
+        keyboard back to this window if a window that has just appeared takes it meanwhile."""
+        import consoles
+        consoles.typing_at = time.time() if on else 0
+
     def focus_lost(self, info):
         """The message box lost the keyboard while you were typing (ui/app.js): log where it went, including which window
         has the foreground (another program's window, a console flashing up...), now and a moment later."""
@@ -1481,6 +1487,7 @@ def main():
     ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(APP_ID)   # own taskbar button, not Python's
     import consoles
     consoles.start()   # console windows of commands Claude runs: hidden as they appear, so they can't take the keyboard
+                       # (and a window that pops up while you type in the message box gives the keyboard back)
     app = App(args)
     # A new port each launch: on pywebview's fixed default (42001) the window's cache can serve an old interface
     # after an update.
