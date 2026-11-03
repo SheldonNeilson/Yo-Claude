@@ -13,6 +13,8 @@ const AW = 128;                // the analysis grid frames are decoded to (colum
 // too, which looks odd when it comes round again and again; idle_sigh opens it wide (a sigh should be head back, subtle).
 const HIDDEN = ["think_tap_lips", "listen_lean", "idle_s_swallow", "idle_sigh", "idle_thumbs_up", "idle_breathe_deep", "idle_curious"];   // (listen_lean_closed and idle_sigh_soft replace two of them; breathe_deep opens the mouth wide and contorts, curious puckers or goes wide-eyed)
 const PACE_ABOVE = 1.35;       // a clip peaking this many times above the typical clip's peak speed is slowed to match
+const PACE_TYPICAL = 5;         // ...and "typical" is never taken as faster than this: a character whose whole pool moves fast
+                                // (Female 1's typical clip measures about 8, the others 4 to 6) is slowed as a whole, not only her outliers
 const COLS = 64;               // characters across, whatever the panel's width
 const VIEW = [0, 0, 1, 1];     // the part of the clip shown: left, top, right, bottom (fractions; see frameView)
 const REST = [44, 60];         // idle frames with a soft, closed-mouth smile: where she rests
@@ -100,7 +102,7 @@ const avatar = {
       peak[name] = m;
     }
     const vals = Object.values(peak).filter((v) => v > 0).sort((a, b) => a - b);
-    const typical = vals[Math.floor(vals.length / 2)] || 0;
+    const typical = Math.min(PACE_TYPICAL, vals[Math.floor(vals.length / 2)] || 0);
     this.pace = {};
     if (!typical) return;
     for (const [name, m] of Object.entries(peak)) this.pace[name] = m > typical * PACE_ABOVE ? Math.max(0.4, (typical * PACE_ABOVE) / m) : 1;
