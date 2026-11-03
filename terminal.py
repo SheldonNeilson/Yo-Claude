@@ -3,6 +3,7 @@ xterm.js (ui/terminal.js). Output goes to the window as "term_out" events; keys 
 A terminal keeps its last bit of output, so a reloaded window gets its screen back."""
 
 import logging
+import base64
 import os
 import shutil
 import subprocess
@@ -19,13 +20,46 @@ except Exception as _e:   # not installed: the pane says so and the external ter
     log.warning("pywinpty missing: %s", _e)
 
 
-def shell_argv(choice=""):
-    """PowerShell 7 if it's there, else Windows PowerShell, else cmd. `choice` (a setting) can name another shell."""
+# The terminal pane's PowerShell, set up after your profile: grey suggestions from your history as you type, Tab takes the
+# suggestion (or, with none showing, completes the name as usual), and a program in the current folder runs by its name
+# alone ("app.exe" or "app", as in cmd: PowerShell normally wants ".\app.exe").
+PS_SETUP = r"""
+try {
+  Set-PSReadLineOption -PredictionSource History -PredictionViewStyle InlineView -ErrorAction Stop
+  Set-PSReadLineKeyHandler -Key Tab -BriefDescription SuggestionOrComplete -ScriptBlock {
+    $before = $null; $at = $null
+    [Microsoft.PowerShell.PSConsoleReadLine]::GetBufferState([ref]$before, [ref]$at)
+    if ($at -eq $before.Length) { [Microsoft.PowerShell.PSConsoleReadLine]::AcceptSuggestion() }
+    $after = $null
+    [Microsoft.PowerShell.PSConsoleReadLine]::GetBufferState([ref]$after, [ref]$at)
+    if ($after -eq $before) { [Microsoft.PowerShell.PSConsoleReadLine]::TabCompleteNext() }
+  }
+} catch {}
+$ExecutionContext.InvokeCommand.CommandNotFoundAction = {
+  param($name, $e)
+  foreach ($c in @($name, "$name.exe")) {
+    $p = Join-Path (Get-Location) $c
+    if (Test-Path -LiteralPath $p -PathType Leaf) {
+      $e.Command = $ExecutionContext.InvokeCommand.GetCommand($p, "Application"); $e.StopSearch = $true; break
+    }
+  }
+}
+"""
+
+
+def shell_argv(choice="", pane=False):
+    """PowerShell 7 if it's there, else Windows PowerShell, else cmd. `choice` (a setting) can name another shell.
+    pane: the terminal pane's shell (PS_SETUP runs in it)."""
     for name in ([choice] if choice else []) + ["pwsh", "powershell", "cmd"]:
         exe = shutil.which(name)
         if exe:
             low = os.path.basename(exe).lower()
-            return [exe, "-NoLogo"] if low.startswith(("pwsh", "powershell")) else [exe]
+            if not low.startswith(("pwsh", "powershell")):
+                return [exe]
+            if not pane:
+                return [exe, "-NoLogo"]
+            code = base64.b64encode(PS_SETUP.encode("utf-16-le")).decode()
+            return [exe, "-NoLogo", "-NoExit", "-EncodedCommand", code]
     return ["cmd.exe"]
 
 
@@ -71,7 +105,7 @@ class Terminals:
             self.n += 1
             tid = f"t{self.n}"
         try:
-            proc = PtyProcess.spawn(shell_argv(self.settings.get("terminal_shell", "")), cwd=cwd, dimensions=(rows, cols))
+            proc = PtyProcess.spawn(shell_argv(self.settings.get("terminal_shell", ""), pane=True), cwd=cwd, dimensions=(rows, cols))
         except Exception as e:
             log.warning("terminal spawn failed: %s", e)
             return {"error": f"Couldn't start a shell: {e}"}
