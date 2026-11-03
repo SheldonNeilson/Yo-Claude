@@ -2028,6 +2028,15 @@ function alertBox(text) { const d = dialog(appName()); d.appendChild(el("div", "
   let typedAt = 0;
   const mine = (n) => n && (n.id === "input" || n.id === "btwInput");
   document.addEventListener("keydown", (e) => { if (mine(e.target)) typedAt = Date.now(); }, true);
+  // and when the box loses the keyboard anyway while you type: log where it went (api().focus_lost: the element, or the
+  // other window that took it), to find what does it
+  const name = (n) => (n ? `${n.tagName.toLowerCase()}${n.id ? "#" + n.id : ""}${typeof n.className === "string" && n.className ? "." + n.className.split(" ")[0] : ""}` : null);
+  document.addEventListener("focusout", (e) => {
+    if (!mine(e.target) || Date.now() - typedAt > 4000) return;
+    const since = Date.now() - typedAt, related = name(e.relatedTarget);
+    setTimeout(() => api().focus_lost({ from: name(e.target), to: related, now: name(document.activeElement),
+                                        page_has_focus: document.hasFocus(), since_key_ms: since }), 30);
+  }, true);
   const focus = HTMLElement.prototype.focus;
   HTMLElement.prototype.focus = function (...a) {
     if (mine(document.activeElement) && this !== document.activeElement && Date.now() - typedAt < 2500 && !(window.event && window.event.isTrusted)) return;

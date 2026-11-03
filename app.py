@@ -1084,6 +1084,36 @@ class Api:
     def move_group(self, name, delta):
         self._app.router.move_group(name, delta)
 
+    def focus_lost(self, info):
+        """The message box lost the keyboard while you were typing (ui/app.js): log where it went, including which window
+        has the foreground (another program's window, a console flashing up...), now and a moment later."""
+        import ctypes
+        from ctypes import wintypes
+        u, k = ctypes.windll.user32, ctypes.windll.kernel32
+
+        def fg():
+            h = u.GetForegroundWindow()
+            title, cls = ctypes.create_unicode_buffer(200), ctypes.create_unicode_buffer(100)
+            u.GetWindowTextW(h, title, 200)
+            u.GetClassNameW(h, cls, 100)
+            pid = wintypes.DWORD()
+            u.GetWindowThreadProcessId(h, ctypes.byref(pid))
+            exe = ""
+            hp = k.OpenProcess(0x1000, False, pid.value)   # PROCESS_QUERY_LIMITED_INFORMATION
+            if hp:
+                buf, n = ctypes.create_unicode_buffer(400), wintypes.DWORD(400)
+                if k.QueryFullProcessImageNameW(hp, 0, buf, ctypes.byref(n)):
+                    exe = os.path.basename(buf.value)
+                k.CloseHandle(hp)
+            return f"{exe or '?'} pid {pid.value} [{cls.value}] '{title.value[:60]}'" + (" (this app)" if pid.value == os.getpid() else "")
+        try:
+            now = fg()
+            time.sleep(0.25)
+            later = fg()
+        except Exception as e:
+            now = later = f"? ({e})"
+        log.info("Message box lost focus: %s; foreground %s; 0.25 s later %s", info, now, later)
+
     def ui_report(self, token, text):
         """The window's answer to one of Claude's ui_state / ui_control calls (ui/selfctl.js)."""
         self._app.router.ui_report(token, text)
