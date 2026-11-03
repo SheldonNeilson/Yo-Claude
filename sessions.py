@@ -2605,7 +2605,8 @@ class Router:
         self.meta.set_workspace(folder, present)
         self.emit("workspaces", workspaces=self.workspaces())
 
-    def new_session(self, cwd="current", picked=False):
+    def new_session(self, cwd="current", picked=False, group=None):
+        """group: put the new session in that group (the + on a group's header), not just its folder's default one."""
         cwd = self.folder if cwd == "current" else cwd
         if cwd:
             self.meta.add_folder(cwd)
@@ -2616,6 +2617,8 @@ class Router:
         self.live[s.id] = s
         self.active = s
         self.folder = cwd
+        if group and group in self.meta.data["groups"] and group != self.default_group(cwd):
+            self.meta.update(s.id, group=group, cwd=cwd)
         self.ensure_baseline(s, "start")
         self.emit("opened", session=self.describe(s), items=[])
         self.sessions_changed(cwd)

@@ -845,10 +845,10 @@ class Api:
         a.bus.put(("folder", {"folder": a.router.folder, "folders": a.router.meta.data["recent_folders"]}))
 
     # --- sessions ---
-    def new_session(self, cwd="current"):
-        """cwd: a folder, null for a chat, or omitted for the folder of the session you're in."""
+    def new_session(self, cwd="current", group=None):
+        """cwd: a folder, null for a chat, or omitted for the folder of the session you're in. group: the group to put it in."""
         r = self._app.router
-        return r.describe(r.new_session(cwd, picked=True))
+        return r.describe(r.new_session(cwd, picked=True, group=group))
 
     def add_folder(self):
         result = self._app.main.create_file_dialog(webview.FileDialog.FOLDER)

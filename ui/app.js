@@ -354,7 +354,7 @@ function renderTree() {
       `<span class="spacer"></span><button class="fadd" title="New ${groupHome(g) ? "session in " + esc(base(groupHome(g))) : "chat"}">+</button>`;
     head.title = isFolder && cwd ? `${g}: ${cwd}` : g;
     head.onclick = (e) => {
-      if (e.target.closest(".fadd")) return api().new_session(groupHome(g));
+      if (e.target.closest(".fadd")) return api().new_session(groupHome(g), g);
       setOpen(gkey, !open); renderTree();
     };
     head.oncontextmenu = (e) => { e.preventDefault(); groupMenu(e, g); };
@@ -447,7 +447,7 @@ function groupMenu(e, g) {
   showMenu(e, [
     ["sub:" + g],
     [focused ? "show everything again" : "show only this group", () => api().set_setting("group_focus", focused ? null : g)],
-    [home ? "new session in " + base(home) : "new chat", () => api().new_session(home)],
+    [home ? "new session in " + base(home) : "new chat", () => api().new_session(home, g)],
     home ? ["open in vs code", () => api().open_path(home, "code")] : null,
     home ? ["show in explorer", () => api().open_path(home, "open")] : null,
     ...(home ? termMenuItems(home, null, "dir") : []),
@@ -1994,6 +1994,19 @@ function confirmBox(text, done) {
   addButtons(d, [["cancel", closeModal], ["yes", () => { closeModal(); done(); }, "danger"]]);
 }
 function alertBox(text) { const d = dialog(appName()); d.appendChild(el("div", "", esc(text))); addButtons(d, [["ok", closeModal, "primary"]]); }
+
+// A script moving the keyboard focus while you type in the message box (a file opening in the editor, a panel redrawing) would
+// swallow what you type next. For a couple of seconds after a key in the box, focus() calls that aren't from your own click or key are ignored.
+(() => {
+  let typedAt = 0;
+  const mine = (n) => n && (n.id === "input" || n.id === "btwInput");
+  document.addEventListener("keydown", (e) => { if (mine(e.target)) typedAt = Date.now(); }, true);
+  const focus = HTMLElement.prototype.focus;
+  HTMLElement.prototype.focus = function (...a) {
+    if (mine(document.activeElement) && this !== document.activeElement && Date.now() - typedAt < 2500 && !(window.event && window.event.isTrusted)) return;
+    return focus.apply(this, a);
+  };
+})();
 
 // ---------- start ----------
 window.addEventListener("pywebviewready", async () => {
