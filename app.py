@@ -135,6 +135,7 @@ class App:
             w.events.loaded += lambda w=w: self.ready.__setitem__(w, True)
         self.main.events.loaded += self.on_main_loaded
         self.main_visible = self.settings.get("show_window", True)
+        self.bar_lock = threading.RLock()
         self.main.events.shown += self.dress_main     # title-bar colours only stick once the window is on screen
         self.main.events.closing += self.on_main_closing
         self.main.events.minimized += lambda: self.set_main_visible(False)
@@ -156,6 +157,7 @@ class App:
         threading.Thread(target=self.keep_awake, daemon=True, name="awake").start()
         threading.Thread(target=self.restart_when_asked, daemon=True, name="restart").start()
         threading.Thread(target=self.live_view, daemon=True, name="live").start()
+        threading.Thread(target=self.watch_main, daemon=True, name="watchmain").start()
         if self.settings.get("launch_at_login", True):
             set_launch_at_login(True)
         self.update_bar_visibility()
@@ -270,20 +272,32 @@ class App:
 
     # --- the event bus -> windows / tray ---
     def dispatch(self):
+        """The only way anything reaches the windows: it must never stop. (An uncaught error once ended this thread and
+        the window went deaf for good: messages still went out, but no reply, switch or update came back.)"""
         while True:
-            events = []
             try:
-                events.append(self.bus.get(timeout=0.5))
-                deadline = time.time() + 0.06
-                while time.time() < deadline:
-                    try:
-                        events.append(self.bus.get(timeout=max(0, deadline - time.time())))
-                    except queue.Empty:
-                        break
-            except queue.Empty:
-                pass
-            main_events, bar_events, levels = [], [], []
-            for kind, d in events:
+                self.dispatch_once()
+            except Exception:
+                log.exception("Window updates: a round failed (carrying on)")
+                time.sleep(0.2)
+
+    def dispatch_once(self):
+        """One round of the bus: wait for events, then hand them to the windows, tray and bar. A bad event or a failing
+        tray/bar/taskbar call is logged and skipped; the windows still get the rest."""
+        events = []
+        try:
+            events.append(self.bus.get(timeout=0.5))
+            deadline = time.time() + 0.06
+            while time.time() < deadline:
+                try:
+                    events.append(self.bus.get(timeout=max(0, deadline - time.time())))
+                except queue.Empty:
+                    break
+        except queue.Empty:
+            pass
+        main_events, bar_events, levels = [], [], []
+        for kind, d in events:
+            try:
                 if kind == "level":
                     levels.append(round(d["level"], 1))
                     continue
@@ -302,22 +316,26 @@ class App:
                 main_events.append({"kind": kind, **d})
                 if kind in BAR_FEED:
                     bar_events.append(main_events[-1])
-            new_display = display_state(self.voice_state, self.work_state)
-            if new_display != self.display or any(e["kind"] in ("state", "work") for e in main_events):
-                self.display = new_display
-                ev = {"kind": "display", "state": self.display, "voice": self.voice_state, "work": self.work_state,
-                      "text": self.voice_text, "hold": self.voice_hold}
-                main_events.append(ev)
-                bar_events.append(ev)
-                self.update_tray()
-                self.update_bar_visibility()
-                if getattr(self, "taskbar", None):
-                    self.taskbar.show(self.display)
-            if levels:
-                bar_events.append({"kind": "levels", "levels": levels})
-                main_events.append({"kind": "levels", "levels": levels})
-            self.push(self.main, main_events)
-            self.push(self.bar, bar_events)
+            except Exception:
+                log.exception("Window updates: skipped a bad %r event: %.300r", kind, d)
+        new_display = display_state(self.voice_state, self.work_state)
+        if new_display != self.display or any(e["kind"] in ("state", "work") for e in main_events):
+            self.display = new_display
+            ev = {"kind": "display", "state": self.display, "voice": self.voice_state, "work": self.work_state,
+                  "text": self.voice_text, "hold": self.voice_hold}
+            main_events.append(ev)
+            bar_events.append(ev)
+            for what, call in (("tray", self.update_tray), ("bar", self.update_bar_visibility),
+                               ("taskbar", lambda: getattr(self, "taskbar", None) and self.taskbar.show(self.display))):
+                try:
+                    call()
+                except Exception:
+                    log.exception("Window updates: the %s update failed (display %s)", what, self.display)
+        if levels:
+            bar_events.append({"kind": "levels", "levels": levels})
+            main_events.append({"kind": "levels", "levels": levels})
+        self.push(self.main, main_events)
+        self.push(self.bar, bar_events)
 
     def push(self, window, events):
         if events and self.ready.get(window):
@@ -426,15 +444,38 @@ class App:
         return (self.settings.get("bar_when_idle", True) and not getattr(self, "bar_snoozed", False)) or busy or bool(held)
 
     def update_bar_visibility(self):
-        want = self.bar_wanted()
-        if want != getattr(self, "bar_shown", None):
-            self.bar_shown = want
-            if want:
-                self.bar.show()
-                self.style_bar()
-                self.place_bar(getattr(self, "bar_height", 56))
-            else:
-                self.bar.hide()
+        with self.bar_lock:   # (window events arrive on several threads at once)
+            want = self.bar_wanted()
+            if want != getattr(self, "bar_shown", None):
+                log.info("Bar %s (window %s)", "shown" if want else "hidden", "on screen" if self.main_visible else "not on screen")
+                self.bar_shown = want
+                if want:
+                    self.bar.show()
+                    self.style_bar()
+                    self.place_bar(getattr(self, "bar_height", 56))
+                else:
+                    self.bar.hide()
+
+    def main_on_screen(self):
+        """Whether the main window is really on screen (not hidden, not minimised), asked of Windows rather than taken from
+        the minimise/restore events, which can arrive out of order or not at all."""
+        try:
+            hwnd = self.main.native.Handle.ToInt32()
+            return bool(ctypes.windll.user32.IsWindowVisible(hwnd)) and not ctypes.windll.user32.IsIconic(hwnd)
+        except Exception:
+            return None
+
+    def watch_main(self):
+        """The floating bar and the window are never both on screen: follow the window's real state."""
+        while True:
+            time.sleep(0.5)
+            try:
+                on = self.main_on_screen()
+                if on is not None and on != self.main_visible:
+                    log.info("Window is %s: the bar follows", "on screen" if on else "hidden or minimised")
+                    self.set_main_visible(on)
+            except Exception as e:
+                log.debug("watch_main: %s", e)
 
     # --- tray ---
     def make_tray(self):
@@ -1477,6 +1518,13 @@ def main():
         handlers.append(logging.StreamHandler(sys.stdout))
     logging.basicConfig(level=logging.WARNING, format="%(asctime)s %(message)s", handlers=handlers)
     log.setLevel(logging.DEBUG if args.debug else logging.INFO)
+    # pythonw has no console: an error that ends a thread would otherwise vanish without a word (that's how the window
+    # once stopped updating for good). Log every one, with its thread.
+    def thread_died(a):
+        if a.exc_type is not SystemExit:
+            log.error("Thread %r ended by an error", getattr(a.thread, "name", "?"), exc_info=(a.exc_type, a.exc_value, a.exc_traceback))
+    threading.excepthook = thread_died
+    sys.excepthook = lambda t, v, tb: log.error("Uncaught error", exc_info=(t, v, tb))
 
     import win32api, win32event, winerror
     mutex = win32event.CreateMutex(None, False, "Local\\YoClaude")

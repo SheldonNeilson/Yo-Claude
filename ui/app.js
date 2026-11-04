@@ -1376,6 +1376,7 @@ function tidyZone(box) {   // a stretch of the message safely away from the curs
   if (tail < words.length - 1) zones.push({ kind: "tail", text: v.slice(words[tail][0]) });
   return zones.find((z) => !tidy.seen.has(z.text)) || null;
 }
+document.addEventListener("focusin", (e) => { if (e.target.id === "input") setTimeout(tidySoon, 0); });   // (what waited while the keyboard was elsewhere)
 function tidySoon() {   // soon when something's safely behind (or ahead of) the cursor, at a short pause for the rest
   clearTimeout(tidy.timer);
   if (S.settings.fix_text === false) return;
@@ -1384,6 +1385,7 @@ function tidySoon() {   // soon when something's safely behind (or ahead of) the
 }
 async function tidyNow() {
   const box = $("#input"), full = box.value, t = full.trim();
+  if (document.activeElement !== box) return;   // the keyboard is elsewhere: don't pull it back (box.focus + blur left it on nothing); fixed when you return
   if (tidy.busy || tidy.dictating || t.startsWith("/") || !$("#atlist").classList.contains("hidden")) return;
   const zone = tidyZone(box) || (!tidy.seen.has(full) && t.split(/\s+/).length >= 2 ? { kind: "all", text: full } : null);
   if (!zone) return;
@@ -1399,12 +1401,12 @@ async function tidyNow() {
   tidy.seen.add(fixed);   // (so an undo isn't fixed all over again)
   if (fixed === zone.text || tidy.dictating || !$("#atlist").classList.contains("hidden")) return tidySoon();
   const a = zone.kind === "tail" ? v.length - zone.text.length : 0, b = a + zone.text.length, d = fixed.length - zone.text.length;
-  const c0 = box.selectionStart, c1 = box.selectionEnd, focused = document.activeElement === box;
+  if (document.activeElement !== box) return;   // (you clicked elsewhere while it was being fixed)
+  const c0 = box.selectionStart, c1 = box.selectionEnd;
   const at = (p) => (p >= b ? p + d : zone.kind === "all" ? Math.max(0, p + d) : p);
-  box.focus(); box.setSelectionRange(a, b);
+  box.setSelectionRange(a, b);
   document.execCommand("insertText", false, fixed);   // one edit: Ctrl+Z puts back what you typed
   box.setSelectionRange(at(c0), at(c1));
-  if (!focused) box.blur();
   box.classList.add("tidied"); setTimeout(() => box.classList.remove("tidied"), 900);
   autosize();
   tidySoon();
@@ -2056,15 +2058,22 @@ function alertBox(text) { const d = dialog(appName()); d.appendChild(el("div", "
   document.addEventListener("mousedown", () => { if (toldAt) { toldAt = 0; api().typing(false); } }, true);   // (a click: what opens next is yours)
   // and when the box loses the keyboard anyway while you type: log where it went (api().focus_lost: the element, or the
   // other window that took it), to find what does it
+  let lastFocus = null, lastDown = null;
+  document.addEventListener("mousedown", (e) => { lastDown = { on: name(e.target), at: Date.now() }; }, true);
   const name = (n) => (n ? `${n.tagName.toLowerCase()}${n.id ? "#" + n.id : ""}${typeof n.className === "string" && n.className ? "." + n.className.split(" ")[0] : ""}` : null);
   document.addEventListener("focusout", (e) => {
     if (!mine(e.target) || Date.now() - typedAt > 4000) return;
     const since = Date.now() - typedAt, related = name(e.relatedTarget);
     setTimeout(() => api().focus_lost({ from: name(e.target), to: related, now: name(document.activeElement),
-                                        page_has_focus: document.hasFocus(), since_key_ms: since }), 30);
+                                        page_has_focus: document.hasFocus(), since_key_ms: since,
+                                        last_click: lastDown && { ...lastDown, ago_ms: Date.now() - lastDown.at },
+                                        last_script_focus: lastFocus && { ...lastFocus, ago_ms: Date.now() - lastFocus.at } }), 30);
   }, true);
+  // (only your own click or key counts as a reason to move the keyboard: not a scroll, a mouse move or a resize happening to be in progress)
+  const yours = () => { const t = window.event; return !!t && t.isTrusted && ["mousedown", "pointerdown", "mouseup", "click", "keydown"].includes(t.type); };
   HTMLElement.prototype.focus = function (...a) {
-    if (mine(document.activeElement) && this !== document.activeElement && Date.now() - typedAt < 2500 && !(window.event && window.event.isTrusted)) return;
+    if (mine(document.activeElement) && this !== document.activeElement && Date.now() - typedAt < 4000 && !yours()) return;
+    lastFocus = { to: name(this), at: Date.now(), event: window.event?.type || null, stack: (new Error().stack || "").split(/\n/).slice(2, 5).map((l) => l.trim()).join(" < ") };
     return focus.apply(this, a);
   };
 })();

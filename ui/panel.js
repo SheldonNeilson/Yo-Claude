@@ -23,19 +23,27 @@ window.panel = {
     if (!sameFolder(cwd, this.cwd)) { this.sel = new Set(); this.anchor = null; }
     this.cwd = cwd;
     if (!cwd) { this.git = null; this.changes = null; this.dirs = {}; renderBranch(); if (this.shown()) this.render(); return; }
-    const [git, changes] = session ? await Promise.all([api().git_info(), api().changes()]) : [null, null];
+    const mine = (this.gen = (this.gen || 0) + 1);   // (a newer load supersedes this one: no stale redraws)
+    const slow = session ? Promise.all([api().git_info(), api().changes()]) : Promise.resolve([null, null]);   // (a snapshot of a big repo takes seconds: only the marks wait for it)
+    if (this.shown() && this.tab === "files") {
+      await this.loadDirs();
+      if (mine !== this.gen) return;
+      this.render();
+    }
+    const [git, changes] = await slow;
+    if (mine !== this.gen) return;
     this.git = git; this.changes = changes;
-    if (this.shown() && this.tab === "files") await this.loadDirs();
     renderBranch();
     if (this.shown()) this.render();
   },
   async loadDirs() {
-    const dirs = {};
-    for (const rel of [...this.openDirs]) {
-      const r = await api().tree(rel, this.cwd);
-      if (r.error && rel) { this.openDirs.delete(rel); continue; }   // renamed, moved or deleted
+    const dirs = {}, rels = [...this.openDirs];
+    const lists = await Promise.all(rels.map((rel) => api().tree(rel, this.cwd)));   // (all open folders at once)
+    rels.forEach((rel, i) => {
+      const r = lists[i];
+      if (r.error && rel) { this.openDirs.delete(rel); return; }   // renamed, moved or deleted
       dirs[rel] = r.entries || [];
-    }
+    });
     this.dirs = dirs;
     const seen = new Set(Object.values(dirs).flat().map((e) => e.path));
     for (const p of [...this.sel]) if (!seen.has(p)) this.sel.delete(p);
@@ -259,7 +267,8 @@ ${elsewhere} running in other sessions` : ""}">` +
     this.searchEls = pc ? null : { cols, tree, results };
     this.runSearch();
     this.paintSel();
-    if (this.treeFocus && $("#modal").classList.contains("hidden")) tree.focus({ preventScroll: true });
+    const a = document.activeElement;   // (only take the keyboard back when the redrawn tree was what had it, never from the message box)
+    if (this.treeFocus && $("#modal").classList.contains("hidden") && (!a || a === document.body || a.closest?.(".ftree"))) tree.focus({ preventScroll: true });
   },
 
   // ---------- file explorer ----------

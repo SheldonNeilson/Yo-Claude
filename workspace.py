@@ -12,6 +12,7 @@ import time
 import re
 import shutil
 import subprocess
+import threading
 import tempfile
 
 log = logging.getLogger("yo_claude")
@@ -80,6 +81,36 @@ def deep_mtime(folder, budget):
     return newest, complete
 
 
+_pending, _wake = [], threading.Event()
+
+
+def _deep_worker():
+    """Works out folders' deep modified times in the background, so listing a folder never waits for them."""
+    while True:
+        _wake.wait()
+        _wake.clear()   # (before the work: a folder asked for meanwhile wakes the next pass)
+        while _pending:
+            folder = _pending.pop(0)
+            try:
+                _deep.pop(folder, None)
+                deep_mtime(folder, 4.0)
+            except Exception as e:
+                log.debug("deep mtime %s: %s", folder, e)
+
+
+def _want_deep(folder):
+    global _worker
+    if folder not in _pending:
+        _pending.append(folder)
+    if _worker is None:
+        _worker = threading.Thread(target=_deep_worker, daemon=True, name="deepmtime")
+        _worker.start()
+    _wake.set()
+
+
+_worker = None
+
+
 def drives():
     """This PC: the drives there are, for browsing above a drive's top folder."""
     out = []
@@ -107,14 +138,19 @@ def list_dir(root, rel=""):
         paths = [os.path.join(rel, n).replace("\\", "/") for n in entries]
         ignored = set(git(root, "check-ignore", "--stdin", input="\n".join(paths), check=False).split("\n"))
         entries = [n for n, p in zip(entries, paths) if p not in ignored]
-    out, end = [], time.time() + 1.2   # (all the folders here get 1.2 s between them)
+    out = []
     for n in entries:
         full = os.path.join(folder, n)
         e = {"name": n, "path": os.path.join(rel, n).replace("\\", "/"), "dir": os.path.isdir(full)}
         try:
             if e["dir"]:
-                left = end - time.time()
-                e["mtime"], done = deep_mtime(full, min(0.12, left)) if left > 0 else (os.stat(full).st_mtime, False)
+                hit = _deep.get(full)   # (what's known now, however old: the list never waits; a background pass refreshes it)
+                if hit:
+                    e["mtime"], done = hit[1], hit[2]
+                else:
+                    e["mtime"], done = os.stat(full).st_mtime, False
+                if not hit or not done or time.time() - hit[0] > 60:
+                    _want_deep(full)
                 if not done:
                     e["approx"] = True
             else:
