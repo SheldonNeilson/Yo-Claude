@@ -12,6 +12,7 @@ import argparse
 import ctypes
 import json
 import logging
+import logging.handlers
 import os
 import queue
 import subprocess
@@ -29,6 +30,7 @@ import icons
 import localai
 import media
 import openwith
+import plugins
 import sessions
 import taskbar
 import terminal
@@ -205,6 +207,7 @@ class App:
         threading.Thread(target=self.restart_when_asked, daemon=True, name="restart").start()
         threading.Thread(target=self.live_view, daemon=True, name="live").start()
         threading.Thread(target=self.watch_main, daemon=True, name="watchmain").start()
+        threading.Thread(target=self.watch_ui, daemon=True, name="watchui").start()
         if self.settings.get("launch_at_login", True):
             set_launch_at_login(True)
         self.update_bar_visibility()
@@ -546,6 +549,27 @@ class App:
             return bool(ctypes.windll.user32.IsWindowVisible(hwnd)) and not ctypes.windll.user32.IsIconic(hwnd)
         except Exception:
             return None
+
+    def watch_ui(self):
+        """Logs when the page stops answering (its script stuck, or the bridge to it dead: clicks then do nothing), with
+        what every thread of the app was doing at that moment, and when it answers again."""
+        import traceback
+        self.ui_beat_at = time.time()
+        stalled = 0.0
+        while True:
+            time.sleep(2)
+            if not self.main_visible:
+                self.ui_beat_at = time.time()   # (a hidden or minimised page may be throttled: that's not a stall)
+                continue
+            quiet = time.time() - self.ui_beat_at
+            if quiet > 12 and not stalled:
+                stalled = self.ui_beat_at
+                names = {t.ident: t.name for t in threading.enumerate()}
+                stacks = chr(10).join(f"--- {names.get(i, i)}{chr(10)}" + "".join(traceback.format_stack(f)[-6:]) for i, f in sys._current_frames().items())
+                log.warning("The window hasn't answered for %.0f s (clicks would do nothing). Threads now:%s%s", quiet, chr(10), stacks[:6000])
+            elif stalled and quiet < 6:
+                log.warning("The window answers again after %.0f s", time.time() - stalled)
+                stalled = 0.0
 
     def watch_main(self):
         """The floating bar and the window are never both on screen: follow the window's real state."""
@@ -1147,7 +1171,11 @@ class Api:
             webbrowser.open(url)
 
     def open_session(self, sid, cwd):
+        t0 = time.time()
+        log.info("Opening session %s", str(sid)[:8])
         s = self._app.router.open(sid, cwd)
+        took = time.time() - t0
+        (log.warning if took > 1.0 else log.info)("Opened session %s in %.2f s (%d items)", str(sid)[:8], took, len(s.items))
         return {"session": self._app.router.describe(s), "items": s.items}
 
     def list_sessions(self, cwd):
@@ -1179,6 +1207,19 @@ class Api:
         """Queued messages dragged into a new order (their indexes, first to go first) in the open session."""
         r = self._app.router
         return r.reorder_queue(r.active.id, order) if r.active else {"error": "Open a session first."}
+
+    def plugins_list(self):
+        """The toolbar plugins' buttons (and any plugin that failed to load, with why)."""
+        r = self._app.router
+        return plugins.public(r.plugins, r.plugin_errors)
+
+    def reload_plugins(self):
+        """Tools > Reload plugins: read the plugins folder again."""
+        return self._app.router.reload_plugins()
+
+    def plugin_run(self, sid, name, button):
+        """A plugin's toolbar button was clicked (in session sid)."""
+        return self._app.router.plugin_run(sid, str(name), str(button))
 
     def checklist_answer(self, sid, cid, picks, note=""):
         """[submit] on Claude's checklist card: your yes/no (and why) per item go to Claude as your next message."""
@@ -1559,6 +1600,10 @@ class Api:
     def open_data_folder(self):
         os.startfile(DATA_DIR)
 
+    def open_plugins_folder(self):
+        os.makedirs(plugins.PLUGINS_DIR, exist_ok=True)
+        os.startfile(plugins.PLUGINS_DIR)
+
     def request_quit(self):
         busy = self._app.replying()
         if not busy:
@@ -1614,6 +1659,10 @@ class Api:
     def task_output(self, key):
         return self._app.router.task_output(key)
 
+    def ui_beat(self):
+        """The page says it's alive every few seconds (see watch_ui)."""
+        self._app.ui_beat_at = time.time()
+
     def ui_loaded(self, info):
         log.info("Window loaded: %s", str(info)[:300])
 
@@ -1629,7 +1678,7 @@ def main():
     args.debug = args.debug or args.collect
 
     os.makedirs(DATA_DIR, exist_ok=True)
-    handlers = [logging.FileHandler(LOG_PATH, encoding="utf-8")]
+    handlers = [logging.handlers.RotatingFileHandler(LOG_PATH, maxBytes=1_000_000, backupCount=2, encoding="utf-8")]   # (a rolling log: about 3 MB at most, the newest in yo_claude.log)
     if sys.stdout:
         handlers.append(logging.StreamHandler(sys.stdout))
     logging.basicConfig(level=logging.WARNING, format="%(asctime)s %(message)s", handlers=handlers)

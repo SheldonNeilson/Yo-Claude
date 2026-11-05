@@ -28,6 +28,7 @@ import claude_agent_sdk as sdk
 from claude_agent_sdk._internal import sessions as sdk_sessions
 
 import localai
+import plugins
 import workspace
 import writing
 
@@ -2142,6 +2143,8 @@ class Router:
         self.detached = {}                  # session id -> background tasks still running from before a restart
         self.finished_tasks = {}            # task id -> how a task from before a restart ended
         self.btw = {}                       # session id -> its open /btw side chat {"id", "queue", "future"}
+        self.plugins, self.plugin_errors = plugins.load()   # toolbar plugins (plugins.py); a bad one is skipped
+        self.plugin_jobs = {}               # checklist card id -> a plugin's review waiting for [submit]
         self.watcher = None
         self.limits = self.meta.data.get("limits")   # last known plan usage limits
         self.on_voice_approval = None       # set by the voice assistant
@@ -3240,12 +3243,64 @@ class Router:
         note = (note or "").strip()
         item.update(status="answered", picks=picks, note=note)
         s.changed(item)
+        job = self.plugin_jobs.pop(cid, None)
+        if job:   # a plugin's review: only the ticked rows go to its apply command, nothing goes to Claude
+            keep = [dict(e, **({"note": p["why"]} if p["why"] else {})) for e, p in zip(job["entries"], picks) if p["yes"]]
+            threading.Thread(target=self._plugin_apply, args=(s, job, keep), name="plugin-apply", daemon=True).start()
+            return {}
         lines = [("✓ yes: " if p["yes"] else "✗ no: ") + p["item"] + (f"  (why: {p['why']})" if p["why"] else "")
                  for p in picks]
         text = (f"My answers to \"{item['title']}\" (ticked = yes):\n" + "\n".join(lines)
                 + (f"\n\nNote: {note}" if note else ""))
         self.send(text, sid=sid)
         return {}
+
+    def reload_plugins(self):
+        self.plugins, self.plugin_errors = plugins.load()
+        return plugins.public(self.plugins, self.plugin_errors)
+
+    def plugin_run(self, sid, name, button):
+        """A plugin's toolbar button: its command runs off the UI thread; a review action ends as a tick-list card
+        in the session (nothing is applied until [submit])."""
+        s = self.live.get(sid) if sid else self.active
+        plugin, b = plugins.find(self.plugins, name, button)
+        if s is None:
+            return {"error": "Open a session first."}
+        if not b:
+            return {"error": "That plugin button is gone: reload the plugins."}
+        threading.Thread(target=self._plugin_work, args=(s, plugin, b), name="plugin-run", daemon=True).start()
+        return {}
+
+    def _plugin_work(self, s, plugin, b):
+        action = b["run"]
+        label = plugin["name"] if b["label"] == plugin["name"] else f"{plugin['name']}: {b['label']}"
+        self.emit("notice", text=f"{label}: running…")
+        try:
+            if action["kind"] == "command":
+                ok, out, err = plugins.run(plugin, action["command"], action["timeout"])
+                s.add({"kind": "note", "text": f"{label}\n{out or 'Done.'}"} if ok else {"kind": "error", "text": f"{label} failed: {err}"})
+                return
+            entries, labels = plugins.preview_rows(plugin, action)
+            if not entries:
+                s.add({"kind": "note", "text": f"{label}: nothing to propose."})
+                return
+            cid = uuid.uuid4().hex[:12]
+            self.plugin_jobs[cid] = {"plugin": plugin, "action": action, "entries": entries, "label": label}
+            title = action["title"] or f"{label}: tick what to write"
+            s.add({"kind": "checklist", "id": cid, "title": title, "items": labels, "checked": labels, "status": "pending"})
+        except Exception as e:   # a plugin can't break the app, only fail its own button
+            logging.exception("plugin %s failed", plugin["name"])
+            s.add({"kind": "error", "text": f"{label} failed: {e}"})
+
+    def _plugin_apply(self, s, job, keep):
+        label = job["label"]
+        if not keep:
+            return s.add({"kind": "note", "text": f"{label}: nothing ticked, nothing written."})
+        try:
+            ok, text = plugins.apply_entries(job["plugin"], job["action"], keep)
+        except Exception as e:
+            ok, text = False, str(e)
+        s.add({"kind": "note", "text": f"{label}: {len(keep)} ticked\n{text}"} if ok else {"kind": "error", "text": f"{label} failed: {text}"})
 
     def answer(self, sid, aid, answers):
         """The user's answers to Claude's AskUserQuestion ({question: label(s)}), or None to skip it."""

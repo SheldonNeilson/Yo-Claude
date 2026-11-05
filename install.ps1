@@ -52,8 +52,16 @@ function Find-Python {
 Step "Python"
 $python = Find-Python
 if (-not $python) {
-    if (Ask "Python 3.13 isn't installed. Install it now (winget, just for you)?") {
-        winget install -e --id Python.Python.3.13 --scope user --accept-package-agreements --accept-source-agreements
+    if (Ask "Python 3.13 isn't installed. Install it now (just for you)?") {
+        if (Get-Command winget -ErrorAction SilentlyContinue) {
+            winget install -e --id Python.Python.3.13 --scope user --accept-package-agreements --accept-source-agreements
+        } else {   # (winget doesn't come with every Windows install: python.org's own installer, silent, for this user only)
+            $exe = Join-Path $env:TEMP "python-3.13-installer.exe"
+            Write-Host "winget isn't available here: downloading Python from python.org"
+            Invoke-WebRequest "https://www.python.org/ftp/python/3.13.5/python-3.13.5-amd64.exe" -OutFile $exe -UseBasicParsing
+            Start-Process $exe -ArgumentList "/quiet", "InstallAllUsers=0", "PrependPath=1", "Include_launcher=1", "Include_test=0" -Wait
+            Remove-Item $exe -ErrorAction SilentlyContinue
+        }
         $env:Path = [Environment]::GetEnvironmentVariable("Path", "User") + ";" + [Environment]::GetEnvironmentVariable("Path", "Machine")
         $python = Find-Python
     }

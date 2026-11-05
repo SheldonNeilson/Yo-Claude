@@ -53,7 +53,7 @@ what Claude saw, and a live view of the screen while it works.
 
 - Windows 10 or 11, a microphone and speakers.
 - A Claude **Pro or Max** subscription (Yo Claude uses it through Claude Code; it doesn't need an API key).
-- Git, to download and update it: `winget install -e --id Git.Git` if you don't have it.
+- Git, to download and update it: `winget install -e --id Git.Git` if you have winget, otherwise the installer from https://git-scm.com/download/win (winget doesn't come with every Windows install).
 
 ## Install
 

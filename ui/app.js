@@ -410,7 +410,12 @@ function sessionRow(s, withFolder = false) {
   row.innerHTML = `<div class="t">${mark}${s.pinned ? "▴ " : ""}${esc(s.title)}</div>
     <div class="m">${esc(ago(s.modified))}${where}${s.branch ? " · ⎇ " + esc(s.branch) : ""}${src}</div>`;
   row.title = s.first || s.title;
-  row.onclick = () => api().open_session(s.id, s.cwd);
+  // opens on mouse-down: the list is rebuilt whenever a session's state changes, and a click (down, then up on the same
+  // element) is lost when that happens in between: with a few busy sessions, clicks seemed to do nothing
+  let openedAt = 0;
+  const openIt = () => { openedAt = Date.now(); api().open_session(s.id, s.cwd); };
+  row.onmousedown = (e) => { if (e.button === 0) openIt(); };
+  row.onclick = () => { if (Date.now() - openedAt > 600) openIt(); };   // (keyboard or a touch with no mouse-down)
   row.oncontextmenu = (e) => { e.preventDefault(); sessionMenu(e, s); };
   row.draggable = true;   // drag it onto a group (or, from a group, back onto its folder)
   row.ondragstart = (e) => {
@@ -2121,6 +2126,7 @@ window.addEventListener("pywebviewready", async () => {
   MASCOT.draw($("#logo"), "idle", 0, 1);
   showDisplay();
   requestAnimationFrame(animate);
+  setInterval(() => { try { api().ui_beat(); } catch (_) { /* the bridge is gone: Python notices the silence */ } }, 3000);   // (watch_ui in app.py)
   $("#input").focus();
   api().ui_loaded(`tree: ${S.workspaces.length} folders, ${allSessions().length} sessions; transcript: ${S.items.length} items`);
 });

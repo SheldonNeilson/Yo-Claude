@@ -32,7 +32,22 @@ https://github.com/SheldonNeilson/Yo-Claude (private); their installs update fro
 | `media.py`, `taskbar.py`, `icons.py` | local file links, taskbar state, mascot icons |
 | `ui/` | the window and the floating bar (plain HTML/JS, no build step) |
 | `pc_control/` | bundled screen-control MCP server (own environment) |
+| `plugins.py`, `ui/plugins.js` | toolbar plugins (below) |
 | `install.ps1` / `uninstall.ps1` | install, update (`-Update`), remove |
+
+## Plugins (toolbar buttons)
+
+Not the Claude Code plugins/mods (those are Claude's own, switched in Options > MCP). These are Yo Claude's: folders in
+`~/.yoclaude/plugins/<name>/plugin.json`, **outside the repo and the installer**, so a private plugin is never shipped or pushed.
+Read at startup and by Tools > Reload plugins (Tools > Open plugins folder). Spec and manifest format: docstring of `plugins.py`.
+- Manifest: name, description, version, `buttons[]` (id, icon, label, tooltip, `run`). Each button shows as `[icon label]` on the
+  composer row. `run.kind` is `command` (run it, show output as a note) or `review` (run `preview`, which prints a JSON array;
+  show it as Claude's tick-list card with a per-row why/note; on [submit] run `apply` with only the ticked rows in a temp JSON
+  file, `{file}`). Review cards reuse `checklist` items; `Router.plugin_jobs` maps the card to the plugin, so [submit] goes to
+  the plugin, not to Claude.
+- Failures are isolated: a bad manifest is skipped and reported in a toast; a failing command shows an error in the session.
+- Plugins run commands as the user (no sandbox): they are trusted local scripts. Keep any plugin with private data or
+  private paths in `~/.yoclaude/plugins`, never in the repo. `YOCLAUDE_PLUGINS_DIR` overrides the folder (for tests).
 
 ## Avatar training plan (the six faces): status, next steps, open questions
 

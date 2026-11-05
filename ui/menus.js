@@ -152,6 +152,8 @@ const MENUS = {
     "-",
     ["Open log", () => api().open_log()],
     ["Open Yo Claude's data folder", () => api().open_data_folder()],
+    ["Reload plugins", () => window.plugins.load(true)],
+    ["Open plugins folder", () => api().open_plugins_folder()],
   ],
   // the extras, each on or off (named the old way). Claude's own (tick lists, advisor notes) apply from a session's
   // next start; the rest at once.
