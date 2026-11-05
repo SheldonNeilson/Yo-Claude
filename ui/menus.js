@@ -109,6 +109,7 @@ const MENUS = {
     ] }],
     ["Start Maximized", () => toggleSetting("start_maximized"), { checked: setting("start_maximized") }],
     ["Launch with Windows", () => toggleSetting("launch_at_login"), { checked: setting("launch_at_login") }],
+    ["Update automatically", () => toggleSetting("auto_update"), { checked: setting("auto_update") }],
     "-",
     ["Reset Workspace to Default…", () => resetWorkspace()],
   ],

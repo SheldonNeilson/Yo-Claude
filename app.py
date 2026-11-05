@@ -219,7 +219,9 @@ class App:
                 self.check_updates(quiet=True)
             except Exception as e:
                 log.debug("update check: %s", e)
-            time.sleep(UPDATE_CHECK_S)
+            # an update waiting for Claude to finish a reply is retried every few minutes, not after 6 hours
+            info = getattr(self, "update_info", None) or {}
+            time.sleep(300 if info.get("behind") and self.settings.get("auto_update", True) else UPDATE_CHECK_S)
 
     def live_view(self):
         """While Claude is using the PC, a small picture of the screen about once a second for the transcript."""
@@ -289,6 +291,9 @@ class App:
             if not quiet:
                 self.notify(f"{self.name()} {VERSION} is up to date.")
             return
+        if quiet and self.settings.get("auto_update", True) and not self.replying() and self.safe_to_auto_update():
+            self.notify(f"Updating Yo Claude to {remote}… it restarts in a moment. Background tasks keep running.")
+            return self.install_update()
         if quiet:
             if self.update_info.get("announced") != remote:
                 self.notify(f"Yo Claude {remote} is available (you have {VERSION}). "
@@ -300,6 +305,15 @@ class App:
                         "Check for updates again when it's done.")
             return
         self.notify(f"Updating {self.name()}… it restarts in a moment. Background tasks keep running.")
+        self.install_update()
+
+    def safe_to_auto_update(self):
+        """Only a plain install: a dev clone (uncommitted changes, or commits not on GitHub yet) is never pulled under you."""
+        if self.git("status", "--porcelain", "--untracked-files=no").stdout.strip():
+            return False
+        return self.git("rev-list", "--count", "@{upstream}..HEAD").stdout.strip() == "0"
+
+    def install_update(self):
         subprocess.Popen(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
                           os.path.join(HERE, "install.ps1"), "-Update"], cwd=HERE,
                          creationflags=subprocess.CREATE_NEW_CONSOLE)
@@ -623,6 +637,7 @@ class App:
             pystray.MenuItem("Keep the screen on too", toggle("keep_screen_on"), checked=checked("keep_screen_on")),
             pystray.MenuItem("Launch with Windows", toggle("launch_at_login", set_launch_at_login),
                              checked=checked("launch_at_login")),
+            pystray.MenuItem("Update automatically", toggle("auto_update"), checked=checked("auto_update")),
             pystray.Menu.SEPARATOR,
             pystray.MenuItem("Train the wake word…", lambda: self.open_training()),
             pystray.MenuItem("Check for updates…",
