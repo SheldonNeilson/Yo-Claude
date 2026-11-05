@@ -61,6 +61,11 @@ body.resizing iframe, body.resizing video { pointer-events: none; }
 #folderBox button { border: 0; border-left: 1px solid var(--line2); padding: 0 7px; }
 #toast { position: fixed; bottom: 70px; left: 50%; transform: translateX(-50%); background: var(--orange); color: var(--bg);
          padding: 3px 12px; font-weight: bold; z-index: 70; box-shadow: 3px 3px 0 #000; }
+#toast.ask { background: var(--amber); color: var(--bg); cursor: pointer; pointer-events: auto; font-weight: bold; }
+.askpill { display: inline-block; margin-right: 5px; padding: 0 5px; font-size: 10px; font-weight: bold; background: var(--amber); color: var(--bg);
+  animation: askblink 1.2s steps(2, jump-none) infinite; }
+@keyframes askblink { 50% { opacity: .55; } }
+.session.asking .t { color: var(--amber); }
 #toast.error { background: #2a1210; color: var(--red); border: 1px solid var(--red); font-weight: normal; max-width: 80vw; }
 #toast.error::before { content: "✗ "; font-weight: bold; }
 .rp-error { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; text-align: center;

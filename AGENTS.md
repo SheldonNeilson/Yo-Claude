@@ -48,6 +48,7 @@ Read at startup and by Tools > Reload plugins (Tools > Open plugins folder). Spe
   the plugin, not to Claude.
 - Failures are isolated: a bad manifest is skipped and reported in a toast; a failing command shows an error in the session.
 - Plugins run commands as the user (no sandbox): they are trusted local scripts. Keep any plugin with private data or
+- **Keep a plugin self-contained**: its scripts and config live in its own folder and the manifest refers to them as `{plugin_dir}` (also each command's working directory), so copying the folder shares it; per-user data goes under `%LOCALAPPDATA%`, never inside.
   private paths in `~/.yoclaude/plugins`, never in the repo. `YOCLAUDE_PLUGINS_DIR` overrides the folder (for tests).
 
 ## Avatar training plan (the six faces): status, next steps, open questions

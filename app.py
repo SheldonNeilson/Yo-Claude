@@ -1196,20 +1196,22 @@ class Api:
     def list_sessions(self, cwd):
         return self._app.router.list(cwd)
 
-    def send(self, text, attachments=None, images=None):
-        """attachments: folder-relative paths; images: data: URLs pasted into the box."""
+    def send(self, text, attachments=None, images=None, sid=None):
+        """attachments: folder-relative paths; images: data: URLs pasted into the box; sid: the session the window is showing
+        (so a message can never land in a different conversation than the one you are looking at)."""
         text = (text or "").strip()
         attachments, images = attachments or [], images or []
         if not text and not attachments and not images:
             return
-        cwd = self._cwd()
+        shown = self._app.router.live.get(sid) if sid else None
+        cwd = shown.cwd if shown else self._cwd()
         context = "\n\n".join(workspace.attachment_text(cwd, p) for p in attachments) if cwd else ""
         pics = []
         for url in images:
             head, _, data = url.partition(",")
             if head.startswith("data:image/") and ";base64" in head:
                 pics.append((head[5:].split(";")[0], data))
-        self._app.router.send(text or "(see attached)", context=context, attachments=attachments, images=pics)
+        self._app.router.send(text or "(see attached)", sid=sid, context=context, attachments=attachments, images=pics)
 
     def stop(self):
         self._app.commands.put("stop")

@@ -69,7 +69,7 @@ function showContext() {
     `${mem ? `<h4>memory files</h4><table class="ctxtab">${mem}</table>` : ""}</div></div>` +
     (tips.length ? `<ul class="tips">${tips.map((t) => `<li>${esc(t)}</li>`).join("")}</ul>` : "")));
   if (c.servers || c.skills) d.appendChild(loadoutView(c));
-  addButtons(d, [["compact this conversation", () => { closeModal(); api().send("/compact"); }],
+  addButtons(d, [["compact this conversation", () => { closeModal(); api().send("/compact", [], [], S.active?.id); }],
                  ["new session", () => { closeModal(); api().new_session(); }], ["close", closeModal, "primary"]]);
 }
 $("#ctxMeter").onclick = showContext;

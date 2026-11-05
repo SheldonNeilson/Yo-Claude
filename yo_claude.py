@@ -804,7 +804,7 @@ class Assistant:
             return heard
         self.emit("dictation", session=sid, stage="heard", text=heard)
         try:
-            fixed = self.router.tidy(heard, sid).result(TIDY_TIMEOUT_S) or heard
+            fixed = self.router.tidy(heard, sid, voice=True).result(TIDY_TIMEOUT_S) or heard
         except Exception as e:
             log.info("Couldn't fix what was heard (%s): sending it as it is", e or type(e).__name__)
             fixed = heard

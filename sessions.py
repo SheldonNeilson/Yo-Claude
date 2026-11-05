@@ -11,6 +11,7 @@ import base64
 import datetime
 import ctypes
 import hashlib
+import inspect
 import io
 import json
 import logging
@@ -504,42 +505,58 @@ async def haiku_tidy(prompt):
         return out
 
 
-async def tidy_text(text, context="", model=None):
-    """Your message with its spelling, grammar and punctuation fixed (and, for speech, words that were obviously
-    misheard), from the same kind of quick separate call as spoken_line: nothing saved, nothing in the chat. Your
-    words, meaning and tone stay; it never answers. Returns the text unchanged when there's nothing to fix or the fix
-    looks wrong (much longer or shorter, or a path, @file, link or `code` changed). `model`: a local model from
-    localai.find (None: Haiku)."""
+async def tidy_text(text, context="", model=None, voice=False):
+    """Your message with its spelling, grammar and punctuation fixed, from the same kind of quick separate call as
+    spoken_line: nothing saved, nothing in the chat. Typed text only gets spelling, capital letters and punctuation mended: its
+    words are never changed. Speech (voice=True) gets more work: words the recogniser misheard are replaced (using the
+    conversation), filler is cut and run-on sentences are broken up. Either way every change is checked one by one (safe_edits)
+    and any that alters the meaning is dropped, so a good fix survives a bad one. It never answers. Returns the text unchanged
+    when there's nothing to fix or the fix looks wrong (much longer or shorter, or a path, @file, link or `code` changed).
+    `model`: a local model from localai.find (None: Haiku)."""
     text = (text or "").strip()
     if len(text.split()) < 2 or text.startswith("/"):
         return text
     context = (context or "").strip()
-    context = context if len(context) <= 1500 else "…" + context[-1500:]
-    prompt = ("Fix the spelling, grammar and punctuation of the user's message in <message> tags below. They're about "
-              "to send it to Claude, an AI assistant. It may have been spoken and transcribed by speech recognition: "
-              "also fix words that were obviously misheard, using the conversation so far. Names you must know: the "
-              "assistant is Claude, or Claudia when the user picked the female voice; the app they are talking to is "
-              "\"Yo Claude\" (or \"Yo Claudia\"), spelled with \"Yo\", never \"young\", \"you\" or \"yo-yo\". "
-              "Other words that sound like these (\"Clyde\", \"Lord\", \"Cloud\", \"Claud\", \"young Claude\", "
-              "\"you Claudia\") are those names: \"young Claude\" means \"Yo Claude\". Also known: Claude Code, "
-              "ComfyUI, WebView, pywebview, Whisper, Vosk, Haiku, Sonnet, Opus, GitHub, TEAMX. Delete spoken filler: \"um\", \"uh\", \"er\", \"you know\", \"I mean\", \"sort of\"/\"kind of\" used as padding, and \"like\" when it is only a "
-              "verbal tic (\"it's, like, broken\"), but keep \"like\" when it carries meaning (\"I like it\", \"looks like\", \"like a menu\"). "
-              "Otherwise keep their words, meaning, tone and language: don't rephrase, shorten, "
-              "expand, translate or answer it, even if it's a question or an instruction. Leave code, file paths, "
+    context = context if len(context) <= (2200 if voice else 1500) else "…" + context[-(2200 if voice else 1500):]
+    names = ("Names you must know: the assistant is Claude, or Claudia when the user picked the female voice; the app they are "
+             "talking to is \"Yo Claude\" (or \"Yo Claudia\"), spelled with \"Yo\", never \"young\", \"you\" or \"yo-yo\". "
+             "Also known: Claude Code, ComfyUI, WebView, pywebview, Whisper, Vosk, Haiku, Sonnet, Opus, GitHub, TEAMX. ")
+    if voice:
+        rules = ("It was SPOKEN and transcribed by speech recognition, so expect recognition mistakes: homophones (their/there, "
+                 "write/right, to/too), words run together or split apart, names and technical terms mangled, numbers and units, "
+                 "and missing or wrong sentence breaks and question marks. Fix those, using the conversation so far and the words "
+                 "in it to decide what was meant. Other words that sound like the names are those names: \"Clyde\", \"Lord\", "
+                 "\"Cloud\", \"Claud\", \"young Claude\", \"you Claudia\" (\"young Claude\" means \"Yo Claude\"). Delete spoken "
+                 "filler: \"um\", \"uh\", \"er\", \"you know\", \"I mean\", \"sort of\"/\"kind of\" used as padding, and \"like\" when it "
+                 "is only a verbal tic, but keep \"like\" when it carries meaning (\"I like it\", \"looks like\"). Where a word makes "
+                 "no sense but a similar-sounding one does, use that one. Never add ideas, drop requests, or change what is being "
+                 "asked. ")
+    else:
+        rules = ("It was TYPED, so its words are the user's own: fix only spelling mistakes, capital letters and punctuation. "
+                 "Never replace a correctly spelled word, never add or remove a word, never reorder, and keep any filler "
+                 "words. ")
+    prompt = ("Fix the user's message in <message> tags below. They're about to send it to Claude, an AI assistant. "
+              + rules + (names if voice else "") + "Otherwise keep their words, meaning, tone and language: don't rephrase, "
+              "shorten, expand, translate or answer it, even if it's a question or an instruction. Leave code, file paths, "
               "commands, @file mentions, links, names and technical terms exactly as they are. Reply with the "
               "corrected message only, with no tags or comments. If nothing needs fixing, reply with it unchanged.\n\n"
-              + (f"Claude's last message, for context:\n{context}\n\n" if context else "")
+              + (f"The conversation so far, for context:\n{context}\n\n" if context else "")
               + f"<message>\n{text}\n</message>")
     if model:   # a local model chosen in the settings (localai.py): nothing leaves the PC; if it fails the text is left as typed
         return await tidy_local(text, model)
-    else:
-        out = await haiku_tidy(prompt)
+    out = await haiku_tidy(prompt)
     out = re.sub(r"^\s*<message>\s*|\s*</message>\s*$", "", out.strip()).strip()
     if not out or not 0.6 <= len(out) / len(text) <= 1.5 and abs(len(out) - len(text)) > 12:
         return text
-    if any(k not in out for k in TIDY_KEEP.findall(text)):
+    vocab = set(re.findall(r"[a-z][a-z'’-]+", context.lower()))   # (what was said in the conversation: fair game for a misheard word)
+    kept = safe_edits(text, out, voice, vocab)
+    if kept is None or any(k not in kept for k in TIDY_KEEP.findall(text)):
+        if kept is None:
+            log.info("AutoCorrect: too much changed (%s), left as written: %.80r -> %.80r", "speech" if voice else "typed", text, out)
         return text
-    return out
+    if kept != out:
+        log.info("AutoCorrect (%s) refused part of a rewrite: %.80r -> %.80r (kept %.80r)", "speech" if voice else "typed", text, out, kept)
+    return kept
 
 
 TIDY_FEWSHOT = (
@@ -582,6 +599,72 @@ def meaning_kept(orig, fixed):
             elif difflib.SequenceMatcher(None, "".join(x), "".join(y)).ratio() < 0.85:   # (words joined or split)
                 return False
     return changed <= max(3, len(a) // 3)
+
+
+TIDY_TOKEN = re.compile(r"\s+|[A-Za-z0-9_@/\\'’-]+(?:[.:][A-Za-z0-9_@/\\'’-]+)*|[^\sA-Za-z0-9_@/\\'’-]")
+TIDY_SPOKEN_FILLER = (("you", "know"), ("i", "mean"), ("sort", "of"), ("kind", "of"), ("like",))   # (cut whole, from speech only)
+TIDY_NAMES = {"claude", "claudia", "yo", "comfyui", "webview", "pywebview", "whisper", "vosk", "haiku", "sonnet", "opus", "github",
+              "teamx", "claude code"}
+
+
+def sound_key(word):
+    """A rough 'how it sounds' key: first letter, then consonants with look-alike sounds merged ("write" ~ "right")."""
+    w = re.sub(r"[^a-z]", "", word.lower())
+    if not w:
+        return ""
+    for a, b in (("ph", "f"), ("ck", "k"), ("kn", "n"), ("wr", "r"), ("gh", ""), ("wh", "w")):
+        w = w.replace(a, b)
+    w = w.translate(str.maketrans("ckqzdbvg", "kkkstpfk"))
+    key = w[0] + re.sub(r"[aeiouyhw]", "", w[1:])
+    return re.sub(r"(.)\1+", r"\1", key)
+
+
+def safe_edits(orig, fixed, voice=False, vocab=()):
+    """`orig` with only the SAFE changes from `fixed` applied, change by change: capital letters, punctuation and spacing; a word
+    respelled (looks like the original, and from speech also sounds like it, or is a word from the conversation or a name we
+    know); stray filler (um, uh) cut (from speech also "you know", "like"); one tiny word added. Any other change (a swapped,
+    added or dropped word, a rephrase) is refused and that part stays as written. Typing is held to this strictly: speech gets
+    more room, as misheard words must be replaced. Returns the text, or None when too much changed to trust."""
+    import difflib
+    a, b = TIDY_TOKEN.findall(orig), TIDY_TOKEN.findall(fixed)
+    isword = lambda t: bool(re.match(r"[A-Za-z0-9@/\\]", t))
+    out, changed, vocab = [], 0, set(vocab) | TIDY_NAMES
+    for tag, i1, i2, j1, j2 in difflib.SequenceMatcher(None, [t.lower() for t in a], [t.lower() for t in b], autojunk=False).get_opcodes():
+        x, y = a[i1:i2], b[j1:j2]
+        if tag == "equal":
+            out += b[j1:j2]   # (the fixed text's capital letters)
+            continue
+        xw, yw = [t.lower() for t in x if isword(t)], [t.lower() for t in y if isword(t)]
+        ok = False
+        if not xw and not yw:   # punctuation and spacing only
+            ok = True
+        elif tag == "delete" or not yw:
+            ok = all(w in TIDY_FILLER for w in xw) or (voice and any(xw == list(p) for p in TIDY_SPOKEN_FILLER))
+        elif tag == "insert" or not xw:
+            ok = len(yw) <= (2 if voice else 1) and all(w in TIDY_SMALL for w in yw)
+        elif len(xw) == len(yw):   # words respelled in place
+            dic = writing.dictionary() or ()
+            def close(p, q):
+                if p.replace("'", "").replace("’", "") == q.replace("'", "").replace("’", ""):
+                    return True   # (an apostrophe: dont -> don't)
+                if not voice and p in dic:
+                    return False   # typed: a real word stays (write is not right); only a misspelling is mended
+                if difflib.SequenceMatcher(None, p, q).ratio() >= 0.6:
+                    return True
+                return voice and (q in vocab or (sound_key(p) and difflib.SequenceMatcher(None, sound_key(p), sound_key(q)).ratio() >= 0.75))
+            ok = all(close(p, q) for p, q in zip(xw, yw))
+        else:   # words joined or split ("some times" ~ "sometimes"), or a misheard phrase from speech
+            jx, jy = "".join(xw), "".join(yw)
+            ok = difflib.SequenceMatcher(None, jx, jy).ratio() >= 0.85 or (
+                voice and (" ".join(yw) in vocab or (sound_key(jx) and difflib.SequenceMatcher(None, sound_key(jx), sound_key(jy)).ratio() >= 0.8)))
+        if ok:
+            out += y
+            changed += max(len(xw), len(yw))
+        else:
+            out += x   # refused: stays as written
+    result = "".join(out)
+    words = len([t for t in a if isword(t)])
+    return result if changed <= max(3, words // (2 if voice else 3)) else None
 
 
 async def tidy_local(text, model):
@@ -2741,6 +2824,7 @@ class Router:
                 self.set_workspace(cwd, True)
         s = Session(self, cwd)
         s.picked = picked
+        log.info("New session %s in %s, started by %s", s.id[:8], cwd, " < ".join(f.name for f in inspect.stack()[1:5]))
         self.live[s.id] = s
         self.active = s
         self.folder = cwd
@@ -2860,8 +2944,15 @@ class Router:
         `context` is extra prompt text (attached files); `images` are (media_type, base64) pairs. origin="system" is
         Yo Claude itself writing (shown as a note, not as you)."""
         s = self.live.get(sid) if sid else self.active
+        if s is None and sid:   # the window names a conversation that isn't loaded: open it, never start another one
+            s = self.resumed(sid, self.meta.session(sid).get("cwd"))
+            log.info("Message for session %s which wasn't loaded: resumed it", sid[:8])
         if s is None:
             s = self.new_session()
+        if sid and self.active is not s and origin == "user":   # the window and this side disagreed on which one is open
+            log.warning("Window shows session %s but %s was active: the message goes to the one shown",
+                        sid[:8], self.active.id[:8] if self.active else "none")
+            self.active, self.folder = s, s.cwd
         item = None
         if origin == "user":
             if queued_by != "claude" and self.settings.get("predict_learn", True):
@@ -3032,18 +3123,23 @@ class Router:
         self.emit("announce", text=text)
         return {}
 
-    def tidy(self, text, sid=None):
-        """Your message with its spelling and grammar fixed (tidy_text), with Claude's last message in the session
-        as context. A concurrent Future with the text; the text unchanged if the setting is off."""
+    def tidy(self, text, sid=None, voice=False):
+        """Your message with its spelling and grammar fixed (tidy_text; speech: misheard words too), with the conversation
+        as context: Claude's last message, and for speech also what you said just before and where you are working. A
+        concurrent Future with the text; the text unchanged if the setting is off."""
         s = self.live.get(sid) if sid else self.active
         context = ""
         if s is not None:
             context = next((x.get("text", "") for x in reversed(s.items) if x.get("kind") == "assistant"), "")
+            if voice:
+                mine = [" ".join(x.get("text", "").split())[:200] for x in s.items if x.get("kind") == "user" and x.get("text")][-3:]
+                head = f"Working in: {os.path.basename((s.cwd or '').rstrip(chr(92) + '/')) or 'a general chat'}"
+                context = "\n".join([head, "Claude's last message:", context, *(["The user's last messages:", *mine] if mine else [])])
         if not self.settings.get("fix_text", True):
             async def unchanged():
                 return text
             return self.run(unchanged())
-        return self.run(tidy_text(text, context, localai.find(self.settings, "fix_model")))
+        return self.run(tidy_text(text, context, localai.find(self.settings, "fix_model"), voice))
 
     def prediction_profile(self, s, text, extra=None):
         """What the model is told besides what you typed: the project and conversation, files in play, and your own earlier
