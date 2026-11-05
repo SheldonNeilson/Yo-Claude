@@ -4,11 +4,21 @@ const $ = (s) => document.querySelector(s);
 // Calls that open things answer with a message when they can't (file gone, no app for it...): show it.
 const REPORTS_ERRORS = new Set(["add_group", "rename_group", "open_path", "open_with", "pop_out", "reveal", "open_in_editor", "term_cd", "term_type_path", "term_run", "open_terminal_external"]);
 const api = () => new Proxy(window.pywebview.api, {
-  get: (t, k) => !REPORTS_ERRORS.has(k) ? t[k] : (...a) => t[k](...a).then((r) => {
-    const err = typeof r === "string" ? r : r?.error;
-    if (err) toast(err, "error");
-    return r;
-  }),
+  get: (t, k) => {
+    if (k === "open_session") return (...a) => t.open_session(...a).then((r) => {
+      if (r?.session && S.active?.id !== r.session.id) handle({ kind: "opened", ...r });
+      return r;
+    });
+    if (k === "new_session") return (...a) => t.new_session(...a).then((s) => {
+      if (s?.id && S.active?.id !== s.id) handle({ kind: "opened", session: s, items: [] });
+      return s;
+    });
+    return !REPORTS_ERRORS.has(k) ? t[k] : (...a) => t[k](...a).then((r) => {
+      const err = typeof r === "string" ? r : r?.error;
+      if (err) toast(err, "error");
+      return r;
+    });
+  },
 });
 const S = { settings: {}, folder: null, workspaces: [], groups: [], groupCwd: {}, groupParent: {}, groupFolders: [], lists: {}, busy: new Set(), bg: new Set(), work: {}, active: null,
             items: [], display: { state: "starting" }, filter: "", manual: {}, more: new Set() };
@@ -121,6 +131,9 @@ function handle(e) {
       confirmBox(`${Who()} is in the middle of a reply in ${e.busy.map((b) => `“${b.title}”`).join(", ")}. ` +
                  "Quitting now cuts it off (background tasks keep running and are picked up after a restart).",
                  () => api().quit(true));
+      break;
+    case "confirm_restart":
+      confirmRestart(e.busy);
       break;
     case "session_rekeyed":   // /clear: the same conversation continues under a new id
       if (S.active && S.active.id === e.old) S.active.id = e.new;
@@ -1816,6 +1829,7 @@ const LOCAL_COMMANDS = [
   ["model", "<fable|opus|sonnet|haiku|default>", "Switch this session's model"],
   ["effort", "<low|medium|high|xhigh|max|default>", "Switch this session's effort"],
   ["context", "", "What's using this conversation's context window"],
+  ["mcp", "", "MCP servers, skills and plugins: switch them on or off"],
   ["usage", "", "Your plan's 5-hour and weekly limits"],
   ["tasks", "", "Background tasks and subagents"],
   ["files", "", "The folder's files"],
@@ -1827,6 +1841,7 @@ const LOCAL_COMMANDS = [
 function runLocalCommand(text) {
   const [, name, arg = ""] = text.match(/^\/(\S+)\s*(.*)$/) || [];
   if (!LOCAL_COMMANDS.some(([n]) => n === name)) return false;
+  if (name === "mcp" && arg.trim()) return false;   // /mcp reconnect|enable|disable <server> is Claude Code's own
   const pick = (sel, wanted, list) => {
     const w = wanted.trim().toLowerCase();
     const hit = list.find(([v, label]) => (w === "default" && !v) || (v && (v.toLowerCase() === w || label.toLowerCase().includes(w))));
@@ -1841,6 +1856,7 @@ function runLocalCommand(text) {
     model: () => pick("#modelSel", arg, MODELS),
     effort: () => pick("#effortSel", arg, EFFORTS),
     context: () => showContext(),
+    mcp: () => { loadoutTab = "mcp"; showContext(); },
     usage: () => showLimits(),
     tasks: () => tab("tasks"), files: () => tab("files"), changes: () => tab("changes"), git: () => tab("git"),
     stop: () => api().stop(),

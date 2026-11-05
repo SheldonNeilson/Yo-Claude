@@ -1052,10 +1052,21 @@ class Session:
                     inp = b.get("input") or {}
                     self.add({"kind": "checklist", "id": b.get("id"), "title": inp.get("title") or "",
                               "items": [str(x) for x in inp.get("items") or []], "status": "past"})
+                elif t == "tool_use" and b.get("name") == "AskUserQuestion":
+                    inp = b.get("input") or {}
+                    qs = [q for q in inp.get("questions") or [] if isinstance(q, dict) and q.get("question")]
+                    ans = inp.get("answers") if isinstance(inp.get("answers"), dict) else {}
+                    self.add({"kind": "question", "id": b.get("id"), "questions": qs,
+                              "answers": ans, "status": "answered" if ans else "pending"})
                 elif t == "tool_use":
                     self.add({"kind": "tool", "id": b.get("id"), "name": b.get("name"), "input": b.get("input", {}),
                               "result": None, "status": "done"})
                 elif t == "tool_result":
+                    qitem = next((x for x in reversed(self.items)
+                                  if x.get("kind") == "question" and x.get("id") == b.get("tool_use_id")), None)
+                    if qitem is not None:
+                        qitem["status"] = "skipped" if b.get("is_error") else "answered"
+                        continue
                     item = self.tool_item(b.get("tool_use_id"))
                     if item:
                         item["result"] = result_text(b.get("content"))
@@ -1070,6 +1081,11 @@ class Session:
                     continue
                 voice = text.startswith("[voice] ")
                 self.add({"kind": "user", "text": text[8:] if voice else text, "voice": voice, "attachments": []})
+        last_item = next((x for x in reversed(self.items)
+                          if x.get("kind") in ("user", "assistant", "question", "tool")), None)
+        for x in self.items:
+            if x.get("kind") == "question" and x.get("status") == "pending" and x is not last_item:
+                x["status"] = "skipped"
 
     # --- SDK plumbing ---
     def options(self):
@@ -3237,6 +3253,17 @@ class Router:
         future = s and s.approvals.get(aid)
         if future:
             self.loop.call_soon_threadsafe(lambda: future.done() or future.set_result(answers))
+            return
+        item = s and next((x for x in s.items if x.get("kind") == "question" and x.get("id") == aid), None)
+        if not item or item.get("status") != "pending":
+            return
+        item["status"] = "answered" if answers else "skipped"
+        item["answers"] = answers or {}
+        s.changed(item)
+        if answers:
+            lines = [f"- {q}: {', '.join(a) if isinstance(a, list) else a}" for q, a in answers.items() if a]
+            if lines:
+                self.send("My answers to your questions:\n" + "\n".join(lines), sid=sid)
 
     def set_permission_mode(self, sid, mode):
         if mode not in ("auto", "default", "acceptEdits", "plan"):

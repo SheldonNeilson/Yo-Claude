@@ -45,6 +45,18 @@ function expandAll(open) {
 }
 async function pastePath() { $("#folderPath").focus(); $("#folderPath").value = (await api().paste_text()) || ""; }
 
+function confirmRestart(busy) {
+  const names = Array.isArray(busy) && busy.length ? busy.map((b) => `“${b.title}”`).join(", ") : "a session";
+  const d = dialog(`Restart ${appName()}?`);
+  const t = el("div", "", esc(`${Who()} is in the middle of a reply in ${names}. It will restart automatically once that reply is done, or you can restart now (background tasks keep running).`));
+  t.style.whiteSpace = "pre-wrap"; d.appendChild(t);
+  addButtons(d, [
+    ["cancel restart", () => { closeModal(); api().cancel_restart(); }],
+    ["when it's done", () => { closeModal(); toast("Restarting once the reply in progress is done"); }],
+    ["restart now", () => { closeModal(); api().restart(true); }, "danger"],
+  ]);
+}
+
 const MENUS = {
   file: () => [
     ["New session", () => api().new_session(), { kbd: "Ctrl+N" }],
@@ -59,8 +71,8 @@ const MENUS = {
     ["Trash…", () => $("#trashBtn").click()],
     "-",
     ["Compact mode (just the bar)", () => api().compact()],
-    [`Restart ${appName()}`, async () => { if (await api().request_restart()) toast("Restarting once the reply in progress is done"); }],
-    ["Exit", () => api().request_quit()],
+    [`Restart ${appName()}`, async () => { const r = await api().request_restart(); if (r) confirmRestart(r.busy); }],
+    ["Exit", async () => { const r = await api().request_quit(); if (r?.busy) handle({ kind: "confirm_quit", busy: r.busy }); }],
   ],
   edit: () => [
     ["Copy", () => copyText(getSelection().toString()), { kbd: "Ctrl+C", disabled: !getSelection().toString() }],

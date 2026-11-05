@@ -80,9 +80,11 @@ function loadoutView(c) {
   const off = c.off || { mcp: [], skills: [], plugins: [] };
   const wrap = el("div", "loadout");
   const pending = new Set();   // switched since this was measured: applies from the next message
+  const listed = new Set(off.mcp);   // off when this opened: still listed once switched on (it starts from the next message)
   const draw = () => {
     const servers = [...(c.servers || [])];
-    for (const n of off.mcp) if (!servers.some((s) => s.name === n)) servers.push({ name: n, status: "off", tools: 0, tokens: 0 });
+    for (const n of new Set([...listed, ...off.mcp])) if (!servers.some((s) => s.name === n))
+      servers.push({ name: n, status: off.mcp.includes(n) ? "off" : "not started", tools: 0, tokens: 0 });
     const skills = c.skills || [];
     const groups = new Map();   // plugin id ("" = your own and the folder's skills) -> skills
     for (const k of skills) {   // plugins by id; your own skills and the folder's under "~user" / "~project"

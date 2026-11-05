@@ -86,6 +86,53 @@ def display_state(voice, work):
 BAR_FEED = {"item", "delta", "opened", "settings", "speech", "mood"}
 
 
+def patch_webview():
+    """pywebview's EdgeChrome.evaluate_js waits on a Semaphore with no timeout, and its ContinueWith callback doesn't
+    release the semaphore if task.Result / json.loads fails or the delegate is collected before ExecuteScriptAsync
+    finishes. One lost callback freezes the caller thread (such as App.dispatch or a js_bridge_call) for good."""
+    try:
+        from System import Action, Func, Object, String
+        from System.Threading.Tasks import Task
+        from webview.platforms import edgechromium
+    except Exception as e:
+        log.debug("patch_webview: %s", e)
+        return
+
+    def evaluate_js(self, script: str, parse_json: bool):
+        result = None
+        semaphore = threading.Semaphore(0)
+
+        def on_done(task):
+            nonlocal result
+            try:
+                raw = task.Result
+                res = json.loads(raw) if raw is not None else None
+                if parse_json and res is not None:
+                    try:
+                        result = json.loads(res)
+                    except Exception:
+                        result = res
+                else:
+                    result = res
+            except Exception as e:
+                log.debug("evaluate_js callback failed: %s", e)
+            finally:
+                semaphore.release()
+
+        cont = Action[Task[String]](on_done)
+        start = Func[Object](lambda: self.webview.ExecuteScriptAsync(script).ContinueWith(
+            cont, self.syncContextTaskScheduler))
+        try:
+            self.webview.Invoke(start)
+            if not semaphore.acquire(timeout=5.0):
+                log.warning("evaluate_js timed out after 5s")
+        except Exception:
+            log.debug("evaluate_js invoke failed", exc_info=True)
+        return result
+
+    edgechromium.EdgeChrome.evaluate_js = evaluate_js
+
+
 class App:
     def __init__(self, args):
         self.args = args
@@ -338,11 +385,35 @@ class App:
         self.push(self.bar, bar_events)
 
     def push(self, window, events):
-        if events and self.ready.get(window):
-            try:
-                window.evaluate_js(f"window.app && app.events({json.dumps(events, default=str)})")
-            except Exception as e:
-                log.debug("push failed: %s", e)
+        if not events or not self.ready.get(window):
+            return
+        if window is self.bar and not getattr(self, "bar_shown", False):
+            return
+        script = f"window.app && app.events({json.dumps(events, default=str)})"
+        try:
+            from System import Action
+            form = window.native
+            if form and not form.IsDisposed:
+                pending = getattr(self, "_pending_js", None)
+                if pending is None:
+                    pending = self._pending_js = set()
+
+                def run():
+                    try:
+                        if not form.IsDisposed:
+                            form.browser.webview.ExecuteScriptAsync(script)
+                    except Exception as e:
+                        log.debug("push script failed: %s", e)
+                    finally:
+                        pending.discard(act)
+
+                act = Action(run)
+                pending.add(act)
+                form.BeginInvoke(act)
+                return
+            window.run_js(script)
+        except Exception as e:
+            log.debug("push failed: %s", e)
 
     def emit_settings(self):
         self.bus.put(("settings", {"settings": dict(self.settings)}))
@@ -453,8 +524,19 @@ class App:
                     self.bar.show()
                     self.style_bar()
                     self.place_bar(getattr(self, "bar_height", 56))
+                    self.sync_bar()
                 else:
                     self.bar.hide()
+
+    def sync_bar(self):
+        """Bring the floating bar up to date when it appears (events aren't pushed to it while it's hidden)."""
+        active = self.router.active
+        evs = [{"kind": "settings", "settings": dict(self.settings)},
+               {"kind": "display", "state": self.display, "voice": self.voice_state,
+                "work": self.work_state, "text": self.voice_text, "hold": self.voice_hold}]
+        if active:
+            evs.append({"kind": "opened", "session": self.router.describe(active), "items": active.items})
+        self.push(self.bar, evs)
 
     def main_on_screen(self):
         """Whether the main window is really on screen (not hidden, not minimised), asked of Windows rather than taken from
@@ -522,6 +604,7 @@ class App:
             pystray.MenuItem("Check for updates…",
                              lambda: threading.Thread(target=self.check_updates, daemon=True).start()),
             pystray.MenuItem("Open log", lambda: os.startfile(LOG_PATH)),
+            pystray.MenuItem("Restart", lambda: self.request_restart_tray()),
             pystray.MenuItem("Quit", lambda: self.request_quit()),
         )
         icon = pystray.Icon("YoClaude", icons.tray_frame("starting", 0), f"{self.name()} – starting", menu)
@@ -607,6 +690,15 @@ class App:
                           f"Start-Sleep -Seconds 4; Start-Process '{exe}' -ArgumentList '\"{os.path.join(HERE, 'app.py')}\"' "
                           f"-WorkingDirectory '{HERE}'"], creationflags=subprocess.CREATE_NO_WINDOW)
         self.quit()
+
+    def request_restart_tray(self):
+        """From the tray: restart now if idle, else open the window and ask."""
+        busy = self.replying()
+        if not busy:
+            return self.restart()
+        open(os.path.join(DATA_DIR, "restart-request"), "w").close()
+        self.show_main()
+        self.bus.put(("confirm_restart", {"busy": busy}))
 
     def request_quit(self):
         """From the tray: ask first if a reply is in progress."""
@@ -1055,7 +1147,8 @@ class Api:
             webbrowser.open(url)
 
     def open_session(self, sid, cwd):
-        self._app.router.open(sid, cwd)
+        s = self._app.router.open(sid, cwd)
+        return {"session": self._app.router.describe(s), "items": s.items}
 
     def list_sessions(self, cwd):
         return self._app.router.list(cwd)
@@ -1467,12 +1560,35 @@ class Api:
         os.startfile(DATA_DIR)
 
     def request_quit(self):
-        threading.Thread(target=self._app.request_quit, daemon=True).start()
+        busy = self._app.replying()
+        if not busy:
+            threading.Thread(target=self._app.quit, daemon=True).start()
+            return None
+        return {"busy": busy}
 
     def request_restart(self):
-        """File > Restart: once no session is in the middle of a reply (see App.restart_when_asked)."""
+        """File > Restart: restart at once if idle; if a session is mid-reply, queue restart-request and return busy."""
+        busy = self._app.replying()
+        if not busy:
+            self.restart(force=True)
+            return None
         open(os.path.join(DATA_DIR, "restart-request"), "w").close()
-        return "busy" if self._app.replying() else None
+        return {"busy": busy}
+
+    def restart(self, force=False):
+        a = self._app
+        if force or not a.replying():
+            try:
+                os.remove(os.path.join(DATA_DIR, "restart-request"))
+            except OSError:
+                pass
+            threading.Thread(target=a.restart, daemon=True).start()
+
+    def cancel_restart(self):
+        try:
+            os.remove(os.path.join(DATA_DIR, "restart-request"))
+        except OSError:
+            pass
 
     def quit(self, force=False):
         a = self._app
@@ -1533,6 +1649,7 @@ def main():
         return
 
     ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(APP_ID)   # own taskbar button, not Python's
+    patch_webview()
     import consoles
     consoles.start()   # console windows of commands Claude runs: hidden as they appear, so they can't take the keyboard
                        # (and a window that pops up while you type in the message box gives the keyboard back)
