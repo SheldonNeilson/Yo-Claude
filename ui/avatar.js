@@ -11,9 +11,9 @@ const AW = 128;                // the analysis grid frames are decoded to (colum
 // clips that read wrongly when they play at random: kept on disk, never played. think_tap_lips is a straight finger on the
 // lips (a shush: for shushing only, never idling); listen_lean leans in with the mouth wide open, and idle_s_swallow opens it
 // too, which looks odd when it comes round again and again; idle_sigh opens it wide (a sigh should be head back, subtle).
-const HIDDEN = ["think_tap_lips", "listen_lean", "idle_s_swallow", "idle_sigh", "idle_thumbs_up", "idle_breathe_deep", "idle_curious"];   // (listen_lean_closed and idle_sigh_soft replace two of them; breathe_deep opens the mouth wide and contorts, curious puckers or goes wide-eyed)
-const PACE_ABOVE = 1.35;       // a clip peaking this many times above the typical clip's peak speed is slowed to match
-const PACE_TYPICAL = 5;         // ...and "typical" is never taken as faster than this: a character whose whole pool moves fast
+const HIDDEN = ["think_tap_lips", "listen_lean", "idle_s_swallow", "idle_sigh", "idle_thumbs_up", "idle_breathe_deep", "idle_curious", "idle_s_lips_purse"];   // (listen_lean_closed and idle_sigh_soft replace two of them; breathe_deep opens the mouth wide and contorts, curious puckers or goes wide-eyed, lips_purse is a kiss)
+const PACE_ABOVE = 1.25;       // a clip peaking this many times above the typical clip's peak speed is slowed to match
+const PACE_TYPICAL = 4;         // ...and "typical" is never taken as faster than this: a character whose whole pool moves fast
                                 // (Female 1's typical clip measures about 8, the others 4 to 6) is slowed as a whole, not only her outliers
 const COLS = 64;               // characters across, whatever the panel's width
 const VIEW = [0, 0, 1, 1];     // the part of the clip shown: left, top, right, bottom (fractions; see frameView)
@@ -105,7 +105,7 @@ const avatar = {
     const typical = Math.min(PACE_TYPICAL, vals[Math.floor(vals.length / 2)] || 0);
     this.pace = {};
     if (!typical) return;
-    for (const [name, m] of Object.entries(peak)) this.pace[name] = m > typical * PACE_ABOVE ? Math.max(0.3, (typical * PACE_ABOVE) / m) : 1;
+    for (const [name, m] of Object.entries(peak)) this.pace[name] = m > typical * PACE_ABOVE ? Math.max(0.4, (typical * PACE_ABOVE) / m) : 1;
   },
   // frame `f`, or if that's in a blink, the first frame past it going `dir` (past back-to-back blinks too)
   stepPast(f, dir, frames) {
@@ -297,7 +297,7 @@ const avatar = {
   nextIdle(now) {
     this.microClip = null; this.restUntil = 0;
     // each play of a clip a little different: its own speed, and a pause at the turn now and then (an expression held)
-    this.speed = 0.6 + Math.random() * 0.55; this.holdFor = Math.random() < 0.45 ? 300 + Math.random() * 1400 : 0;
+    this.speed = 0.55 + Math.random() * 0.4; this.holdFor = Math.random() < 0.45 ? 300 + Math.random() * 1400 : 0;
     if (this.idleExtra && this.clip === this.idleExtra && !this.extraPending) {   // just played: the next in a while
       this.idleExtra = null; this.nextIdleExtra = now + 14000 + Math.random() * 14000;   // (a whole one now and then)
     }
@@ -325,7 +325,7 @@ const avatar = {
   },
   // how far into a clip she goes in a busy state: all the way just after the state changed, else only a hint of it
   pickTurn(st) {
-    this.speed = 0.6 + Math.random() * 0.5;
+    this.speed = 0.55 + Math.random() * 0.4;
     const shut = this.shutAt?.[this.clip] ?? 99, n = this.clips[this.clip]?.length || 61;
     if (st === "speaking") { this.turnAt = 0; return; }
     if (this.bigNext) { this.bigNext = false; this.turnAt = shut < n ? shut - 1 : 0; return; }   // (up to any eyes-shut stretch)
@@ -388,7 +388,7 @@ const avatar = {
     }
     if (want !== this.clip && !this.rewinding) this.rewinding = true;   // back to the shared start frame first
     if (this.rewinding) {
-      this.frame = this.stepPast(Math.max(0, this.frame - 3), -1, frames);   // (no blink on the way back either)
+      this.frame = this.stepPast(Math.max(0, this.frame - 2), -1, frames);   // (no blink on the way back either)
       if (this.frame === 0) {
         this.rewinding = false; this.dir = 1;
         if (st === "idle") this.nextIdle(now); else { this.clip = want; this.pickTurn(st); }
