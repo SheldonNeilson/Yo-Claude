@@ -1545,12 +1545,32 @@ function mediaThumb(path, cwd, info) {
   });
   return box;
 }
-function mediaUnder(node, it) {
-  // Paths a reply mentions become links (click: preview, right-click: open with...; folders open in Explorer), and
-  // pictures, video, audio and PDFs among them are shown underneath it.
+// Bare paths in running text (no backticks): drive-letter paths without spaces. Paths with spaces need backticks.
+const PLAIN_PATH_RE = /[A-Za-z]:[\\/][^\s`"'<>|*?()\[\]]*[^\s`"'<>|*?()\[\]:;,.!]/g;
+function wrapPlainPaths(node) {   // wrap them in <span class="pathtxt"> so they get linked like the ones in `code`
+  const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT, {
+    acceptNode: (t) => t.parentElement.closest("pre, code, a, .pathlink, .pathtxt, .more") ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT });
+  const texts = []; while (walker.nextNode()) texts.push(walker.currentNode);
+  const spans = [];
+  for (const t of texts) {
+    const text = t.nodeValue; let last = 0, frag = null;
+    for (const m of text.matchAll(PLAIN_PATH_RE)) {
+      frag ||= document.createDocumentFragment();
+      frag.appendChild(document.createTextNode(text.slice(last, m.index)));
+      const sp = el("span", "pathtxt"); sp.textContent = m[0]; frag.appendChild(sp); spans.push(sp);
+      last = m.index + m[0].length;
+    }
+    if (frag) { frag.appendChild(document.createTextNode(text.slice(last))); t.replaceWith(frag); }
+  }
+  return spans;
+}
+function mediaUnder(node, it, { thumbs = true } = {}) {
+  // Paths a reply (or a thought) mentions become links (click: preview, right-click: open with...; folders open in Explorer), and
+  // pictures, video, audio and PDFs among them are shown underneath a reply.
   const codes = [...node.querySelectorAll("code")].filter((c) => !c.closest("pre"));
+  codes.push(...wrapPlainPaths(node));
   const tokens = new Set(codes.map((c) => c.textContent.trim()).filter(looksLikePath));
-  for (const m of (it.text || "").match(MEDIA_RE) || []) tokens.add(m.trim());
+  if (thumbs) for (const m of (it.text || "").match(MEDIA_RE) || []) tokens.add(m.trim());
   if (!tokens.size) return;
   const cwd = S.active?.cwd;
   const show = (list) => {
@@ -1560,7 +1580,7 @@ function mediaUnder(node, it) {
       if (!m) continue;
       c.classList.add("pathlink");
       c.title = m.kind === "dir" ? "Open this folder · right-click for more" : "Preview · right-click for open with…";
-      c.onclick = () => m.kind === "dir" ? api().open_path(m.path, "open") : viewFile(m.path, cwd);
+      c.onclick = (e) => { e.stopPropagation(); return m.kind === "dir" ? api().open_path(m.path, "open") : viewFile(m.path, cwd); };
       c.oncontextmenu = (e) => {
         if (m.kind !== "dir") return showFileMenu(e, m.path, cwd);
         e.preventDefault(); e.stopPropagation();
@@ -1569,14 +1589,16 @@ function mediaUnder(node, it) {
           ["copy path", () => copyText(m.path, "path copied")]]);
       };
     }
+    if (!thumbs) return;
     const seen = new Set(), media = list.filter((m) => !["dir", "file"].includes(m.kind) && !seen.has(m.path) && seen.add(m.path));
     if (!media.length) return;
     const strip = el("div", "thumbs");
     for (const m of media) strip.appendChild(mediaThumb(m.path, cwd, m));
     node.appendChild(strip);
   };
-  if (mediaCache.has(it.i)) return show(mediaCache.get(it.i));
-  api().resolve_paths([...tokens], cwd).then((list) => { mediaCache.set(it.i, list || []); show(list || []); });
+  const key = it.i + "|" + [...tokens].join("\n");   // thoughts change text as they expand: key by the tokens too
+  if (mediaCache.has(key)) return show(mediaCache.get(key));
+  api().resolve_paths([...tokens], cwd).then((list) => { mediaCache.set(key, list || []); show(list || []); });
 }
 function viewFile(path, cwd, opts = {}) { return docs.open(path, cwd, opts); }   // files open in the file pane (docs.js)
 async function viewFileModal(path, cwd, opts = {}) {   // (the old pop-up viewer, kept as a fallback)
@@ -1620,6 +1642,7 @@ function thoughtBubble(it) {
   n.innerHTML = `<span class="ttext">${esc(it.expanded || !cut ? text : "… " + tail) || (it.streaming ? "" : "(nothing to show)")}</span>` +
     (cut ? '<span class="more">▸ all of it</span>' : it.expanded ? '<span class="more">▾ less</span>' : "");
   n.dataset.tip = it.expanded ? "Click to show less" : `${Who()}'s thinking · click to read all of it`;
+  if (!it.streaming) mediaUnder(n, it, { thumbs: false });   // paths in a thought are links too
   n.onclick = (e) => {
     if (getSelection().toString()) return;   // selecting text to copy, not toggling
     e.stopPropagation(); it.expanded = !it.expanded; renderItem(it);

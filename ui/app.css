@@ -262,8 +262,8 @@ pre:hover .codecopy { opacity: 1; }
 .add { color: var(--green); } .del { color: var(--red); }
 #branchPill { cursor: pointer; }
 .dialog.wide { width: min(1100px, 90vw); max-width: 96vw; max-height: 94vh; resize: both; overflow: auto; }
-code.pathlink { cursor: pointer; text-decoration: underline dotted; text-underline-offset: 3px; }
-code.pathlink:hover { color: var(--orange2); background: var(--bg3); }
+code.pathlink, .pathtxt.pathlink { cursor: pointer; text-decoration: underline dotted; text-underline-offset: 3px; }
+code.pathlink:hover, .pathtxt.pathlink:hover { color: var(--orange2); background: var(--bg3); }
 .viewer { max-height: 62vh; overflow: auto; background: #0b0b0a; border: 1px solid var(--line); padding: 8px; margin: 0; }
 .viewer.diff .hunk { color: var(--blue); display: block; }
 .viewer.diff span { display: block; white-space: pre; }
