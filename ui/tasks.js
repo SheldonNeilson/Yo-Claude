@@ -179,9 +179,16 @@ Click to see its output`;
     const copy = el("button", "", "copy");
     copy.onclick = () => copyText(this.output?.text ?? $("#taskOut")?.textContent ?? "", "output copied");
     bar.appendChild(copy);
+    const whole = t.kind === "shell" ? (t.command || t.description || "") : "";   // (the whole command: the header only has room for its start)
+    if (whole) {
+      const cc = el("button", "", "copy command");
+      cc.onclick = () => copyText(whole, "command copied");
+      bar.appendChild(cc);
+    }
     bar.appendChild(follow.button("task"));
     top.appendChild(bar);
     body.appendChild(info);
+    if (t.kind === "shell") this.renderFacts(body, t, whole);
     if (this.output?.path) {
       const file = el("button", "", "open file");
       file.onclick = () => api().open_path(this.output.path, "open");
@@ -198,11 +205,39 @@ Click to see its output`;
     }
     const pre = el("pre", "viewer taskout");
     pre.id = "taskOut";
-    pre.textContent = this.output ? (this.output.error || this.output.text || this.output.note || "(no output yet)") : "loading…";
+    pre.textContent = this.output ? (this.output.error || this.output.text || (this.output.note === "Its output file isn't known." ? "(no output file: see above)" : this.output.note) || "(no output yet)") : "loading…";
     body.appendChild(pre);
     if (this.output?.cut) pre.before(el("div", "dim small tcut", "showing the end of the output"));
     follow.bind("task", pre);
     if (follow.on.task) follow.stick("task", pre); else pre.scrollTop = follow.pos.taskOut ?? 0;
+  },
+  // A background command: its whole command (wrapped), when it started, where its output is, and, when Yo Claude has no output
+  // file for it (it started before a restart), the processes it is running as. A command that has said nothing for a long time
+  // is flagged: it may be stuck.
+  renderFacts(body, t, whole) {
+    const facts = el("div", "taskfacts");
+    if (whole) { const c = el("pre", "viewer taskcmd"); c.textContent = whole; facts.appendChild(c); }
+    const rows = [["started", t.started ? `${whenText(t.started)} (${fullWhen(t.started)})` : "unknown"]];
+    if (t.ended) rows.push(["ended", fullWhen(t.ended)]);
+    rows.push(["output", t.output_file ? esc(t.output_file) : "not recorded: it started before Yo Claude last restarted"]);
+    if (t.task_id) rows.push(["task id", esc(t.task_id)]);
+    facts.appendChild(el("div", "tfacts", rows.map(([k, v]) => `<div><span>${k}</span><b>${v}</b></div>`).join("")));
+    const loop = /\b(until|while)\b[\s\S]*\bsleep\b/.test(whole), age = t.started ? Date.now() / 1000 - t.started : 0;   // (a wait loop: polls until something appears)
+    if (t.status === "running" && (t.idle_s > 600 || (loop && age > 900))) {
+      const why = t.idle_s > 600 ? `Its output hasn't changed for ${Math.round(t.idle_s / 60)} minutes.` : `It has been waiting for ${Math.round(age / 60)} minutes.`;
+      facts.appendChild(el("div", "tstuck", `⚠ ${why} If it's a wait loop (until … sleep), its marker may never match: a log written as UTF-16 hides text from grep. You can stop it.`));
+    }
+    body.appendChild(facts);
+    if (t.status === "running" && !t.output_file) {   // nothing to read: show what it runs as, which is all there is to see
+      const ps = el("div", "tprocs", "looking for its process…");
+      facts.appendChild(ps);
+      api().task_processes(t.key).then((found) => {
+        if (this.open !== t.key) return;
+        ps.innerHTML = found && found.length
+          ? "<div class=\"dim small\">Running as:</div>" + found.map((p) => `<div class="tproc"><b>${esc(p.name)}</b> pid ${p.pid}${p.started ? " · started " + esc(whenText(new Date(p.started).getTime() / 1000)) : ""}<br><span class="dim">${esc(p.cmd)}</span></div>`).join("")
+          : "<span class=\"dim\">No process found for it: it has probably ended.</span>";
+      }).catch(() => { ps.textContent = ""; });
+    }
   },
   // A subagent's work laid out like the conversation: its brief, what it said, its tool calls folded into
   // "N steps" (click to see each one; the latest run stays open while it works) and its report back.

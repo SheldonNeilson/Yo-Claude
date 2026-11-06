@@ -236,11 +236,11 @@ pre:hover .codecopy { opacity: 1; }
 .task .tstat { flex: none; width: 1.2em; text-align: center; }
 .task .tspin, .taskhead .tspin { color: #b9a3ff; }
 .task .tmain { min-width: 0; flex: 1; }
-.task .tdesc { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
+.task .tdesc { overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; word-break: break-word; color: var(--text); }   /* two lines of a long command, not one */
 .task.running .tdesc { color: #b9a3ff; }
 .task .tmeta { font-size: 11px; color: var(--faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tsess { color: var(--dim); }
-.taskhead .tdesc { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
+.taskhead .tdesc { min-width: 0; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; word-break: break-word; color: var(--text); }
 .taskout { margin: 0; max-height: none; flex: 1; font-size: 11.5px; white-space: pre-wrap; word-break: break-word; border: 0;
            border-top: 1px solid var(--line); }
 .tcut { padding: 2px 10px; }
@@ -890,3 +890,9 @@ button { white-space: nowrap; }
 #transcript.loading { opacity: .35; transition: opacity .15s; }
 .session.loadingrow .t::before { content: "✻ "; color: var(--orange2); animation: spinload 1s linear infinite; display: inline-block; }
 @keyframes spinload { to { transform: rotate(360deg); } }
+/* a background command's detail: the whole command, its facts, its processes, a warning when it has gone quiet */
+.taskfacts { border-bottom: 1px solid var(--line); }
+.taskcmd { margin: 0; max-height: 9em; overflow: auto; font-size: 11.5px; white-space: pre-wrap; word-break: break-all; border: 0; border-bottom: 1px solid var(--line); }
+.tfacts { padding: 6px 10px; font-size: 12px; } .tfacts div { display: flex; gap: 10px; } .tfacts span { flex: none; width: 5.5em; color: var(--faint); } .tfacts b { font-weight: normal; color: var(--text); word-break: break-all; }
+.tstuck { margin: 0 10px 8px; padding: 5px 8px; border: 1px solid var(--amber); color: var(--amber); font-size: 12px; }
+.tprocs { padding: 0 10px 8px; font-size: 12px; } .tproc { padding: 3px 0; word-break: break-all; }

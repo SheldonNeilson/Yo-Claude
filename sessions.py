@@ -2524,7 +2524,8 @@ class Router:
                 out.append({**base, "key": f"{sid}:{t['task_id']}", "kind": "shell", "task_id": t["task_id"],
                             "description": t.get("description") or "background command", "status": t["status"],
                             "started": t.get("started"), "ended": t.get("ended"), "summary": t.get("summary"),
-                            "detached": bool(t.get("detached")), "output_file": t.get("output_file"), "command": t.get("command")})
+                            "detached": bool(t.get("detached")), "output_file": t.get("output_file"), "command": t.get("command"),
+                            "idle_s": quiet_for(t.get("output_file")) if t["status"] == "running" else None})
             ids = {t.get("tool_use_id"): t["task_id"] for t in shells if t.get("tool_use_id")}
             for a in agents:
                 a["task_id"] = ids.get(a["tool_use_id"])   # background agents can be stopped like commands
@@ -2595,7 +2596,7 @@ class Router:
         snips = {tail, tail.replace("/", chr(92)), tail.replace(chr(92), "/")}
         env = dict(os.environ, YC_SNIPS="\n".join(sorted(snips)))
         ps = ("$s = $env:YC_SNIPS -split \"`n\"; Get-CimInstance Win32_Process | Where-Object { $c = $_.CommandLine; $c -and "
-              "(($s | Where-Object { $c.Contains($_) }).Count -gt 0) } | Select-Object ProcessId,ParentProcessId,Name,CommandLine | ConvertTo-Json -Compress")
+              "(($s | Where-Object { $c.Contains($_) }).Count -gt 0) } | Select-Object ProcessId,ParentProcessId,Name,CommandLine,@{n='Started';e={$_.CreationDate.ToString('s')}} | ConvertTo-Json -Compress")
         try:
             r = subprocess.run(["powershell", "-NoProfile", "-Command", ps], capture_output=True, text=True, timeout=20, env=env,
                                creationflags=subprocess.CREATE_NO_WINDOW)
@@ -2610,7 +2611,7 @@ class Router:
             return ("…" if at > 40 else "") + line[max(0, at - 40):at + 140]
         ids = {int(x["ProcessId"]) for x in rows}
         rows = [x for x in rows if int(x.get("ParentProcessId") or 0) not in ids]   # the top of each chain: ending it ends the rest
-        out = [{"pid": int(x["ProcessId"]), "name": x["Name"], "cmd": around(" ".join(str(x["CommandLine"]).split()), snips)}
+        out = [{"pid": int(x["ProcessId"]), "name": x["Name"], "started": x.get("Started"), "cmd": around(" ".join(str(x["CommandLine"]).split()), snips)}
                for x in rows if int(x["ProcessId"]) != os.getpid() and "pythonw" not in str(x["Name"]).lower()]
         if len(out) > 3:   # that many matches means the text isn't particular enough: better to end nothing than the wrong things
             out = []
@@ -3829,6 +3830,15 @@ def exit_code(path):
     except OSError:
         return None
     return int(found[-1]) if found else None
+
+
+def quiet_for(path):
+    """Seconds since a background command's output file last changed (None: no such file): a running one that has said
+    nothing for a long time may be stuck (a wait loop whose marker never matches)."""
+    try:
+        return max(0, int(time.time() - os.path.getmtime(path))) if path else None
+    except OSError:
+        return None
 
 
 def running_shells():
