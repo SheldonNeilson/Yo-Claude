@@ -1018,6 +1018,7 @@ class Session:
         self.pid = None                     # this session's claude.exe
         self.context = None                 # context window usage, measured after each reply
         self.loading_history, self.history_ts = False, None   # items from history carry their message's time
+        self.quiet = False                  # loading history: no window event per item (the "opened" event carries them all)
 
     @property
     def mode(self):
@@ -1028,11 +1029,13 @@ class Session:
             item["ts"] = self.history_ts if self.loading_history else time.time()
         item["i"] = len(self.items)
         self.items.append(item)
-        self.router.emit("item", session=self.id, item=item)
+        if not self.quiet:
+            self.router.emit("item", session=self.id, item=item)
         return item
 
     def changed(self, item):
-        self.router.emit("item", session=self.id, item=item)
+        if not self.quiet:
+            self.router.emit("item", session=self.id, item=item)
 
     def advisor_said(self, text):
         """Claude's text minus any <advisor> block: the advisor's reply, passed on (ADVISOR_PROMPT). That goes in the
@@ -1061,31 +1064,46 @@ class Session:
 
     def load_history(self):
         """Transcript of an existing session, from its JSONL (with the transcripts before a /clear, as one conversation)."""
-        before = self.router.chain_before(self.id)
-        for pid in before:
-            self.load_transcript(pid, None)
-            self.add({"kind": "note", "text": "Context cleared"})
-        self.load_transcript(self.id, self.rewind_mark())
-        likes = set(self.router.meta.session(self.id).get("likes") or [])
-        for it in self.items if likes else []:
-            if it.get("kind") == "assistant" and like_key(it.get("text")) in likes:
-                it["liked"] = True
-        self.restore_spoken()
+        # (a thousand items sent to the windows one by one, for a conversation they aren't showing yet, only slowed the
+        # open down: the "opened" event that follows has them all)
+        self.quiet = True
+        try:
+            before = self.router.chain_before(self.id)
+            for pid in before:
+                self.load_transcript(pid, None)
+                self.add({"kind": "note", "text": "Context cleared"})
+            self.load_transcript(self.id, self.rewind_mark())
+            likes = set(self.router.meta.session(self.id).get("likes") or [])
+            for it in self.items if likes else []:
+                if it.get("kind") == "assistant" and like_key(it.get("text")) in likes:
+                    it["liked"] = True
+            self.restore_spoken()
+        finally:
+            self.quiet = False
 
     def load_transcript(self, sid, mark):
+        path = self.router.session_file(sid, self.cwd)[1]
+        start = len(self.items)
+        # an earlier transcript (before a /clear) doesn't change any more: its items come from the cache when it has them
+        key = history_cache_key(path) if sid != self.id and mark is None else None
+        cached = history_cache_read(sid, key) if key else None
+        if cached is not None:
+            for it in cached:
+                self.add(it)   # (each keeps its own time)
+            return
         try:
             messages = sdk.get_session_messages(sid, directory=self.cwd or CHAT_DIR)
         except Exception as e:
             log.warning("Couldn't read session %s: %s", sid, e)
             return
-        path = self.router.session_file(sid, self.cwd)[1]
-        stamps = message_times(path)
-        self.folded = folded_prompts(path)
+        stamps, self.folded = transcript_index(path)
         self.loading_history = True
         try:
             self.load_messages(messages, mark, stamps)
         finally:
             self.loading_history, self.history_ts, self.folded = False, None, {}
+        if key:
+            history_cache_write(sid, key, self.items[start:])
 
     def load_messages(self, messages, mark, stamps):
         for m in messages:
@@ -2103,39 +2121,25 @@ def iso_time(text):
         return None
 
 
-def message_times(path):
-    """When each message of a session was written: message id -> seconds since the epoch."""
-    out = {}
+def transcript_index(path):
+    """One read of a session's JSONL for what the SDK's messages leave out (a big transcript, with screenshots in it, can
+    be 100+ MB: reading it once instead of twice is a second saved on opening it):
+    - when each message was written: message id -> seconds since the epoch;
+    - messages you sent while Claude was working that it took in mid-reply: Claude Code files them as attachments to the
+      message before (not as messages of their own; several in a row hang off each other, and other attachments can sit
+      in between). That message's id -> [(attachment id, your text)], in the order sent."""
+    stamps, parents, found, folded = {}, {}, [], {}
     try:
         with open(path, encoding="utf-8") as f:
             for raw in f:
-                if '"timestamp"' not in raw:
+                if '"timestamp"' not in raw and '"attachment"' not in raw:
                     continue
                 try:
                     d = json.loads(raw)
                 except ValueError:
                     continue
                 if d.get("uuid") and d.get("timestamp"):
-                    out[d["uuid"]] = iso_time(d["timestamp"])
-    except OSError:
-        pass
-    return out
-
-
-def folded_prompts(path):
-    """Messages you sent while Claude was working that it took in mid-reply: Claude Code files them as attachments
-    to the message before (not as messages of their own; several in a row hang off each other, and other attachments
-    can sit in between). That message's id -> [(attachment id, your text)], in the order sent."""
-    parents, found, out = {}, [], {}
-    try:
-        with open(path, encoding="utf-8") as f:
-            for raw in f:
-                if '"attachment"' not in raw:
-                    continue
-                try:
-                    d = json.loads(raw)
-                except ValueError:
-                    continue
+                    stamps[d["uuid"]] = iso_time(d["timestamp"])
                 if d.get("type") != "attachment":
                     continue
                 parents[d.get("uuid")] = d.get("parentUuid")
@@ -2154,8 +2158,43 @@ def folded_prompts(path):
             if parent not in parents:
                 break
             parent = parents[parent]
-        out.setdefault(parent, []).append((uid, text))
-    return out
+        folded.setdefault(parent, []).append((uid, text))
+    return stamps, folded
+
+
+# Opening a conversation that went on after a /clear reads its earlier transcripts too, and those can be huge (one here is
+# 184 MB of screenshots): two seconds of parsing every first open. They don't change once a successor took over, so their
+# items are kept on disk, keyed by the file's size and time (any change, or a new HISTORY_CACHE_V, parses it again).
+HISTORY_CACHE_DIR = os.path.join(DATA_DIR, "cache", "history")
+HISTORY_CACHE_V = 1
+
+
+def history_cache_key(path):
+    try:
+        st = os.stat(path)
+    except OSError:
+        return None
+    return [HISTORY_CACHE_V, st.st_size, st.st_mtime_ns]
+
+
+def history_cache_read(sid, key):
+    try:
+        with open(os.path.join(HISTORY_CACHE_DIR, f"{sid}.json"), encoding="utf-8") as f:
+            d = json.load(f)
+    except (OSError, ValueError):
+        return None
+    return d.get("items") if isinstance(d, dict) and d.get("key") == key and isinstance(d.get("items"), list) else None
+
+
+def history_cache_write(sid, key, items):
+    path = os.path.join(HISTORY_CACHE_DIR, f"{sid}.json")
+    try:
+        os.makedirs(HISTORY_CACHE_DIR, exist_ok=True)
+        with open(path + ".tmp", "w", encoding="utf-8") as f:
+            json.dump({"key": key, "items": [{k: v for k, v in it.items() if k != "i"} for it in items]}, f)
+        os.replace(path + ".tmp", path)
+    except (OSError, TypeError, ValueError) as e:   # (no cache is fine: it is parsed again next time)
+        log.debug("Couldn't cache the history of %s: %s", sid, e)
 
 
 def agent_items(path, limit=400):
@@ -2221,6 +2260,7 @@ class Router:
         self.live = {}                      # session id -> Session (open in the app this run)
         self.live_lock = threading.RLock()  # making a Session for a conversation: one at a time (see resumed)
         self.active = None                  # the session voice and the input box talk to
+        self.open_seq = 0                   # opens so far (the window draws each open once: Router.open)
         self.folder = None                  # folder new sessions use; None = chat
         self.work = {}                      # session id -> "thinking" | "using_pc" | "awaiting_approval" | "background"
         self.detached = {}                  # session id -> background tasks still running from before a restart
@@ -2864,7 +2904,9 @@ class Router:
             return s
 
     def open(self, sid, cwd):
+        t0 = time.time()
         s = self.resumed(sid, cwd)
+        t1 = time.time()
         s.picked = True
         self.active = s
         self.folder = s.cwd
@@ -2873,8 +2915,14 @@ class Router:
             self.meta.update(sid, unseen=False)
             self.sessions_changed(cwd)
         self.ensure_baseline(s, "opened")
-        self.emit("opened", session=self.describe(s), items=s.items)
+        t2 = time.time()
+        # seq: the window gets this open twice (this event and open_session's answer) and draws it once
+        self.open_seq += 1
+        s.open_seq = self.open_seq
+        self.emit("opened", session=self.describe(s), items=s.items, seq=s.open_seq)
         self.run(s.warm())
+        if time.time() - t0 > 1.0:   # (which part, when it's slow: loading its history, or the bookkeeping after)
+            log.info("Open of %s: history %.2f s, bookkeeping %.2f s, event %.2f s", sid[:8], t1 - t0, t2 - t1, time.time() - t2)
         return s
 
     def remember_last(self, s):

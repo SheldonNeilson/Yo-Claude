@@ -1191,7 +1191,7 @@ class Api:
         s = self._app.router.open(sid, cwd)
         took = time.time() - t0
         (log.warning if took > 1.0 else log.info)("Opened session %s in %.2f s (%d items)", str(sid)[:8], took, len(s.items))
-        return {"session": self._app.router.describe(s), "items": s.items}
+        return {"session": self._app.router.describe(s), "items": s.items, "seq": getattr(s, "open_seq", None)}
 
     def list_sessions(self, cwd):
         return self._app.router.list(cwd)

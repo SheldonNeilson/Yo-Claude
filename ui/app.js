@@ -3,12 +3,20 @@
 const $ = (s) => document.querySelector(s);
 // Calls that open things answer with a message when they can't (file gone, no app for it...): show it.
 const REPORTS_ERRORS = new Set(["add_group", "rename_group", "open_path", "open_with", "pop_out", "reveal", "open_in_editor", "term_cd", "term_type_path", "term_run", "open_terminal_external"]);
+// A conversation being opened: its id -> the open_session call on its way (a second click while a big one loads joins it,
+// rather than loading and drawing it all again).
+const opening = new Map();
 const api = () => new Proxy(window.pywebview.api, {
   get: (t, k) => {
-    if (k === "open_session") return (...a) => t.open_session(...a).then((r) => {
-      if (r?.session && S.active?.id !== r.session.id) handle({ kind: "opened", ...r });
-      return r;
-    });
+    if (k === "open_session") return (sid, ...a) => {
+      if (opening.has(sid)) return opening.get(sid);
+      const p = t.open_session(sid, ...a).then((r) => {
+        if (r?.session && S.active?.id !== r.session.id) handle({ kind: "opened", ...r });
+        return r;
+      }).finally(() => opening.delete(sid));
+      opening.set(sid, p);
+      return p;
+    };
     if (k === "new_session") return (...a) => t.new_session(...a).then((s) => {
       if (s?.id && S.active?.id !== s.id) handle({ kind: "opened", session: s, items: [] });
       return s;
@@ -105,6 +113,9 @@ function handle(e) {
       loadLists().then(renderTree);
       break;
     case "opened": {
+      // the same open comes twice (open_session's answer and the event): drawing a thousand items once is enough
+      if (e.seq != null && e.seq === S.openSeq && S.active?.id === e.session?.id) break;
+      S.openSeq = e.seq;
       S.active = e.session; S.items = e.items || []; S.folder = e.session.cwd; waitLine.touch();
       const s = findSession(S.active.id); if (s) s.unseen = false;
       renderTranscript(); renderHead(); renderTree();   // its folder opens by itself (it holds the active session)
@@ -419,7 +430,14 @@ function sessionRow(s, withFolder = false) {
   // opens on mouse-down: the list is rebuilt whenever a session's state changes, and a click (down, then up on the same
   // element) is lost when that happens in between: with a few busy sessions, clicks seemed to do nothing
   let openedAt = 0;
-  const openIt = () => { openedAt = Date.now(); api().open_session(s.id, s.cwd); };
+  const openIt = () => {
+    openedAt = Date.now();
+    if (!row.classList.contains("active")) {   // shown as picked straight away (a long conversation takes a moment to load)
+      document.querySelectorAll("#tree .session.active").forEach((r) => r.classList.remove("active"));
+      row.classList.add("active");
+    }
+    api().open_session(s.id, s.cwd);
+  };
   row.onmousedown = (e) => { if (e.button === 0) openIt(); };
   row.onclick = () => { if (Date.now() - openedAt > 600) openIt(); };   // (keyboard or a touch with no mouse-down)
   row.oncontextmenu = (e) => { e.preventDefault(); sessionMenu(e, s); };
@@ -742,11 +760,11 @@ Click to open` : `What ${Who()} saw · click to enlarge`;
     const t = $("#transcript");
     t.querySelector(".empty")?.remove();
     const prev = this.last;
-    this.renderInner(it);
-    if (prev && prev.items && prev !== this.last) this.renderHead(prev);   // something came after it: no longer "now"
+    this.renderInner(it, bulk);
+    if (!bulk && prev && prev.items && prev !== this.last) this.renderHead(prev);   // something came after it: no longer "now"
     if (!bulk) follow.stick("chat", t);   // stays put once you've scrolled up (the follow toggle is off)
   },
-  renderInner(it) {
+  renderInner(it, bulk) {
     const t = $("#transcript");
     if (it.kind === "tool") {
       let g = this.groupOf.get(it.i);
@@ -755,7 +773,7 @@ Click to open` : `What ${Who()} saw · click to enlarge`;
         g.items.push(it.i); this.groupOf.set(it.i, g); this.last = g;
       }
       this.addStep(g, it);
-      this.renderHead(g);
+      if (!bulk) this.renderHead(g);   // (a whole conversation drawn at once: each head once at the end, renderTranscript)
     } else {
       const node = buildItem(it);
       const old = this.els.get(it.i);
@@ -902,17 +920,26 @@ function checklistUnder(node, it) {
 }
 
 // ---------- when things happened: relative for recent ones ("4m ago"), a time or date for older ones ----------
+// (made once: toLocaleString with options builds a new formatter on every call, and a long conversation has thousands of
+// times on it, which was half the time it took to draw one)
+const WHEN_FMT = {
+  time: new Intl.DateTimeFormat([], { hour: "2-digit", minute: "2-digit" }),
+  day: new Intl.DateTimeFormat([], { weekday: "short" }),
+  date: new Intl.DateTimeFormat([], { day: "numeric", month: "short" }),
+  dateYear: new Intl.DateTimeFormat([], { day: "numeric", month: "short", year: "numeric" }),
+  full: new Intl.DateTimeFormat([], { weekday: "long", day: "numeric", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit" }),
+};
 function whenText(ts) {
   const d = new Date(ts * 1000), ago_s = (Date.now() - d) / 1000;
   if (ago_s < 45) return "just now";
   if (ago_s < 3600) return Math.round(ago_s / 60) + "m ago";
   if (ago_s < 4 * 3600) return Math.floor(ago_s / 3600) + "h ago";
-  const time = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }), now = new Date();
+  const time = WHEN_FMT.time.format(d), now = new Date();
   if (d.toDateString() === now.toDateString()) return time;
-  if (now - d < 6 * 86400e3) return d.toLocaleDateString([], { weekday: "short" }) + " " + time;
-  return d.toLocaleDateString([], { day: "numeric", month: "short", ...(d.getFullYear() !== now.getFullYear() ? { year: "numeric" } : {}) }) + " " + time;
+  if (now - d < 6 * 86400e3) return WHEN_FMT.day.format(d) + " " + time;
+  return (d.getFullYear() !== now.getFullYear() ? WHEN_FMT.dateYear : WHEN_FMT.date).format(d) + " " + time;
 }
-const fullWhen = (ts) => new Date(ts * 1000).toLocaleString([], { weekday: "long", day: "numeric", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit" });
+const fullWhen = (ts) => WHEN_FMT.full.format(new Date(ts * 1000));
 function whenHtml(ts, cls = "") {
   return ts ? `<span class="when ${cls}" data-ts="${ts}" data-tip="${esc(fullWhen(ts))}">${esc(whenText(ts))}</span>` : "";
 }
@@ -966,6 +993,7 @@ function renderTranscript() {
   // a message Claude took up after it had waited shows where it was taken up (`at`), not where it was sent
   const place = (it) => (it.at != null ? it.at - 0.5 : it.i);
   S.items.filter(Boolean).sort((a, b) => place(a) - place(b)).forEach((it) => transcript.render(it, true));
+  transcript.refreshGroups();
   follow.bind("chat", t);
   follow.set("chat", true);             // a freshly opened conversation starts at the newest message
   t.scrollTop = t.scrollHeight;
