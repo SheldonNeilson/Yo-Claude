@@ -2164,9 +2164,14 @@ def transcript_index(path):
 
 # Opening a conversation that went on after a /clear reads its earlier transcripts too, and those can be huge (one here is
 # 184 MB of screenshots): two seconds of parsing every first open. They don't change once a successor took over, so their
-# items are kept on disk, keyed by the file's size and time (any change, or a new HISTORY_CACHE_V, parses it again).
+# items are kept on disk, keyed by the file's size and time and by this file's own content (any change to either, an
+# update included, parses it again: how items are made lives here).
 HISTORY_CACHE_DIR = os.path.join(DATA_DIR, "cache", "history")
-HISTORY_CACHE_V = 1
+try:
+    with open(__file__, "rb") as _f:
+        HISTORY_CACHE_V = hashlib.sha1(_f.read()).hexdigest()[:12]
+except OSError:
+    HISTORY_CACHE_V = "?"
 
 
 def history_cache_key(path):

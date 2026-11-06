@@ -113,8 +113,9 @@ function handle(e) {
       loadLists().then(renderTree);
       break;
     case "opened": {
-      // the same open comes twice (open_session's answer and the event): drawing a thousand items once is enough
-      if (e.seq != null && e.seq === S.openSeq && S.active?.id === e.session?.id) break;
+      // the same open comes twice (open_session's answer and the event): drawing a thousand items once is enough. Not
+      // while it's replying: text streamed in between would be added twice to what the first copy already had
+      if (e.seq != null && e.seq === S.openSeq && S.active?.id === e.session?.id && !e.session?.busy) break;
       S.openSeq = e.seq;
       S.active = e.session; S.items = e.items || []; S.folder = e.session.cwd; waitLine.touch();
       const s = findSession(S.active.id); if (s) s.unseen = false;
