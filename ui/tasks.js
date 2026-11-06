@@ -328,7 +328,7 @@ function taskIcon(t) {
   const st = taskState(t);
   return t.kind === "agent"
     ? `<span class="ticon agent ${st}" title="Subagent · ${esc(statusWord(t))}">✻</span>`
-    : `<span class="ticon cmd ${st}" title="Command · ${esc(statusWord(t))}">&gt;_</span>`;
+    : `<span class="ticon cmd ${st}" title="Command · ${esc(statusWord(t))}">&gt;_</span>${st === "running" ? '<span class="bspin">⠋</span>' : ""}`;   // (running: the terminal spinner beside it)
 }
 // A short id for each, quiet but findable: a subagent's, or a command's task id (the whole of it is in the tooltip and the detail)
 const taskId = (t) => String((t.kind === "agent" ? t.agent_id : t.task_id) || "").slice(0, 7);

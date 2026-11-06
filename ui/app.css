@@ -905,3 +905,11 @@ button { white-space: nowrap; }
 @keyframes tpulse { 50% { opacity: .45; transform: scale(.85); } } @keyframes tblink { 50% { opacity: .55; } }
 .tcmd { font-size: 11px; color: var(--faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tid { color: var(--faint); opacity: .75; font-size: 10px; letter-spacing: .3px; }
+/* background work: a radar (a sweep going round a ring, a blip lighting as it passes), stepped for a pixel feel; commands also get the terminal spinner */
+.radar { display: inline-block; flex: none; position: relative; width: 11px; height: 11px; margin: 0 5px 1px 2px; vertical-align: middle; border: 1px solid #b9a3ff; border-radius: 50%; box-sizing: border-box; color: #b9a3ff; }
+.radar::before { content: ""; position: absolute; inset: 0; border-radius: 50%; background: conic-gradient(from 0deg, transparent 0 150deg, currentColor 360deg); opacity: .85; animation: radarsweep 2.4s steps(12) infinite; }
+.radar::after { content: ""; position: absolute; width: 2px; height: 2px; right: 1px; top: 2px; background: currentColor; animation: radarblip 2.4s steps(1) infinite; }
+@keyframes radarsweep { to { transform: rotate(360deg); } }
+@keyframes radarblip { 0%, 14% { opacity: 1; } 15%, 100% { opacity: .15; } }
+.ptabs button .radar { margin-right: 3px; }
+.bspin { color: #b9a3ff; margin-left: 3px; font-size: 12px; }

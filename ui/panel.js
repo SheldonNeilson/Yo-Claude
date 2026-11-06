@@ -152,7 +152,7 @@ window.panel = {
       `${running ? `
 ${running} running in this session` : ""}${elsewhere ? `
 ${elsewhere} running in other sessions` : ""}">` +
-      `tasks${running ? ` <b>${running}</b>` : mine ? ` <i>${mine}</i>` : ""}${elsewhere ? ` <i class="else">+${elsewhere}</i>` : ""}</button>`;
+      `tasks${running ? ` <span class="radar" title="Running now"></span><b>${running}</b>` : mine ? ` <i>${mine}</i>` : ""}${elsewhere ? ` <i class="else">+${elsewhere}</i>` : ""}</button>`;
     p.querySelectorAll("[data-t]").forEach((b) => b.onclick = async () => {
       this.tab = b.dataset.t;
       if (this.tab === "files") await this.loadDirs();

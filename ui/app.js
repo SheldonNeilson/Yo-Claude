@@ -299,6 +299,8 @@ function animate() {   // spinners: header state, busy sessions in the tree, run
   if ((S.local || S.display).state === "thinking") renderState();
   const glyph = SPIN[Math.floor(t / 120) % SPIN.length];
   document.querySelectorAll(".spin").forEach((n) => { n.textContent = glyph; });
+  const dots = BRAILLE[Math.floor(t / 90) % BRAILLE.length];
+  document.querySelectorAll(".bspin").forEach((n) => { n.textContent = dots; });
   if (Math.floor(t / 1000) !== animate.sec) {   // background-task timers, once a second
     animate.sec = Math.floor(t / 1000);
     document.querySelectorAll(".elapsed").forEach((n) => { n.textContent = fmtElapsed(Date.now() - +n.dataset.start); });
@@ -405,7 +407,7 @@ function renderTree() {
     const recent = allSessions().sort((a, b) => (b.modified || 0) - (a.modified || 0)).slice(0, RECENT_SHOWN);
     const head = el("div", "fnode recent");
     head.innerHTML = `<span class="tw">${open ? "▾" : "▸"}</span><span class="fname">◷ RECENT</span>` +
-      `${recent.some((s) => asking(s.id)) ? ASK_PILL : ""}${recent.some((s) => S.busy.has(s.id)) ? '<span class="spin busy">✻</span>' : ""}` +
+      `${recent.some((s) => asking(s.id)) ? ASK_PILL : ""}${recent.some((s) => S.bg.has(s.id)) ? RADAR : ""}${recent.some((s) => S.busy.has(s.id) && !S.bg.has(s.id)) ? '<span class="spin busy">✻</span>' : ""}` +
       `${recent.some((s) => s.unseen) ? '<span class="dot"></span>' : ""}`;
     head.title = "The latest sessions from every folder";
     wireDrop(head, null);
@@ -427,7 +429,7 @@ function renderTree() {
     head.style.paddingLeft = 8 + depth * 14 + "px";
     const icon = isFolder ? (cwd ? "▤" : "◇") : "▦";
     head.innerHTML = `<span class="tw">${open ? "▾" : "▸"}</span><span class="fname">${icon} ${esc(g)}</span><span class="gcount">${all.length}</span>` +
-      `${all.some((s) => asking(s.id)) ? ASK_PILL : ""}${all.some((s) => S.busy.has(s.id)) ? '<span class="spin busy">✻</span>' : ""}${all.some((s) => s.unseen) ? '<span class="dot" title="New reply"></span>' : ""}` +
+      `${all.some((s) => asking(s.id)) ? ASK_PILL : ""}${all.some((s) => S.bg.has(s.id)) ? RADAR : ""}${all.some((s) => S.busy.has(s.id) && !S.bg.has(s.id)) ? '<span class="spin busy">✻</span>' : ""}${all.some((s) => s.unseen) ? '<span class="dot" title="New reply"></span>' : ""}` +
       `<span class="spacer"></span><button class="fadd" title="New ${groupHome(g) ? "session in " + esc(base(groupHome(g))) : "chat"}">+</button>`;
     head.title = isFolder && cwd ? `${g}: ${cwd}` : g;
     head.onclick = (e) => {
@@ -463,12 +465,16 @@ function groupHome(g) {
   if (g in S.groupCwd) return S.groupCwd[g];
   return allSessions().filter((s) => s.group === g).sort((a, b) => (b.modified || 0) - (a.modified || 0))[0]?.cwd ?? null;
 }
+// Background work (a command or subagent still running out there): a little radar, a sweep going round a ring with a blip, so it
+// reads differently from "Claude is working now" (the ✻ spinner). Pure CSS: nothing to animate from here.
+const RADAR = '<span class="radar" title="Background work running"></span>';
+const BRAILLE = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏";   // (the terminal spinner every command-line user reads as "running")
 const asking = (id) => S.work[id] === "awaiting_approval";   // a session waiting on your answer or ok
 const ASK_PILL = '<span class="askpill" title="This session is waiting for your answer">? needs you</span>';
 function sessionRow(s, withFolder = false) {
   const row = el("div", "session" + (S.active && S.active.id === s.id ? " active" : "") + (s.unseen ? " unseen" : "") + (asking(s.id) ? " asking" : ""));
   const src = s.source && s.source !== "yoclaude" ? ` <span class="src">cli</span>` : "";
-  const mark = asking(s.id) ? ASK_PILL : S.bg.has(s.id) ? '<span class="spin busy bgtask" title="Background task running">✻</span>'
+  const mark = asking(s.id) ? ASK_PILL : S.bg.has(s.id) ? RADAR
              : S.busy.has(s.id) ? '<span class="spin busy" title="Working">✻</span>'
              : s.unseen ? '<span class="dot" title="New reply you haven\'t seen"></span>' : "";
   const where = withFolder ? ` · ${s.cwd ? "▤ " + esc(base(s.cwd)) : "◇ chat"}` : "";
