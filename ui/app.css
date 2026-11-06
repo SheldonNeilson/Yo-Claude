@@ -896,3 +896,12 @@ button { white-space: nowrap; }
 .tfacts { padding: 6px 10px; font-size: 12px; } .tfacts div { display: flex; gap: 10px; } .tfacts span { flex: none; width: 5.5em; color: var(--faint); } .tfacts b { font-weight: normal; color: var(--text); word-break: break-all; }
 .tstuck { margin: 0 10px 8px; padding: 5px 8px; border: 1px solid var(--amber); color: var(--amber); font-size: 12px; }
 .tprocs { padding: 0 10px 8px; font-size: 12px; } .tproc { padding: 3px 0; word-break: break-all; }
+/* task kinds: a little Claude (subagent) or terminal (command), coloured by state; a quiet id */
+.task .tstat { width: 2.2em; }
+.ticon { display: inline-block; font-weight: bold; line-height: 1; }
+.ticon.agent { font-size: 15px; } .ticon.cmd { font-size: 10px; padding: 1px 2px; border: 1px solid currentColor; letter-spacing: -1px; }
+.ticon.running { color: #b9a3ff; } .ticon.done { color: var(--green); } .ticon.failed { color: var(--red); } .ticon.stopped { color: var(--dim); }
+.ticon.agent.running { animation: tpulse 1.6s ease-in-out infinite; } .ticon.cmd.running { animation: tblink 1.1s steps(2, jump-none) infinite; }
+@keyframes tpulse { 50% { opacity: .45; transform: scale(.85); } } @keyframes tblink { 50% { opacity: .55; } }
+.tcmd { font-size: 11px; color: var(--faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tid { color: var(--faint); opacity: .75; font-size: 10px; letter-spacing: .3px; }

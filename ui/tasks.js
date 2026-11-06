@@ -12,7 +12,7 @@ window.tasks = {
     const running = list.filter((t) => t.status === "running");
     if (!running.length) return toast("Nothing is running.");
     if (running.every((t) => !(t.task_id && !t.detached) && t.kind === "shell")) return this.stopTasks(running);   // only the process list's own confirmation, once
-    const names = running.slice(0, 6).map((t) => "• " + (t.description || "task")).join("\n") + (running.length > 6 ? `\n… and ${running.length - 6} more` : "");
+    const names = running.slice(0, 6).map((t) => "• " + (taskName(t) || "task")).join("\n") + (running.length > 6 ? `\n… and ${running.length - 6} more` : "");
     confirmBox(`Stop ${what || (running.length === 1 ? "this" : `these ${running.length}`)}?\n\n${names}\n\nWhat they have done so far stays; the work in progress is cut off.`, () => this.stopTasks(running));
   },
   async stopTasks(running) {
@@ -133,17 +133,19 @@ window.tasks = {
       const list = el("div", "tree tasklist");
       for (const x of items) {
         const row = el("div", "node task " + x.status);
-        row.innerHTML = `<span class="tstat">${statusMark(x)}</span>` +
-          `<div class="tmain"><div class="tdesc">${esc(x.description)}</div>` +
+        const name = taskName(x), raw = x.kind === "shell" ? (x.command || x.description || "") : "";
+        row.innerHTML = `<span class="tstat">${taskIcon(x)}</span>` +
+          `<div class="tmain"><div class="tdesc">${esc(name)}</div>` +
+          (raw && raw !== name ? `<div class="tcmd" title="${esc(raw)}">${esc(raw)}</div>` : "") +   // (the command itself, when the name is made from it)
           `<div class="tmeta">${x.kind === "agent" ? `agent${x.agent_type && x.agent_type !== "general-purpose" ? " · " + esc(x.agent_type) : ""}` : "command"}` +
-          ` · ${esc(elapsed(x))}</div></div>`;
+          ` · ${esc(elapsed(x))}${taskId(x) ? ` <span class="tid" title="${esc(x.kind === "agent" ? x.agent_id : x.task_id)}">#${esc(taskId(x))}</span>` : ""}</div></div>`;
         if (x.status === "running") {
           const k = el("button", "tstop danger", "✕");
           k.title = "Stop it";
           k.onclick = (e) => { e.stopPropagation(); this.stopPrompt([x]); };
           row.appendChild(k);
         }
-        row.title = `${x.description}
+        row.title = `${raw || x.description}
 ${statusWord(x)} · in “${x.title}”
 Click to see its output`;
         row.onclick = () => this.show(x.key);
@@ -160,10 +162,10 @@ Click to see its output`;
     const head = el("div", "phead taskhead");
     const back = el("button", "", "← tasks");
     back.onclick = () => { this.open = null; this.output = null; this.render(); };
-    head.append(back, el("span", "tdesc", `${statusMark(t)} ${esc(t.description)}`));
+    head.append(back, el("span", "tdesc", `${taskIcon(t)} ${esc(taskName(t))}`));
     top.appendChild(head);
     body.appendChild(top);
-    const info = el("div", "pinfo", `${esc(statusWord(t))} · ${esc(elapsed(t))} · ${t.kind === "agent" ? "subagent" : "background command"}` +
+    const info = el("div", "pinfo", `${esc(statusWord(t))} · ${esc(elapsed(t))} · ${t.kind === "agent" ? "subagent" : "background command"}${t.kind === "agent" && t.agent_id ? ` · <span class="tid">#${esc(t.agent_id)}</span>` : ""}` +
       `<br>in <span class="tsess">${esc(t.title)}</span>` + (t.summary ? `<br>${esc(t.summary)}` : ""));
     const bar = el("div", "phead");
     if (t.session !== S.active?.id) {
@@ -221,6 +223,7 @@ Click to see its output`;
     if (t.ended) rows.push(["ended", fullWhen(t.ended)]);
     rows.push(["output", t.output_file ? esc(t.output_file) : "not recorded: it started before Yo Claude last restarted"]);
     if (t.task_id) rows.push(["task id", esc(t.task_id)]);
+    if (t.kind === "agent" && t.agent_id) rows.push(["agent id", esc(t.agent_id)]);
     facts.appendChild(el("div", "tfacts", rows.map(([k, v]) => `<div><span>${k}</span><b>${v}</b></div>`).join("")));
     const loop = /\b(until|while)\b[\s\S]*\bsleep\b/.test(whole), age = t.started ? Date.now() / 1000 - t.started : 0;   // (a wait loop: polls until something appears)
     if (t.status === "running" && (t.idle_s > 600 || (loop && age > 900))) {
@@ -286,6 +289,49 @@ Click to see its output`;
   },
 };
 
+// A background command's name for the list: the description Claude gave it, or, when the "description" is just the command
+// itself, a short name made from it ("Wait for fix15_view.txt", "npm run build", "Run unity.ps1 in sg2_bushes2"). The command
+// itself shows under it.
+const CMD_LIKE = /[|;&><$]|^\s*(cd|until|while|for|if|python3?|py|node|npm|pnpm|yarn|npx|git|dotnet|pwsh|powershell|bash|sh|ls|cat|tail|head|grep|rm|cp|mv|curl|sleep|echo)\b|^\s*(\.{1,2}[\\/]|[A-Za-z]:[\\/])/i;
+const baseName = (p) => (p || "").replace(/["']/g, "").split(/[\\/]/).filter(Boolean).pop() || p || "";
+const PATHISH = /(?:^|\s)((?:\/|[A-Za-z]:[\\/]|\.{1,2}[\\/]|~\/)[^\s"';|&\]]*)/;
+function commandName(t) {
+  const raw = (t.command || t.description || "").trim().replace(/^Running\s+/i, "");
+  if (!raw) return "background command";
+  if (t.description && t.command && t.description !== t.command && !CMD_LIKE.test(t.description)) return t.description;   // Claude's own label
+  if (!CMD_LIKE.test(raw)) return raw.length > 60 ? raw.slice(0, 59) + "…" : raw;   // a plain label, or too bare to improve
+  let cmd = raw.replace(/\s+/g, " "), dir = "", m;
+  const cd = cmd.match(/^cd\s+(?:\/d\s+)?("[^"]+"|'[^']+'|\S+)\s*(?:&&|;)\s*/i);
+  if (cd) { dir = baseName(cd[1]); cmd = cmd.slice(cd[0].length); }
+  const inDir = dir && dir !== "." && dir !== "~" ? ` in ${dir}` : "";
+  if (/^(?:until|while)\b/i.test(cmd)) {   // a poll loop: waiting for a file to say something
+    const files = [...cmd.matchAll(new RegExp(PATHISH.source, "g"))].map((x) => x[1]).filter((p) => !/^\/dev\//.test(p));
+    return files.length ? "Wait for " + baseName(files[0]) : "Wait loop" + inDir;
+  }
+  if ((m = cmd.match(/^tail\s+(?:-\S+\s+)*(\S+)/i)) && /\s-[a-z]*f/i.test(cmd)) return "Watch " + baseName(m[1]);
+  if ((m = cmd.match(/^sleep\s+(\d+)/i))) return `Wait ${m[1]}s`;
+  if ((m = cmd.match(/^(npm|pnpm|yarn)\s+(run\s+)?(\S+)/i))) return `${m[1]} ${m[2] ? "run " : ""}${m[3]}${inDir}`;
+  if ((m = cmd.match(/^dotnet\s+(\S+)/i))) return `dotnet ${m[1]}${inDir}`;
+  if ((m = cmd.match(/^git\s+(\S+)/i))) return `git ${m[1]}${inDir}`;
+  if ((m = cmd.match(/^(?:python3?|py|node|pwsh|powershell|bash|sh)\s+(?:-\S+\s+)*("[^"]+"|'[^']+'|\S+)/i)) && !/^[-$({]/.test(m[1])) return `Run ${baseName(m[1])}${inDir}`;
+  if ((m = cmd.match(/(\S+\.(?:ps1|sh|bat|cmd|py))\b/i))) return `Run ${baseName(m[1])}${inDir}`;
+  const words = cmd.split(" "), prog = baseName(words[0]).replace(/\.exe$/i, ""), arg = words.slice(1).find((w) => !w.startsWith("-"));
+  const name = arg && !/^[$({]/.test(arg) ? `${prog} ${baseName(arg)}` : prog;
+  return (name.length > 50 ? name.slice(0, 49) + "…" : name) + inDir;
+}
+const taskName = (t) => (t.kind === "shell" ? commandName(t) : t.description) || "task";
+// The state colour of a task, as a class: running (violet), finished (green), failed (red), stopped (dim)
+const taskState = (t) => (t.status === "running" ? "running" : t.status === "failed" ? "failed" : ["killed", "stopped"].includes(t.status) ? "stopped" : "done");
+// What kind of task it is, at a glance: a subagent is a little Claude (✻) and a command a little terminal (>_), both in the
+// colour of its state (running ones move).
+function taskIcon(t) {
+  const st = taskState(t);
+  return t.kind === "agent"
+    ? `<span class="ticon agent ${st}" title="Subagent · ${esc(statusWord(t))}">✻</span>`
+    : `<span class="ticon cmd ${st}" title="Command · ${esc(statusWord(t))}">&gt;_</span>`;
+}
+// A short id for each, quiet but findable: a subagent's, or a command's task id (the whole of it is in the tooltip and the detail)
+const taskId = (t) => String((t.kind === "agent" ? t.agent_id : t.task_id) || "").slice(0, 7);
 function statusWord(t) {
   return { running: t.detached ? "running (since before the restart)" : "running", completed: "finished", done: "finished",
            failed: "failed", killed: "stopped", stopped: "stopped" }[t.status] || t.status;
