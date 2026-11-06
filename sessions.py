@@ -2284,6 +2284,30 @@ class Router:
         self.loop = asyncio.new_event_loop()
         threading.Thread(target=self.loop.run_forever, name="sessions", daemon=True).start()
         self.restore_detached()
+        self.agent_bg = {}                  # session id -> descriptions of subagents still writing their transcript (see watch_agents)
+        threading.Thread(target=self.watch_agents, name="agent-watch", daemon=True).start()
+
+    def watch_agents(self):
+        """A subagent can be at work without Claude Code having told us of it as a task (one resumed with a message, one started
+        in an earlier run): its transcript is still being written. Treat that as background work, so the session shows busy
+        (radar, the mascot, the status) and is not mistaken for idle when it is quiet itself."""
+        while True:
+            time.sleep(4)
+            try:
+                for sid, s in list(self.live.items()):
+                    if s.busy:
+                        continue
+                    names = [a["description"] for a in self.subagents(sid, s.cwd) if a["status"] == "running"]
+                    if names and not s.running_tasks():
+                        if sid not in self.agent_bg and sid not in self.work:
+                            self.set_work(sid, "background")
+                        self.agent_bg[sid] = names
+                    elif sid in self.agent_bg:
+                        self.agent_bg.pop(sid, None)
+                        if self.work.get(sid) == "background" and not s.running_tasks() and sid not in self.detached:
+                            self.set_work(sid, "idle")
+            except Exception:
+                log.debug("watch_agents", exc_info=True)
 
     def emit(self, kind, **data):
         self._emit(kind, data)
@@ -2834,7 +2858,7 @@ class Router:
             seen.add(s.session_id)
             out.append({"id": s.session_id, "title": m.get("title") or s.custom_title or s.summary or s.first_prompt
                         or "(empty)", "first": s.first_prompt, "modified": s.last_modified, "created": s.created_at,
-                        "background": s.session_id in self.detached or bool(
+                        "background": s.session_id in self.detached or s.session_id in self.agent_bg or bool(
                             s.session_id in self.live and self.live[s.session_id].running_tasks()),
                         "branch": s.git_branch, "cwd": cwd, "tag": s.tag, "source": m.get("source", "claude code"),
                         "pinned": bool(m.get("pinned")), "group": m.get("group"), "unseen": bool(m.get("unseen")),
