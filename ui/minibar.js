@@ -119,6 +119,30 @@ class MiniBar {
     }
     if (L.n && Math.random() < L.n * MiniBar.SPONT * (busy ? 1 : 4) * dt * L.rate) this.fire(L, Math.floor(Math.random() * L.n), -1, true);
   }
+  // Background work (a command or subagent still running while Claude is idle): a radar sweep. A scan line crosses the bar with a
+  // fading trail, and a few blips sit in the dark and light as it passes, then fade: "something is still going on out there".
+  // The same violet and the same sweep as the little radar on the session rows. Nothing is stored; it's all a function of time.
+  drawBackground(g, c, t, cols, mid) {
+    const period = Math.max(2.6, cols / 22), head = (t / period) % 1 * cols, trail = Math.min(16, cols * 0.4), rows = Math.max(1, Math.floor((c.height - 3) / 8));
+    g.globalAlpha = 0.12;   // the dark scope: a dotted midline
+    for (let i = 0; i < cols; i += 2) g.fillRect(i * 5, mid, 4, 3);
+    for (let i = 0; i < cols; i++) {   // the sweep: tall at its head, shorter and fainter behind it
+      const d = (head - i + cols) % cols;
+      if (d >= trail) continue;
+      const f = 1 - d / trail, n = Math.round(f * f * rows * 2 / 2 + (d < 1 ? 1 : 0));
+      g.globalAlpha = 0.15 + 0.85 * f * f;
+      g.fillRect(i * 5, mid, 4, 3);
+      for (let k = 1; k <= Math.min(rows, n); k++) { g.fillRect(i * 5, mid - k * 4, 4, 3); g.fillRect(i * 5, mid + k * 4, 4, 3); }
+    }
+    const blips = Math.max(2, Math.round(cols / 9));   // blips at fixed places, lit by the sweep and fading over about a turn
+    for (let j = 0; j < blips; j++) {
+      const bx = Math.floor(MiniBar.hash(j * 7.31 + 1) * cols), by = Math.floor(MiniBar.hash(j * 3.17 + 5) * (rows * 2 + 1)) - rows;
+      const since = (head - bx + cols) % cols / cols;   // how far round the sweep is since it passed: 0 just now, 1 about to again
+      g.globalAlpha = 0.14 + 0.86 * Math.max(0, 1 - since * 1.6) ** 2;
+      g.fillRect(bx * 5, mid + by * 4, 4, 3);
+    }
+    g.globalAlpha = 1;
+  }
   drawThinking(g, c, t, act) {
     const L = this.thinkLayout(c), on = act ? 1 : 0.55, F = MiniBar.FLASH, R = MiniBar.REFRACT;
     this.stepThinking(L, t);
@@ -183,7 +207,7 @@ class MiniBar {
       listening: (this.text ? "> follow-up? " : "> listening ") + cur,
       thinking: MiniBar.SPIN[Math.floor(t * 8) % MiniBar.SPIN.length] + " thinking…", speaking: "● " + who(),
       using_pc: "⌖ using your pc…", approval: "! " + who() + " needs your ok", error: "! microphone unavailable",
-      background: MiniBar.SPIN[Math.floor(t * 4) % MiniBar.SPIN.length] + " background task running",
+      background: "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"[Math.floor(t * 10) % 10] + " background task running",
     }[this.state] || this.state;
   }
   shownText() {
@@ -205,13 +229,14 @@ class MiniBar {
     m.style.opacity = act ? 1 : 0.75;
     const lab = this.q(".mb-label");
     lab.textContent = this.label(t);
-    lab.style.color = act ? color : "var(--dim)";
+    lab.style.color = act || this.state === "background" ? color : "var(--dim)";
     const c = this.q(".mb-meter"), g = c.getContext("2d");
     if (c.clientWidth && Math.abs(c.width - c.clientWidth) > 4) c.width = c.clientWidth;   // stretches in the window
     g.clearRect(0, 0, c.width, c.height);
     const mid = Math.floor(c.height / 2) - 2;
     const cols = Math.max(1, Math.floor((c.width + 1) / 5)), len = this.levels.length;
     if (this.state === "thinking") { g.fillStyle = color; this.drawThinking(g, c, t, act); }
+    else if (this.state === "background") { g.fillStyle = color; this.drawBackground(g, c, t, cols, mid); }
     else for (let i = 0; i < cols; i++) {   // one column per reading, newest at the right: wider = more history, not stretched
       let lv = this.levels[len - cols + i] || 0;
       if (this.state === "paused") lv = 0;
