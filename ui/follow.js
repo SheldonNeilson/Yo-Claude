@@ -1,6 +1,6 @@
 // "Follow" toggles for the chat and the task/subagent output. While on, new output keeps the view at the bottom.
 // Scrolling up yourself (wheel, scrollbar drag, keys, touch) switches it off so the view stays where you put it;
-// clicking it switches it back on and jumps to the newest output. Views are re-rendered often, so buttons and
+// clicking it, or scrolling yourself all the way back down, switches it back on and jumps to the newest output. Views are re-rendered often, so buttons and
 // scroll containers are registered again on each render; the on/off state lives here.
 const follow = {
   on: { chat: true, task: true },
@@ -44,22 +44,27 @@ const follow = {
     this.bound.add(el);
     const scrollable = () => el.scrollHeight > el.clientHeight + 2;
     const off = () => { if (scrollable()) this.set(name, false); };
-    el.addEventListener("wheel", (e) => { if (e.deltaY < 0) off(); }, { passive: true });
-    el.addEventListener("keydown", (e) => { if (["ArrowUp", "PageUp", "Home"].includes(e.key)) off(); });
+    let userAt = 0;   // when you last scrolled by hand: only your own scroll to the bottom switches following back on
+    const mine = () => { userAt = Date.now(); };
+    el.addEventListener("wheel", (e) => { mine(); if (e.deltaY < 0) off(); }, { passive: true });
+    el.addEventListener("keydown", (e) => { mine(); if (["ArrowUp", "PageUp", "Home"].includes(e.key)) off(); });
     let dragging = false, touchY = null;
     el.addEventListener("pointerdown", (e) => {   // a press on the scrollbar (right edge) is a drag of the bar
       dragging = e.offsetX >= el.clientWidth;
+      if (dragging) mine();
     });
     window.addEventListener("pointerup", () => { dragging = false; });
     let lastTop = el.scrollTop;
     el.addEventListener("scroll", () => {
       if (dragging && el.scrollTop < lastTop) off();
+      else if (!this.on[name] && el.scrollTop > lastTop && Date.now() - userAt < 1500
+               && el.scrollHeight - el.scrollTop - el.clientHeight < 4) this.set(name, true);   // back at the bottom: follow again
       lastTop = el.scrollTop;
       if (el.id) this.pos[el.id] = el.scrollTop;
     }, { passive: true });
     el.addEventListener("touchstart", (e) => { touchY = e.touches[0]?.clientY ?? null; }, { passive: true });
     el.addEventListener("touchmove", (e) => {
-      const y = e.touches[0]?.clientY;
+      const y = e.touches[0]?.clientY; mine();
       if (touchY !== null && y > touchY + 8) off();   // finger moving down = content scrolling up
     }, { passive: true });
   },
