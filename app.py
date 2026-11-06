@@ -44,6 +44,7 @@ DATA_DIR = yo_claude.DATA_DIR
 LOG_PATH = os.path.join(DATA_DIR, "yo_claude.log")
 APP_ID = "YoClaude.App"
 UPDATE_CHECK_S = 6 * 3600
+UPDATE_COUNTDOWN_S = 30   # an automatic update says so first, with a countdown you can cancel
 try:
     with open(os.path.join(HERE, "VERSION"), encoding="utf-8") as _f:
         VERSION = _f.read().strip()
@@ -291,9 +292,9 @@ class App:
             if not quiet:
                 self.notify(f"{self.name()} {VERSION} is up to date.")
             return
-        if quiet and self.settings.get("auto_update", True) and not self.replying() and self.safe_to_auto_update():
-            self.notify(f"Updating Yo Claude to {remote}… it restarts in a moment. Background tasks keep running.")
-            return self.install_update()
+        if (quiet and self.settings.get("auto_update", True) and not self.replying() and time.time() > getattr(self, "update_snooze", 0)
+                and self.safe_to_auto_update()):
+            return self.update_countdown(remote)
         if quiet:
             if self.update_info.get("announced") != remote:
                 self.notify(f"Yo Claude {remote} is available (you have {VERSION}). "
@@ -305,7 +306,47 @@ class App:
                         "Check for updates again when it's done.")
             return
         self.notify(f"Updating {self.name()}… it restarts in a moment. Background tasks keep running.")
-        self.install_update()
+        self.install_update(remote, auto=False)
+
+    def update_countdown(self, remote):
+        """An automatic update: the window shows a countdown (UPDATE_COUNTDOWN_S) with a cancel button, then it installs and
+        restarts. Cancelled, it asks again at the next check in 6 hours. It waits for a reply in progress to finish first."""
+        if getattr(self, "update_pending", None):
+            return
+        pending = self.update_pending = {"latest": remote, "cancelled": False}
+        self.notify(f"Yo Claude {remote} is ready: it updates and restarts in {UPDATE_COUNTDOWN_S} seconds (cancel in the window).")
+        self.bus.put(("update_countdown", {"latest": remote, "current": VERSION, "seconds": UPDATE_COUNTDOWN_S}))
+        def run():
+            end = time.time() + UPDATE_COUNTDOWN_S
+            while time.time() < end or self.replying():
+                if pending["cancelled"]:
+                    self.update_pending, self.update_snooze = None, time.time() + UPDATE_CHECK_S
+                    log.info("Automatic update to %s cancelled: asking again in %d h", remote, UPDATE_CHECK_S // 3600)
+                    return
+                time.sleep(0.5)
+            self.update_pending = None
+            self.install_update(remote, auto=True)
+        threading.Thread(target=run, daemon=True, name="update-countdown").start()
+
+    def cancel_update(self):
+        if getattr(self, "update_pending", None):
+            self.update_pending["cancelled"] = True
+            self.bus.put(("update_countdown", {"cancelled": True}))
+
+    def updated_note(self):
+        """After an update: what it was, from what to what, and the changes since (once, for the window to show), or None."""
+        path = os.path.join(DATA_DIR, "updated.json")
+        try:
+            with open(path, encoding="utf-8") as f:
+                note = json.load(f)
+            os.remove(path)
+        except (OSError, ValueError):
+            return None
+        if note.get("from") == VERSION:   # (it didn't take: the install failed)
+            return None
+        log_ = self.git("log", "--no-merges", "--format=%s", f"{note.get('commit', 'HEAD')}..HEAD").stdout.strip().splitlines()
+        return {"from": note.get("from"), "to": VERSION, "auto": bool(note.get("auto")),
+                "changes": [c.split(" Co-Authored-By")[0][:160] for c in log_[:12]]}
 
     def safe_to_auto_update(self):
         """Only a plain install: a dev clone (uncommitted changes, or commits not on GitHub yet) is never pulled under you."""
@@ -313,7 +354,13 @@ class App:
             return False
         return self.git("rev-list", "--count", "@{upstream}..HEAD").stdout.strip() == "0"
 
-    def install_update(self):
+    def install_update(self, remote="", auto=False):
+        try:   # (read after the restart by updated_note: the window says it was updated, and what changed)
+            with open(os.path.join(DATA_DIR, "updated.json"), "w", encoding="utf-8") as f:
+                json.dump({"from": VERSION, "to": remote, "auto": auto, "commit": self.git("rev-parse", "HEAD").stdout.strip(),
+                           "at": time.time()}, f)
+        except OSError as e:
+            log.info("couldn't leave the update note: %s", e)
         subprocess.Popen(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
                           os.path.join(HERE, "install.ps1"), "-Update"], cwd=HERE,
                          creationflags=subprocess.CREATE_NEW_CONSOLE)
@@ -809,7 +856,11 @@ class Api:
             self.reopened = True
             r.reopen_last()
         active = r.active
+        updated = None
+        if not getattr(self, "told_updated", False):   # (once per run: the window says it was just updated)
+            self.told_updated, updated = True, a.updated_note()
         return {"version": VERSION, "update": getattr(a, "update_info", None), "limits": r.limits,
+                "updated": updated,
                 "settings": dict(a.settings), "folder": r.folder, "folders": r.meta.data["recent_folders"],
                 "workspaces": r.workspaces(), "groups": r.meta.data["groups"], "sessions": self.safe_list(r, r.folder),
                 "active": r.describe(active) if active else None, "items": active.items if active else [],
@@ -1576,6 +1627,10 @@ class Api:
 
     def check_updates(self):
         threading.Thread(target=self._app.check_updates, daemon=True).start()
+
+    def cancel_update(self):
+        """The countdown dialog's cancel: no automatic update now (asks again at the next check)."""
+        self._app.cancel_update()
 
     def copy_text(self, text):
         """Clipboard via Windows itself (works whatever the page is allowed to do)."""

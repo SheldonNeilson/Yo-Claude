@@ -219,6 +219,7 @@ function handle(e) {
       break;
     case "btw": btw.event(e); break;
     case "update": renderUpdate(e); break;
+    case "update_countdown": updateCountdown(e); break;
     case "notice": toast(e.text); break;
     case "session_info":
       if (S.active && e.session.id === S.active.id) { Object.assign(S.active, e.session); renderExtraDirs(); renderFolder(); renderHead(); renderTree(); }
@@ -2155,6 +2156,35 @@ function confirmBox(text, done) {
   { const t = el("div", "", esc(text)); t.style.whiteSpace = "pre-wrap"; d.appendChild(t); }
   addButtons(d, [["cancel", closeModal], ["yes", () => { closeModal(); done(); }, "danger"]]);
 }
+// An automatic update: a countdown to the restart, with a cancel button (Yo Claude asks again at the next check)
+function updateCountdown(e) {
+  clearInterval(updateCountdown.timer);
+  if (e.cancelled) { if (updateCountdown.open) { updateCountdown.open = false; closeModal(); } return; }
+  const d = dialog(`Updating ${appName()} to ${e.latest}`);
+  const line = el("div", "");
+  d.appendChild(line);
+  d.appendChild(el("div", "dim small", `You have ${esc(e.current)}. It restarts by itself; background tasks keep running, a reply in progress finishes first.`));
+  addButtons(d, [["cancel", () => { api().cancel_update(); updateCountdown.open = false; closeModal(); }, "primary"]]);
+  updateCountdown.open = true;
+  closeModal.guard = () => { if (updateCountdown.open) { updateCountdown.open = false; api().cancel_update(); } return true; };   // (Esc or a click outside cancels too)
+  const end = Date.now() + e.seconds * 1000;
+  const tick = () => {
+    const left = Math.max(0, Math.ceil((end - Date.now()) / 1000));
+    line.innerHTML = left ? `Restarting in <b>${left}</b> second${left === 1 ? "" : "s"}…` : "Restarting…";
+    if (!left) clearInterval(updateCountdown.timer);
+  };
+  tick(); updateCountdown.timer = setInterval(tick, 250);
+}
+// Just updated (read once at start): which version, and what changed. Stays up until you close it.
+function updatedBox(u) {
+  const d = dialog(`${appName()} was ${u.auto ? "automatically " : ""}updated`);
+  d.appendChild(el("div", "", `From <b>${esc(u.from)}</b> to <b>${esc(u.to)}</b>.`));
+  if (u.changes?.length) {
+    d.appendChild(el("div", "dim small", "What's new:"));
+    d.appendChild(el("ul", "tips", u.changes.map((c) => `<li>${esc(c)}</li>`).join("")));
+  }
+  addButtons(d, [["ok", closeModal, "primary"]]);
+}
 function alertBox(text) { const d = dialog(appName()); d.appendChild(el("div", "", esc(text))); addButtons(d, [["ok", closeModal, "primary"]]); }
 
 // A script moving the keyboard focus while you type in the message box (a file opening in the editor, a panel redrawing) would
@@ -2214,6 +2244,7 @@ window.addEventListener("pywebviewready", async () => {
   S.manual = s.settings.tree_manual || {};
   $("#versionTag").textContent = "v" + s.version;
   renderUpdate(s.update);
+  if (s.updated) setTimeout(() => updatedBox(s.updated), 800);   // (after the window has settled)
   renderLimits(s.limits || null);
   if (s.settings.zoom) document.body.style.zoom = s.settings.zoom;
   await loadLists();

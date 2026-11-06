@@ -5,7 +5,7 @@ https://github.com/SheldonNeilson/Yo-Claude (private); their installs update fro
 
 ## Rules
 
-- **Auto-update:** installs update themselves (setting `auto_update`, default on; Tools menu and tray toggle): `check_updates` in `app.py` installs when idle (no reply in progress), only if the clone is clean and not ahead of GitHub.
+- **Auto-update:** installs update themselves (setting `auto_update`, default on; Tools menu and tray toggle): `check_updates` in `app.py` shows a 30 s countdown with cancel (`update_countdown`; cancelled = asked again in 6 h), then installs when no reply is in progress, only if the clone is clean and not ahead of GitHub. `install_update` leaves `~/.yoclaude/updated.json`; the next start shows "was updated" with the commits since (`updated_note`).
 - **Bump `VERSION` on every push to GitHub** (semver: patch for fixes, minor for features). Installs compare it with
   GitHub's to show "update available". `hooks/pre-push` refuses a push to `main` with an unchanged `VERSION`; enable
   it in a clone with `git config core.hooksPath hooks`.
