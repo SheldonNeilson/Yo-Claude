@@ -87,6 +87,26 @@ const BOSS_COMMITS = ["boss: it looks like you're writing code", "boss: clippy.e
 const SAYS = ["It looks like you're writing a bug. Need help?", "Would you like me to add more TODOs?",
   "Have you tried turning it off and on again?", "I see you're winning. Let me fix that.", "Tip: tests pass if you delete them!",
   "Did you mean: rm -rf node_modules?", "It looks like you're debugging. Want a printf?"];
+// the other bosses (BOSSES, further down, has their code): art, voice lines and wave titles
+const MERGE_L = ["<<<<<<< HEAD", "  return true;", "  // works here"];
+const MERGE_R = [">>>>>>> main", "  return false;", "  // works here too"];
+const MERGE_SAYS = ["CONFLICT (content): merge conflict in everything.js", "Accept current change? Incoming? Your fate?",
+  "We're both right. That's the problem.", "Who rebased main? WHO?", "Auto-merging... failed. As usual.", "git push --force fixes this, trust me"];
+const MERGE_COMMITS = ["boss: merge branch 'feature' into main (conflicts)", "boss: git rebase -i, what could go wrong", "boss: merge pull request #∞ from you/oops"];
+const BSOD_TXT = ["Your PC ran into a problem", "and needs to restart."];
+const BSOD_SAYS = ["Collecting some error info for you.", "0% complete. 0% complete. 0% complete.", "Stop code: SKILL_ISSUE",
+  "IRQL_NOT_LESS_OR_EQUAL to your aim", "Have you tried turning it off and on again?", "Your shots? Hex dumps now."];
+const BSOD_COMMITS = ["boss: update the display drivers", "boss: installing Windows Update 1 of 347", "boss: IRQL_NOT_LESS_OR_EQUAL"];
+const HEX = "0123456789ABCDEF";
+const NPM_ROOT = ["┌──────────────┐", "│ my-app@1.0.0 │", "└──────┬───────┘"];
+const DEPS = ["left-pad", "is-odd", "is-even", "lodash", "moment", "colors", "faker", "is-number", "event-stream", "node-ipc", "is-array", "chalk"];
+const NPM_SAYS = ["added 1,337 packages in 0.4s", "found 42 vulnerabilities (41 critical)", "npm WARN deprecated: you",
+  "peer dependency? I barely know her", "has anyone seen left-pad?", "run npm audit fix --force to break everything"];
+const NPM_COMMITS = ["boss: npm install (one tiny package)", "boss: add left-pad as a dependency", "boss: rm -rf node_modules && npm install"];
+const LOOP_RING = "do{continue;}while(true)";
+const LOOP_SAYS = ["while (true) { you(); }", "Are we there yet? Are we there yet?", "Still loading... still loading...",
+  "for (;;) is a lifestyle", "I'll stop when you stop.", "Halting problem? Not my problem."];
+const LOOP_COMMITS = ["boss: while (true) { retry(); }", "boss: fix: the loop exits now (it doesn't)", "boss: for (;;) { one more thing }"];
 const OUCH = ["segfault", "stack overflow", "undefined is not a function", "NullReferenceException", "off by one", "race condition"];
 
 // ---------- palette, from the app's own CSS ----------
@@ -294,7 +314,7 @@ function newGame() {
 }
 const hash = (n) => ((n * 2654435761) >>> 0).toString(16).padStart(8, "0").slice(0, 7);
 function waveTitle(n) {
-  if (n % 4 === 0) return BOSS_COMMITS[(n / 4 - 1) % BOSS_COMMITS.length];
+  if (n % 4 === 0) { const k = n / 4, c = BOSSES[bossKind(k)].commits; return c[bossPass(k) % c.length]; }
   return COMMITS[(n - Math.floor(n / 4) - 1) % COMMITS.length];
 }
 function startWave(n) {
@@ -352,10 +372,14 @@ function eraseShields(x, y, w, h) {
     }));
   }
 }
-function spawnBoss(level) {
-  const hp = 36 + 18 * (level - 1);
+// Boss k (wave 4k) is BOSS_ORDER[k-1], round and round; each pass through the order (B.pass 0, 1, 2...) makes them all harder.
+// B.level = k keeps growing, for the kill bonus.
+function spawnBoss(k) {
+  const kind = bossKind(k), def = BOSSES[kind];
   G.hitsAtBoss = G.hits;
-  G.boss = { level, hp, max: hp, x: view.W / 2, y: 50, w: 0, h: 0, t: 0, fireT: 2, spawnT: 5, sayT: 0, say: SAYS[0], flash: 0 };
+  const B = G.boss = { kind, def, level: k, pass: bossPass(k), hp: 1, max: 1, x: view.W / 2, y: 50, w: 0, h: 0, t: 0, fireT: 2, spawnT: 5,
+    sayT: 0, say: def.says[0], flash: 0, dropped: 0, minionDrops: 0 };
+  def.init(B); def.update(B, 0);
 }
 
 // ---------- effects ----------
@@ -394,8 +418,8 @@ function fire() {
   const n = W.length + (spread ? 2 : 0), max = (G.fx.coffee > 0 ? 4 : 2) * n;
   if (G.shots.filter((s) => !s.ally).length >= max) return;
   P.cool = (G.fx.coffee > 0 ? 0.16 : 0.32) * (G.weapon >= 4 ? 0.8 : 1);
-  const cx = P.x + P.w / 2, y = P.y - 8, pierce = G.fx.pierce > 0;
-  const add = (dx, vx) => G.shots.push({ x: cx + dx, y, vx, vy: -440, pierce, hit: pierce ? new Set() : null });
+  const cx = P.x + P.w / 2, y = P.y - 8, pierce = G.fx.pierce > 0, hex = hexOn();
+  const add = (dx, vx) => G.shots.push({ x: cx + dx, y, vx, vy: -440, pierce, hit: pierce ? new Set() : null, hex, ch: hex ? pick(HEX) : "" });
   for (const [dx, vx] of W) add(dx, vx);
   if (spread) { add(0, -140); add(0, 140); }
   SFX.shoot();
@@ -444,9 +468,10 @@ function updateAlly(dt) {   // the pair programmer: tags along beside you and fi
   A.w = m.w; A.h = m.h; A.y = P.y + P.h - m.h;
   const tx = P.x + P.w + 14 + Math.sin(G.time * 1.7) * 6;
   A.x += (clamp(tx, 4, view.W - A.w - 4) - A.x) * Math.min(1, dt * 7);
-  if ((A.cool -= dt) <= 0 && (G.boss || G.enemies.some((e) => e.alive))) {
+  if ((A.cool -= dt) <= 0 && G.intro <= 0 && (G.boss || G.enemies.some((e) => e.alive))) {
     A.cool = 0.55;
-    G.shots.push({ x: A.x + A.w / 2, y: A.y - 6, vx: 0, vy: -420, ally: true });
+    const hex = hexOn();
+    G.shots.push({ x: A.x + A.w / 2, y: A.y - 6, vx: 0, vy: -420, ally: true, hex, ch: hex ? pick(HEX) : "" });
   }
 }
 function enemyFire(dt) {
@@ -476,33 +501,321 @@ function updateUfo(dt) {
   G.ufo.x += G.ufo.dir * 85 * dt;
   if (G.ufo.x > view.W + 10 || G.ufo.x < -G.ufo.w - 10) { G.ufo = null; G.ufoT = rnd(14, 24); }
 }
+// ---------- bosses ----------
+// Each boss is a definition with hooks: init(B) sets HP and its own state from B.pass; update(B, dt) moves it and (once the wave
+// title is gone, G.intro <= 0) attacks; hit(B, shot) returns true when it took the shot (and calls bossHit for damage); draw(B);
+// aim(B, shot) is where grep's homing shots steer; onDeath(B) is optional. Every timer runs on dt, so pause stops it all.
+const BOSS_ORDER = ["clippy", "merge", "bsod", "npm", "loop"];
+const bossKind = (k) => BOSS_ORDER[(k - 1) % BOSS_ORDER.length];
+const bossPass = (k) => Math.floor((k - 1) / BOSS_ORDER.length);
+const slowK = () => (G.fx.slow > 0 ? 0.5 : 1);   // sleep(7) slows the bosses' own clocks too
+const lerp = (a, b, t) => a + (b - a) * t;
+const hexOn = () => !!(G.boss && G.boss.hex > 0);   // the blue screen's hex-dump spell
+const swayX = (B, w, speed) => view.W / 2 - w / 2 + Math.sin(B.t * speed) * Math.max(0, view.W / 2 - w / 2 - 30);
+const bossName = (B) => B.def.name + (B.pass ? ` v${B.pass + 1}` : "");
+const hitBox = (s, x, y, w, h) => overlap(s.x - 1, s.y, 2, 10, x, y, w, h);
+function bossShot(x, y, vx, vy, ch, color) { G.ebul.push({ x, y, vx, vy, ch, color, seed: Math.random() * 6 }); }
+function minion(label, x, y, o = {}) {
+  const m = measure([label], 11);
+  G.drones.push({ x: clamp(x - m.w / 2, 2, view.W - m.w - 2), y, w: m.w, h: m.h, seed: Math.random() * 6, label, minion: true, ...o });
+}
+function aimedShot(x, y, v, ch, color, spread = 0) {
+  const P = G.player, dx = P.x + P.w / 2 - x, dy = Math.max(40, P.y - y), a = Math.atan2(dx, dy) + spread;
+  bossShot(x, y, Math.sin(a) * v, Math.cos(a) * v, ch, color);
+}
+const BOSSES = {
+  clippy: {
+    name: "CLIPPY.EXE", says: SAYS, commits: BOSS_COMMITS, death: "CLIPPY.EXE has stopped responding", flawless: "Clippy has nothing to say",
+    init(B) { B.hp = B.max = 36 + 18 * B.pass; },
+    update(B, dt) {
+      const m = measure(CLIPPY[0], 15), L = B.pass + 1;
+      B.w = m.w; B.h = m.h; B.x = swayX(B, B.w, 0.6); B.y = 50 + Math.sin(B.t * 1.6) * 6;
+      if (G.intro > 0) return;
+      const cx = B.x + B.w / 2, cy = B.y + B.h;
+      if ((B.fireT -= dt) <= 0) {
+        B.fireT = Math.max(0.75, 1.6 - 0.15 * L);
+        const n = Math.min(7, 3 + 2 * B.pass), v = 160 + 15 * B.pass;
+        for (let i = 0; i < n; i++) {
+          const a = n > 1 ? -0.55 + (1.1 * i) / (n - 1) : 0;
+          bossShot(cx, cy, Math.sin(a) * v, Math.cos(a) * v, i % 2 ? "?" : "@", C.amber);
+        }
+        SFX.ufo();
+      }
+      if ((B.spawnT -= dt) <= 0) { B.spawnT = Math.max(3, 6 - L); for (const dx of [-30, 30]) minion("[TODO]", cx + dx, cy); }
+    },
+    hit(B, s) { if (!hitBox(s, B.x + 6, B.y, B.w - 12, B.h)) return false; bossHit(s.x); return true; },
+    draw(B) {
+      const blink = Math.floor(B.t * 1.3) % 5 === 4 ? 1 : 0;
+      drawSprite(sprite(CLIPPY[blink], 15, B.flash > 0 ? "#ffffff" : C.amber, 8), B.x, B.y);
+      txt(bossName(B), B.x + B.w / 2, B.y - 14, C.dim, 10, "center");
+    },
+  },
+  // Two halves drift together; kill both before they meet, or they merge: each heals half its HP (a resolved one comes back).
+  merge: {
+    name: "MERGE CONFLICT", says: MERGE_SAYS, commits: MERGE_COMMITS, death: "conflicts resolved: git commit --no-edit ✓",
+    flawless: "fast-forward only",
+    init(B) {
+      const hp = 12 + 7 * B.pass;
+      B.halves = [{ side: -1, art: MERGE_L, color: "orange2", hp, max: hp }, { side: 1, art: MERGE_R, color: "blue", hp, max: hp }];
+      B.hp = B.max = hp * 2; B.gap = 1; B.meetT = Math.max(12, 30 - 8 * B.pass); B.merges = 0; B.fireT = 2.4; B.spawnT = 6;
+    },
+    update(B, dt) {
+      const H = B.halves, alive = H.filter((h) => h.hp > 0);
+      if (G.intro <= 0) {
+        B.gap -= (dt * slowK() * (alive.length === 1 ? 1.5 : 1)) / B.meetT;   // the one left standing rushes in
+        if (B.gap <= 0) mergeHalves(B);
+      }
+      const cx = view.W / 2, y = 60 + Math.sin(B.t * 1.4) * 5;
+      for (const h of H) {
+        const m = measure(h.art, 13);
+        h.w = m.w; h.h = m.h; h.y = y;
+        h.x = h.side < 0 ? lerp(cx - m.w - 8, 10, B.gap) : lerp(cx + 8, view.W - m.w - 10, B.gap);
+      }
+      B.x = H[0].x; B.y = y; B.w = H[1].x + H[1].w - H[0].x; B.h = Math.max(H[0].h, H[1].h);
+      if (G.intro > 0) return;
+      if ((B.fireT -= dt) <= 0) {
+        B.fireT = Math.max(0.9, 1.8 - 0.3 * B.pass);
+        for (const h of alive) {
+          const x = h.x + h.w / 2, yy = h.y + h.h, v = 150 + 15 * B.pass;
+          aimedShot(x, yy, v, h.side < 0 ? ">" : "<", C[h.color]);
+          for (let i = 0; i < B.pass; i++) bossShot(x, yy, -h.side * rnd(30, 90), v, h.side < 0 ? ">" : "<", C[h.color]);
+        }
+        SFX.ufo();
+      }
+      if ((B.spawnT -= dt) <= 0) { B.spawnT = Math.max(3.5, 7 - B.pass); minion("[=======]", cx, y + B.h, { die: "resolved ✓", color: "red" }); }
+    },
+    hit(B, s) {
+      for (const h of B.halves) {
+        if (h.hp <= 0 || !hitBox(s, h.x, h.y, h.w, h.h)) continue;
+        if (--h.hp <= 0 && B.hp > 1) {
+          burst(h.x + h.w / 2, h.y + h.h / 2, C[h.color], 16, "<>=");
+          float(`${h.side < 0 ? "HEAD" : "main"}: resolved ✓ (now the other one!)`, h.x + h.w / 2, h.y + h.h + 6, C.green, 12, 1.6);
+        }
+        bossHit(s.x);
+        return true;
+      }
+      return false;
+    },
+    aim(B, s) {
+      const al = B.halves.filter((h) => h.hp > 0);
+      const h = al.length ? al.reduce((a, b) => (Math.abs(a.x + a.w / 2 - s.x) < Math.abs(b.x + b.w / 2 - s.x) ? a : b)) : B.halves[0];
+      return { x: h.x + h.w / 2, y: h.y + h.h / 2 };
+    },
+    draw(B) {
+      for (const h of B.halves) {
+        if (h.hp > 0) {
+          drawSprite(sprite(h.art, 13, B.flash > 0 ? "#ffffff" : C[h.color], 7), h.x, h.y);
+          const n = 8, f = Math.ceil((h.hp / h.max) * n);
+          txt(`[${"#".repeat(f)}${".".repeat(n - f)}]`, h.x + h.w / 2, h.y + h.h + 2, C[h.color], 9, "center", 2);
+        } else txt("resolved ✓", h.x + h.w / 2, h.y + h.h / 2 - 6, C.green, 11, "center", 3, 0.45);
+      }
+      const cx = view.W / 2;
+      txt(bossName(B), cx, B.y - 16, C.dim, 10, "center");
+      if (B.gap < 0.35) txt("=======", cx, B.y + B.h / 2 - 6, C.red, 12, "center", 6, Math.floor(G.rt * 6) % 2 ? 1 : 0.4);
+    },
+  },
+  // Sweeping rows of hex with a gap to slip through; every so often it turns your shots into harmless hex dumps for a few seconds.
+  bsod: {
+    name: "BLUE SCREEN OF DEATH", says: BSOD_SAYS, commits: BSOD_COMMITS, death: "rebooting... 100% complete", flawless: "no crash dump needed",
+    init(B) {
+      B.hp = B.max = 40 + 18 * B.pass; B.rowT = 2.2; B.hexT = 9; B.hex = 0; B.warn = 0; B.spawnT = 8; B.gapX = view.W / 2;
+      B.rowEvery = Math.max(1.3, 2.6 - 0.45 * B.pass);
+    },
+    update(B, dt) {
+      const face = pixelText(":(", "#ffffff", "#ffffff"), m = measure(BSOD_TXT, 10);
+      B.fw = face.w * 4; B.fh = face.h * 4;
+      B.w = Math.max(B.fw, m.w) + 24; B.h = B.fh + m.h + 34;
+      B.x = swayX(B, B.w, 0.45); B.y = 50;
+      if (G.intro > 0) return;
+      const k = dt * slowK();
+      if (B.hex > 0) B.hex -= k;
+      else if (B.warn > 0) {
+        if ((B.warn -= k) <= 0) {
+          B.hex = Math.min(4.5, 2.5 + 0.6 * B.pass);
+          float("your shots are hex dumps now", view.W / 2, view.H * 0.55, C.blue, 13, 1.6);
+        }
+      } else if ((B.hexT -= k) <= 0) { B.hexT = Math.max(5, 10 - 1.5 * B.pass); B.warn = 1.3; SFX.ufo(); }
+      if ((B.rowT -= k) <= 0) { B.rowT = B.rowEvery; bsodRow(B); }
+      if ((B.spawnT -= k) <= 0) { B.spawnT = Math.max(5, 9 - B.pass); minion("[WER.exe]", B.x + B.w / 2, B.y + B.h, { die: "report sent ✓", color: "blue" }); }
+    },
+    hit(B, s) { if (!hitBox(s, B.x, B.y, B.w, B.h)) return false; bossHit(s.x); return true; },
+    draw(B) {
+      const cx = B.x + B.w / 2;
+      ctx.fillStyle = B.flash > 0 ? "rgba(255,255,255,.35)" : "rgba(0,120,215,.22)"; ctx.fillRect(B.x, B.y, B.w, B.h);
+      drawPixelText(":(", cx, B.y + 8, B.fw, 4, "#ffffff", "#ffffff");
+      BSOD_TXT.forEach((l, i) => txt(l, cx, B.y + B.fh + 14 + i * 12, C.text, 10, "center"));
+      txt(`${Math.floor(100 * (1 - B.hp / B.max))}% complete`, cx, B.y + B.fh + 14 + BSOD_TXT.length * 12, C.blue, 10, "center", 3);
+      txt(bossName(B), cx, B.y - 13, C.dim, 10, "center");
+      if (B.warn > 0) txt("*** STOP: 0x0000DEAD ***", view.W / 2, view.H * 0.55, C.red, 13, "center", 6, Math.floor(G.rt * 8) % 2 ? 1 : 0.35);
+      if (B.hex > 0) txt(`hex mode ${Math.ceil(B.hex)}s: your shots do nothing`, view.W / 2, G.player.y - 86, C.blue, 10, "center", 3);
+    },
+  },
+  // A dependency tree: deps hang under the root package and shield it, drop off as node_modules minions and grow back.
+  // Kill the root and the whole tree goes with it.
+  npm: {
+    name: "npm install", says: NPM_SAYS, commits: NPM_COMMITS, death: "removed 1,337 packages, audited 0", flawless: "found 0 vulnerabilities",
+    init(B) {
+      B.hp = B.max = 30 + 14 * B.pass; B.depHp = B.pass >= 2 ? 3 : 2;
+      B.deps = Array.from({ length: Math.min(6, 4 + B.pass) }, () => ({ name: pick(DEPS), hp: B.depHp, grow: 1 }));
+      B.regrowEvery = Math.max(1.6, 4 - 0.8 * B.pass); B.regrowT = B.regrowEvery; B.dropT = 5; B.fireT = 2; B.shots = 0;
+    },
+    update(B, dt) {
+      const m = measure(NPM_ROOT, 12), k = dt * slowK();
+      B.w = m.w; B.h = m.h; B.x = swayX(B, B.w, 0.5); B.y = 34 + Math.sin(B.t * 1.2) * 4;
+      const n = B.deps.length, sp = Math.min(84, (view.W - 40) / n), cx = B.x + B.w / 2;
+      B.deps.forEach((d, i) => {
+        if (!d) return;
+        const dm = measure([`[${d.name}]`], 11);
+        d.grow = Math.min(1, d.grow + dt * 2); d.w = dm.w; d.h = dm.h; d.flash = Math.max(0, (d.flash || 0) - dt);
+        d.x = cx + (i - (n - 1) / 2) * sp - dm.w / 2; d.y = B.y + B.h + 26;
+      });
+      if (G.intro > 0) return;
+      const live = B.deps.filter((d) => d && d.grow >= 0.5);
+      if ((B.regrowT -= k) <= 0) {
+        B.regrowT = B.regrowEvery;
+        const empty = B.deps.map((d, i) => (d ? -1 : i)).filter((i) => i >= 0);
+        if (empty.length) B.deps[pick(empty)] = { name: pick(DEPS), hp: B.depHp, grow: 0 };
+      }
+      if ((B.dropT -= k) <= 0) {   // a dep falls off the tree as a node_modules minion
+        B.dropT = Math.max(2.5, 5 - B.pass);
+        if (live.length) {
+          const d = pick(live);
+          B.deps[B.deps.indexOf(d)] = null;
+          minion(`[${d.name}]`, d.x + d.w / 2, d.y, { die: "uninstalled", color: "green", vy: 50 });
+        }
+      }
+      if ((B.fireT -= k) <= 0) {
+        B.fireT = Math.max(0.7, 1.5 - 0.25 * B.pass); B.shots++;
+        for (let i = 0; i <= Math.min(2, B.pass) && live.length; i++) { const d = pick(live); aimedShot(d.x + d.w / 2, d.y + d.h, 150 + 15 * B.pass, "^", C.green, rnd(-0.15, 0.15)); }
+        if (B.shots % 3 === 0) for (const a of [-0.35, 0, 0.35]) bossShot(cx, B.y + B.h, Math.sin(a) * 160, Math.cos(a) * 160, "~", C.amber);
+      }
+    },
+    hit(B, s) {
+      for (let i = 0; i < B.deps.length; i++) {
+        const d = B.deps[i];
+        if (!d || d.grow < 0.5 || !hitBox(s, d.x, d.y, d.w, d.h)) continue;
+        if (--d.hp <= 0) {
+          B.deps[i] = null; addScore(20 * comboHit());
+          burst(d.x + d.w / 2, d.y + d.h / 2, C.green, 10); float(`npm rm ${d.name}`, d.x + d.w / 2, d.y, C.green, 10);
+          minionDrop(d.x + d.w / 2, d.y, 0.15); SFX.hit();
+        } else { d.flash = 0.07; burst(s.x, s.y, C.amber, 3); SFX.hit(); }
+        return true;
+      }
+      if (!hitBox(s, B.x + 4, B.y, B.w - 8, B.h)) return false;
+      bossHit(s.x); return true;
+    },
+    onDeath(B) {
+      for (const d of B.deps) if (d) { burst(d.x + d.w / 2, d.y + d.h / 2, C.green, 8); addScore(20); }
+      B.deps = B.deps.map(() => null);
+    },
+    draw(B) {
+      const cx = B.x + B.w / 2, n = B.deps.length, sp = Math.min(84, (view.W - 40) / n), y0 = B.y + B.h, lo = cx - ((n - 1) / 2) * sp;
+      drawSprite(sprite(NPM_ROOT, 12, B.flash > 0 ? "#ffffff" : C.amber, 6), B.x, B.y);
+      txt(bossName(B), cx, B.y - 13, C.dim, 10, "center");
+      ctx.fillStyle = C.faint; ctx.fillRect(lo, y0 + 8, sp * (n - 1), 1); ctx.fillRect(cx, y0 - 2, 1, 10);
+      B.deps.forEach((d, i) => {
+        const x = lo + i * sp;
+        ctx.fillStyle = C.faint; ctx.fillRect(x, y0 + 8, 1, 16);
+        if (!d) return;
+        const hurt = d.hp < B.depHp;
+        drawSprite(sprite([`[${d.name}]`], 11, d.flash > 0 ? "#ffffff" : hurt ? C.amber : C.green, 4), d.x, d.y, d.grow < 0.5 ? 0.3 : d.grow);
+      });
+    },
+  },
+  // A spinning ⟳ inside a rotating ring of "do{continue;}while(true)": shots only get through the gaps to the core.
+  loop: {
+    name: "INFINITE LOOP", says: LOOP_SAYS, commits: LOOP_COMMITS, death: "break; // finally", flawless: "O(1) after all",
+    init(B) {
+      B.hp = B.max = 24 + 12 * B.pass; B.R = 56; B.N = LOOP_RING.length; B.rot = 0; B.dir = 1; B.flipT = 6; B.fireT = 2.4; B.spawnT = 7;
+      B.spin = 0.6 + 0.3 * B.pass;
+      const gaps = Math.max(2, 4 - B.pass), every = Math.floor(B.N / gaps);   // gaps of 3 segments: 4, then 3, then 2
+      B.open = new Set(Array.from({ length: B.N }, (_, i) => i).filter((i) => i % every < 3 && i < every * gaps));
+    },
+    update(B, dt) {
+      const k = dt * slowK();
+      B.cx = view.W / 2 + Math.sin(B.t * 0.4) * Math.max(0, view.W / 2 - B.R - 40); B.cy = 66 + B.R + Math.sin(B.t * 1.3) * 4;
+      B.x = B.cx - B.R - 8; B.y = B.cy - B.R - 8; B.w = B.h = 2 * B.R + 16;
+      B.rot = (B.rot + B.dir * B.spin * k) % (Math.PI * 2);
+      if (G.intro > 0) return;
+      if (B.pass > 0 && (B.flipT -= k) <= 0) { B.flipT = rnd(4, 7); B.dir = -B.dir; float("reverse()", B.cx, B.cy + B.R + 10, C.blue, 10); }
+      if ((B.fireT -= k) <= 0) {   // bullets fly out of the gaps that face down
+        B.fireT = Math.max(0.8, 1.7 - 0.3 * B.pass);
+        const seg = (Math.PI * 2) / B.N, v = 140 + 15 * B.pass;
+        let fired = 0;
+        for (const i of B.open) {
+          const a = B.rot + (i + 0.5) * seg;
+          if (Math.sin(a) < 0.3) continue;
+          bossShot(B.cx + Math.cos(a) * B.R, B.cy + Math.sin(a) * B.R, Math.cos(a) * v, Math.sin(a) * v, "∞", C.orange2); fired++;
+        }
+        if (!fired || B.pass > 0) aimedShot(B.cx, B.cy + B.R + 4, v, "∞", C.orange2);
+        SFX.ufo();
+      }
+      if ((B.spawnT -= k) <= 0) { B.spawnT = Math.max(4, 8 - B.pass); minion("[for(;;)]", B.cx, B.cy + B.R, { die: "break;", color: "orange2" }); }
+    },
+    // Where a shot's path this frame crosses the ring (radius R) or reaches the core (radius 22), from its last spot: a fast
+    // shot on a slow frame moves over 20px, and could jump straight over a thin ring if we only checked where it is now.
+    hit(B, s) {
+      const x0 = s.px ?? s.x, y0 = (s.py ?? s.y) + 4, dx = s.x - x0, dy = s.y + 4 - y0, fx = x0 - B.cx, fy = y0 - B.cy;
+      const a = dx * dx + dy * dy || 1e-6, b = 2 * (fx * dx + fy * dy);
+      const cross = (r) => {   // where along this frame's path (0..1) it crosses the circle of radius r
+        const c = fx * fx + fy * fy - r * r, disc = b * b - 4 * a * c;
+        if (disc < 0) return [];
+        const q = Math.sqrt(disc);
+        return [(-b - q) / (2 * a), (-b + q) / (2 * a)].filter((t) => t >= 0 && t <= 1);
+      };
+      const core = fx * fx + fy * fy <= 484 ? 0 : cross(22)[0], seg = (Math.PI * 2) / B.N;
+      for (const t of cross(B.R)) {
+        if (core != null && core < t) break;
+        const ang = Math.atan2(fy + dy * t, fx + dx * t), i = Math.floor((((ang - B.rot) % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2) / seg) % B.N;
+        if (B.open.has(i)) continue;
+        burst(x0 + dx * t, y0 + dy * t, C.blue, 3, "{}.");
+        return true;   // the ring takes it
+      }
+      if (core == null) return false;
+      bossHit(s.x); return true;
+    },
+    aim(B) { return { x: B.cx, y: B.cy }; },
+    draw(B) {
+      const seg = (Math.PI * 2) / B.N;
+      for (let i = 0; i < B.N; i++) {
+        if (B.open.has(i)) continue;
+        const a = B.rot + (i + 0.5) * seg, sp = sprite([LOOP_RING[i]], 14, C.blue, 5);
+        drawSprite(sp, B.cx + Math.cos(a) * B.R - sp.w / 2, B.cy + Math.sin(a) * B.R - sp.h / 2);
+      }
+      ctx.save(); ctx.translate(B.cx, B.cy); ctx.rotate(B.t * 3 * B.dir);
+      txt("⟳", 0, -21, B.flash > 0 ? "#ffffff" : C.orange2, 36, "center", 8);
+      ctx.restore();
+      txt(bossName(B), B.cx, B.cy - B.R - 22, C.dim, 10, "center");
+    },
+  },
+};
+function mergeHalves(B) {   // they met: auto-merge, and both heal
+  B.merges++; B.gap = 1;
+  for (const h of B.halves) h.hp = h.hp > 0 ? Math.min(h.max, h.hp + Math.ceil(h.max / 2)) : Math.ceil(h.max / 2);
+  B.hp = B.halves.reduce((a, h) => a + h.hp, 0);
+  const cx = view.W / 2, cy = B.y + B.h / 2;
+  burst(cx, cy, C.red, 26, "<>=");
+  float("Auto-merging... CONFLICT healed itself", cx, cy + 30, C.red, 13, 1.8);
+  for (let i = 0; i < 5 + B.pass * 2; i++) { const a = -0.7 + (1.4 * i) / (4 + B.pass * 2); bossShot(cx, cy, Math.sin(a) * 150, Math.cos(a) * 150, "=", C.red); }
+  G.shake = Math.max(G.shake, 6); SFX.boom();
+}
+function bsodRow(B) {   // a row of hex across the field, with one gap the player can reach in time
+  const P = G.player, W = view.W, gw = P.w * Math.max(1.8, 2.9 - 0.4 * B.pass), reach = 220 * B.rowEvery * 0.7;
+  B.gapX = clamp(B.gapX + rnd(-reach, reach), gw / 2 + 8, W - gw / 2 - 8);
+  for (let x = 6; x < W - 4; x += 13) {
+    if (Math.abs(x - B.gapX) < gw / 2) continue;
+    bossShot(x, B.y + B.h + 4, 0, 70 + 14 * B.pass, pick(HEX), C.blue);
+  }
+}
 function updateBoss(dt) {
-  const B = G.boss, m = measure(CLIPPY[0], 15);
-  B.t += dt; B.w = m.w; B.h = m.h; B.flash = Math.max(0, B.flash - dt);
-  B.x = view.W / 2 - B.w / 2 + Math.sin(B.t * 0.6) * Math.max(0, view.W / 2 - B.w / 2 - 30);
-  B.y = 50 + Math.sin(B.t * 1.6) * 6;
-  if ((B.sayT -= dt) <= 0) { B.say = pick(SAYS); B.sayT = 4; }
-  if (G.intro > 0) return;
-  if ((B.fireT -= dt) <= 0) {
-    B.fireT = Math.max(0.75, 1.6 - 0.15 * B.level);
-    const n = Math.min(7, 3 + 2 * (B.level - 1)), cx = B.x + B.w / 2, cy = B.y + B.h;
-    for (let i = 0; i < n; i++) {
-      const a = n > 1 ? -0.55 + (1.1 * i) / (n - 1) : 0;
-      G.ebul.push({ x: cx, y: cy, vx: Math.sin(a) * 160, vy: Math.cos(a) * 160, ch: i % 2 ? "?" : "@", color: C.amber, seed: 0 });
-    }
-    SFX.ufo();
-  }
-  if ((B.spawnT -= dt) <= 0) {
-    B.spawnT = Math.max(3, 6 - B.level);
-    for (let i = 0; i < 2; i++) {
-      const m2 = measure(["[TODO]"], 11);
-      G.drones.push({ x: B.x + B.w / 2 - m2.w / 2 + (i ? 30 : -30), y: B.y + B.h, w: m2.w, h: m2.h, seed: Math.random() * 6 });
-    }
-  }
+  const B = G.boss;
+  B.t += dt; B.flash = Math.max(0, B.flash - dt);
+  if ((B.sayT -= dt) <= 0) { B.say = pick(B.def.says); B.sayT = 4; }
+  B.def.update(B, dt);
 }
 function updateDrones(dt) {
   for (const d of G.drones) {
-    d.y += (d.drip ? 70 : 38) * dt; d.x += Math.sin(G.time * 2 + d.seed) * (d.drip ? 14 : 40) * dt;
+    d.y += (d.vy || (d.drip ? 70 : 38)) * dt; d.x += Math.sin(G.time * 2 + d.seed) * (d.drip ? 14 : 40) * dt;
     eraseShields(d.x, d.y, d.w, d.h);
     const P = G.player;
     if (overlap(d.x, d.y, d.w, d.h, P.x, P.y, P.w, P.h)) { d.dead = true; playerHit(); }
@@ -525,13 +838,14 @@ function kill(e, noDrop) {
   SFX.hit();
   if (!noDrop) dropPower(cx, cy, false);
 }
-function dropPower(x, y, force) {
+// want: this power-up and no other; real: never a trojan
+function dropPower(x, y, force, want, real) {
   if (!force && (Math.random() > 0.1 || G.powerups.length >= 2)) return;
   const pool = ["refactor", "refactor", "coffee", "coffee", "duck", "lgtm", "revert", "sudo", "grep", "pair", "firewall", "sleep", "npm", "npm", "life"]
     .filter((t) => (t !== "npm" || G.weapon < 4) && (t !== "life" || G.lives < MAX_LIVES));
   if (G.lives < 3) pool.push("revert", "revert", "firewall");
-  const fake = G.wave >= 3 && Math.random() < 0.14;   // a trojan: looks like a power-up, but its name is spelled with numbers
-  const type = fake ? pick(["coffee", "refactor", "sudo", "firewall"]) : pick(pool);
+  const fake = !want && !real && G.wave >= 3 && Math.random() < 0.14;   // a trojan: looks like a power-up, but its name is spelled with numbers
+  const type = fake ? pick(["coffee", "refactor", "sudo", "firewall"]) : want || pick(pool);
   const label = fake ? POWERS[type].label.replace(/[oe]/, (c) => (c === "o" ? "0" : "3")) : POWERS[type].label;
   const m = measure(["[" + label + "]"], 11);
   G.powerups.push({ type, label, fake, x: clamp(x - m.w / 2, 4, view.W - m.w - 4), y, w: m.w, h: m.h });
@@ -586,17 +900,32 @@ function gameOver(reason) {
   G.state = "over"; G.overReason = reason; G.overAt = G.rt; G.shake = 10; G.scored = false;
   store.set("hi", G.hi); SFX.boom();
 }
-function bossHit() {
+// Power-ups in boss fights: every boss drops one (never a trojan) as its HP passes 2/3 and 1/3, once each (a boss that heals
+// can't drop them again), and its minions drop one 22% of the time, at most 3 a fight. While the gun isn't maxed, a fair share of
+// them are npm update.
+const BOSS_DROPS = [2 / 3, 1 / 3], MINION_DROPS = 3;
+function bossDrop(x, y) { dropPower(x, y, true, G.weapon < 4 && Math.random() < 0.45 ? "npm" : null, true); }
+function minionDrop(x, y, chance = 0.22) {
+  const B = G.boss;
+  if (!B || B.minionDrops >= MINION_DROPS || G.powerups.length >= 2 || Math.random() >= chance) return;
+  B.minionDrops++;
+  dropPower(x, y, true, G.weapon < 4 && Math.random() < 0.35 ? "npm" : null);
+}
+function bossHit(x) {
   const B = G.boss;
   B.hp--; B.flash = 0.08; addScore(5); G.shake = Math.max(G.shake, 1);
+  while (B.hp > 0 && B.dropped < BOSS_DROPS.length && B.hp <= Math.floor(B.max * BOSS_DROPS[B.dropped])) {   // a third of it gone
+    B.dropped++; bossDrop(x ?? B.x + B.w / 2, B.y + B.h);
+  }
   if (B.hp > 0) return SFX.hit();
   const cx = B.x + B.w / 2, cy = B.y + B.h / 2, bonus = 1000 * B.level * mult();
   addScore(bonus);
+  if (B.def.onDeath) B.def.onDeath(B);
   for (let i = 0; i < 4; i++) burst(cx + rnd(-30, 30), cy + rnd(-30, 30), pick([C.amber, C.orange, C.text]), 20);
-  float("CLIPPY.EXE has stopped responding", view.W / 2, cy, C.amber, 14, 2.2);
+  float(B.def.death, view.W / 2, cy, C.amber, 14, 2.2);
   float(`+${bonus}`, view.W / 2, cy + 20, C.dim, 11, 2);
   if (G.lives < MAX_LIVES) { G.lives++; float("+1 ✻", G.player.x + G.player.w / 2, G.player.y - 20, C.orange, 12, 1.6); }
-  if (G.hits === G.hitsAtBoss) { addScore(500); float("flawless: Clippy has nothing to say  +500", view.W / 2, cy + 40, C.green, 12, 2.2); }
+  if (G.hits === G.hitsAtBoss) { addScore(500); float(`flawless: ${B.def.flawless}  +500`, view.W / 2, cy + 40, C.green, 12, 2.2); }
   G.boss = null; G.drones = []; G.ebul = []; G.clearT = 2.6; G.shake = 12;
   SFX.boom();
 }
@@ -612,11 +941,21 @@ function updateShots(dt) {
         const d = dx * dx + dy * dy * 0.5;
         if (d < best) { best = d; want = dx; }
       }
+      if (want == null && G.boss) {   // in a boss fight: steer at its weak spot
+        const B = G.boss, t = B.def.aim ? B.def.aim(B, s) : { x: B.x + B.w / 2, y: B.y + B.h / 2 };
+        if (t.y < s.y) want = t.x - s.x;
+      }
       if (want != null) s.vx += clamp(clamp(want * 3, -240, 240) - s.vx, -700 * dt, 700 * dt);
     }
+    s.px = s.x; s.py = s.y;
     s.x += s.vx * dt; s.y += s.vy * dt;
     if (s.y < 18 || s.x < 0 || s.x > view.W) { s.dead = true; continue; }
     if (shieldHit(s.x, s.y)) { s.dead = true; continue; }
+    if (s.hex) {   // a hex dump: harmless, it just splats on the blue screen
+      const B = G.boss;
+      if (B && hitBox(s, B.x, B.y, B.w, B.h)) { s.dead = true; burst(s.x, s.y, C.blue, 2, HEX); }
+      continue;
+    }
     for (const e of G.enemies) {
       if (!e.alive || hidden(e) || (s.hit && s.hit.has(e))) continue;
       const p = epos(e);
@@ -637,11 +976,12 @@ function updateShots(dt) {
       continue;
     }
     const B = G.boss;
-    if (B && overlap(s.x - 1, s.y, 2, 10, B.x + 6, B.y, B.w - 12, B.h)) { s.dead = true; burst(s.x, s.y, C.amber, 3); bossHit(); continue; }
+    if (B && B.def.hit(B, s)) { s.dead = true; burst(s.x, s.y, C.amber, 3); continue; }
     for (const d of G.drones) {
       if (d.dead || !overlap(s.x - 1, s.y, 2, 10, d.x, d.y, d.w, d.h)) continue;
-      s.dead = d.dead = true; addScore(15 * comboHit()); burst(d.x + d.w / 2, d.y, d.drip ? C.green : C.text, 8);
+      s.dead = d.dead = true; addScore(15 * comboHit()); burst(d.x + d.w / 2, d.y, d.drip ? C.green : C[d.color] || C.text, 8);
       float(d.die || "DONE ✓", d.x + d.w / 2, d.y, C.green);
+      if (d.minion) minionDrop(d.x + d.w / 2, d.y);   // (boss fights have power-ups too)
       break;
     }
     if (s.dead) continue;
@@ -713,7 +1053,7 @@ function update(dt) {
   P.inv = Math.max(0, P.inv - dt); P.cool -= dt;
   const dir = (keys.has("right") ? 1 : 0) - (keys.has("left") ? 1 : 0);
   P.x = clamp(P.x + dir * (G.fx.coffee > 0 ? 340 : 220) * dt, 4, view.W - P.w - 4);
-  if (keys.has("fire") && P.cool <= 0) fire();
+  if (keys.has("fire") && P.cool <= 0 && G.intro <= 0) fire();   // (not while the wave's title is up and nothing moves yet)
   if (G.intro > 0) G.intro -= dt;
   else { stepFormation(dt); enemyFire(dt); updateUfo(dt); updateDivers(dt); }
   if (G.state !== "play") return updateFx(dt);
@@ -780,12 +1120,13 @@ function drawField() {
   }
   if (G.ufo) drawSprite(sprite(UFO[Math.floor(G.rt * 6) % 2], 12, C.orange2, 7), G.ufo.x, G.ufo.y);
   if (G.boss) drawBoss();
-  for (const d of G.drones) drawSprite(sprite([d.label || "[TODO]"], 11, d.drip ? C.green : C.text), d.x, d.y);
+  for (const d of G.drones) drawSprite(sprite([d.label || "[TODO]"], 11, d.drip ? C.green : C[d.color] || C.text), d.x, d.y);
   for (const p of G.powerups) {
     const pw = POWERS[p.type];
     drawSprite(sprite(["[" + (p.label || pw.label) + "]"], 11, C[pw.color], 7), p.x, p.y, 0.65 + 0.35 * Math.sin(G.rt * 10));
   }
   for (const s of G.shots) {
+    if (s.hex) { drawSprite(sprite([s.ch], 11, C.blue, 3), s.x - 3.5, s.y, 0.75); continue; }
     const ch = s.vx < -40 ? "\\" : s.vx > 40 ? "/" : "|";
     drawSprite(sprite([ch], 12, s.pierce ? C.red : s.ally ? C.green : C.amber, 6), s.x - 3.5, s.y);
   }
@@ -804,10 +1145,8 @@ function drawField() {
 }
 function drawBoss() {
   const B = G.boss, W = view.W;
-  const blink = Math.floor(B.t * 1.3) % 5 === 4 ? 1 : 0;
-  drawSprite(sprite(CLIPPY[blink], 15, B.flash > 0 ? "#ffffff" : C.amber, 8), B.x, B.y);
-  txt("CLIPPY.EXE", B.x + B.w / 2, B.y - 14, C.dim, 10, "center");
-  const n = 20, f = Math.ceil((B.hp / B.max) * n);
+  B.def.draw(B);
+  const n = 20, f = clamp(Math.ceil((B.hp / B.max) * n), 0, n);
   txt(`[${"#".repeat(f)}${".".repeat(n - f)}]`, W / 2, 20, C.amber, 10, "center", 4);
   const lines = wrap(B.say, 24).map((t) => ({ t, c: C.text }));
   const right = B.x + B.w / 2 < W / 2, cw = charW(11), bw = (Math.max(...lines.map((l) => l.t.length)) + 4) * cw;
@@ -815,7 +1154,7 @@ function drawBoss() {
   if (left > 2 && left + bw < W - 2) {
     box(lines, 0, 0, { left, top: B.y + 2, size: 11, frame: C.dim });
     txt(right ? "<" : ">", right ? left - 8 : left + bw + 1, B.y + 28, C.dim, 11);
-  }
+  } else txt(`"${B.say}"`, W / 2, B.y + B.h + 14, C.dim, 11, "center", 2);   // no room beside it (the merge conflict's halves)
 }
 function drawHud() {
   const W = view.W;
@@ -857,7 +1196,7 @@ function drawIntro() {
 function drawTitle() {
   const W = view.W, H = view.H, cx = W / 2;
   const wait = !V.manual;   // it popped up by itself while Claude works (not opened with the button or the menu)
-  let y = Math.max(6, (H - 352 - (wait ? 22 : 0)) / 2);
+  let y = Math.max(6, (H - 366 - (wait ? 22 : 0)) / 2);
   if (wait) {   // typed out like a prompt, then a blinking cursor
     const s = "While you wait...", n = Math.min(s.length, Math.floor((G.rt - V.shownAt) * 16)), cw = charW(12);
     const x0 = cx - ((s.length + 3) * cw) / 2;
@@ -886,7 +1225,8 @@ function drawTitle() {
     for (const [t, c] of part) { txt(t, x, y, c, 11, "left", 4); x += (t.length + 1) * cw; }
     y += 16;
   }
-  txt("collect npm update to level up your weapon · beware fake power-ups: their names are spelled with numbers", cx, y, C.faint, 10, "center"); y += 18;
+  txt("collect npm update to level up your weapon · beware fake power-ups: their names are spelled with numbers", cx, y, C.faint, 10, "center"); y += 14;
+  txt("every 4th wave a boss: five of them in turn, then round again, harder", cx, y, C.faint, 10, "center"); y += 18;
   const blink = Math.floor(G.rt * 2.5) % 2 === 0;
   if (isFocused()) txt(STANDALONE ? "press SPACE or tap to start · L: top 10" : "press SPACE to start · L: top 10", cx, y, C.amber, 14, "center", 6, blink ? 1 : 0.35);
   else txt("[ click here to play ]", cx, y, C.amber, 14, "center", 6, blink ? 1 : 0.35);
@@ -1218,7 +1558,7 @@ window.invaders = {
   get visible() { return V.visible; },
   // for tests: drive the game without real time or focus
   _debug: {
-    G, V, view, keys, poll, render, newGame, startWave, applyPower, dropPower, gameOver,
+    G, V, view, keys, poll, render, newGame, startWave, applyPower, dropPower, gameOver, BOSSES, bossKind, bossPass,
     step(sec) { for (let t = 0; t < sec; t += 1 / 60) advance(1 / 60, true); render(); paintStatus(); },
   },
 };
