@@ -11,7 +11,7 @@ class MiniBar {
   // fires once charge beats a random threshold, so two pulses close together nearly always fire it); seconds charge leaks;
   // spontaneous firings per neuron per second (4x while nothing is in flight); most pulses in flight per neuron.
   static FLASH = 0.16; static REFRACT = 1.2; static SPEED = 7; static FANOUT = 0.65; static KICK = 0.75; static LEAK = 0.8;
-  static SPONT = 0.025; static PULSES = 0.45; static WAVE = 3; static WAVE_GAP = [0.8, 2.2]; static WAVE_BACK = 0.1; static WAVE_REACH = 0.94; static WAVE_REFRACT = 0.7; static WIDE_RATE = 0.65;   // WIDE_RATE: the speed (of everything) at 560 px and wider; 160 px and under run at 1
+  static SPONT = 0.025; static PULSES = 0.45; static WAVE = 3; static WAVE_GAP = [0.5, 1.4]; static WAVE_GLOW = 0.42; static WAVE_BACK = 0.1; static WAVE_REACH = 0.94; static WAVE_REFRACT = 0.7; static WIDE_RATE = 0.65;   // WIDE_RATE: the speed (of everything) at 560 px and wider; 160 px and under run at 1
   static hash(n) { const s = Math.sin(n * 127.1 + 311.7) * 43758.5453; return s - Math.floor(s); }
   // smooth 1-D value noise in [0, 1] (the idle shimmer of the resting neurons)
   static noise(x) {
@@ -93,7 +93,7 @@ class MiniBar {
     const best = [...ext.values()].sort((a, b) => (b[1] - b[0]) - (a[1] - a[0]))[0];
     L.start = best ? best[2].filter((i) => L.x[i] <= best[0] + Math.max(10, (best[1] - best[0]) * 0.12)) : [];   // (its leftmost neurons)
     L.wsp = Math.max(10, cols / MiniBar.WAVE / L.rate);   // cells a second: about WAVE seconds to cross, whatever the width
-    L.next = 0; L.waveOn = false;
+    L.next = 0; L.waveOn = false; L.wmax = 0; L.relays = 0; L.right = best ? best[1] : 0;
     L.fresh = true;
     return L;
   }
@@ -107,6 +107,7 @@ class MiniBar {
   fire(L, i, from, all, wave) {   // neuron i fires (unless refractory): flash, and pulses down its other branches (all, or each by chance)
     if (L.now - L.fired[i] < (wave ? (L.fw[i] ? MiniBar.WAVE_REFRACT : 0.12) : MiniBar.FLASH + MiniBar.REFRACT)) return;   // (a thought breaks into a neuron resting from chatter, but not twice in one crossing)
     L.fired[i] = L.now; L.v[i] = 0; L.fw[i] = wave ? 1 : 0;
+    if (wave) L.wmax = Math.max(L.wmax, L.x[i]);
     let slot = 0, sent = 0, fwd = -1;
     for (let k = L.aoff[i]; k < L.aoff[i + 1]; k++) {
       const e = L.adj[k], to = L.ea[e] === i ? L.eb[e] : L.ea[e];
@@ -128,7 +129,7 @@ class MiniBar {
     L.last = t; L.now += dt *= L.rate;
     if (L.fresh) {   // a new thinking spell: everything at rest, and one cascade straight away
       L.fresh = false; L.fired.fill(-99); L.v.fill(0); L.pto.fill(-1);
-      L.next = L.now + 0.15; L.waveOn = false;
+      L.next = L.now + 0.15; L.waveOn = false; L.wmax = 0;
     }
     let busy = false, wave = false;
     for (let s = 0; s < L.cap; s++) {   // pulses arriving: charge the target, which fires if the charge beats a random threshold
@@ -144,7 +145,13 @@ class MiniBar {
       if (L.v[j] > 0.2 + Math.random()) this.fire(L, j, e, false, !!L.pw[s]);
     }
     if (wave) { L.waveOn = true; L.next = Infinity; }
-    else if (L.waveOn) { L.waveOn = false; L.next = L.now + MiniBar.WAVE_GAP[0] + Math.random() * (MiniBar.WAVE_GAP[1] - MiniBar.WAVE_GAP[0]); }   // a thought is over: a pause, then the next
+    else if (L.waveOn && L.wmax < L.right * 0.93 && L.relays < 6) {   // it ran out of branches short of the right: relay it on from the next neuron beyond the front
+      let to = -1;
+      for (let i = 0; i < L.n; i++) if (L.x[i] > L.wmax && (to < 0 || L.x[i] < L.x[to] || (L.x[i] === L.x[to] && Math.random() < 0.5))) to = i;
+      L.relays++;
+      if (to >= 0 && L.x[to] - L.wmax <= 40) this.fire(L, to, -1, true, true); else L.relays = 99;
+    }
+    else if (L.waveOn) { L.waveOn = false; L.relays = 0; L.next = L.now + MiniBar.WAVE_GAP[0] + Math.random() * (MiniBar.WAVE_GAP[1] - MiniBar.WAVE_GAP[0]); }   // a thought is over: a pause, then the next
     if (!wave && L.now >= L.next && L.start.length) {   // a thought: from the left (tried again if it didn't take)
       for (let s = 0; s < L.cap; s++) if (!L.pw[s]) L.pto[s] = -1;   // (chatter gives way: a thought starts on a clear network)
       this.fire(L, L.start[Math.floor(Math.random() * L.start.length)], -1, true, true); L.next = L.now + 0.4;
@@ -193,7 +200,7 @@ class MiniBar {
       }
     }
     for (let i = 0; i < L.n; i++) {   // neurons: a resting glow (brighter as charge builds), a flash with a halo, a dim refractory spell
-      const age = L.now - L.fired[i], x = L.x[i], y = L.y[i];
+      const age = L.now - L.fired[i], x = L.x[i], y = L.y[i], F = L.fw[i] ? MiniBar.WAVE_GLOW : MiniBar.FLASH;   // (a thought's neurons glow longer: the front is a band, not specks)
       const rest = 0.34 + 0.12 * MiniBar.noise(i * 1.9 + L.now * 0.4) + 0.35 * L.v[i] * Math.exp(-(L.now - L.vt[i]) / MiniBar.LEAK);
       let a = rest;
       if (age < F) {
