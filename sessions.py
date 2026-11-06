@@ -2401,6 +2401,8 @@ class Router:
                     code = exit_code(t.get("output_file"))
                     gone = code is None and task_command(t) and shells is not None \
                         and not command_running(task_command(t), shells)
+                    if code is None and not task_command(t) and not t.get("output_file") and not pid_alive(self.meta.session(sid).get("tasks_pid")):
+                        gone = True   # (nothing to look for, and what ran it is gone: it can't be told from a live one, so it isn't kept listed)
                     if code is not None or gone:   # this one's done: its card says so now, not when they all are
                         t["ended"], t["exit_code"] = time.time(), code
                         self.detached_card(sid, t)
@@ -2524,7 +2526,7 @@ class Router:
                 out.append({**base, "key": f"{sid}:{t['task_id']}", "kind": "shell", "task_id": t["task_id"],
                             "description": t.get("description") or "background command", "status": t["status"],
                             "started": t.get("started"), "ended": t.get("ended"), "summary": t.get("summary"),
-                            "detached": bool(t.get("detached")), "output_file": t.get("output_file"), "command": t.get("command"),
+                            "detached": bool(t.get("detached")), "output_file": t.get("output_file"), "command": t.get("command"), "type": t.get("type"),
                             "idle_s": quiet_for(t.get("output_file")) if t["status"] == "running" else None})
             ids = {t.get("tool_use_id"): t["task_id"] for t in shells if t.get("tool_use_id")}
             for a in agents:
@@ -2586,17 +2588,19 @@ class Router:
         """Processes that look like a running background command (found by its command line), for ending one Yo Claude no longer
         has a handle on (it started before a restart). The pids are remembered: only these can be ended with kill_processes."""
         t = next((x for x in self.tasks_list() if x["key"] == key), None)
-        command = " ".join(str((t or {}).get("command") or "").split())
+        command = " ".join(str(task_command(t or {}) or "").split())   # (a restored task has no stored command: its description is it)
+        command = re.sub(r"[\\'\"`]", "", command)   # (the shell's command line has it quoted and escaped: compared without those)
         self._killable = set()
         if len(command) < 8:
             return []
         tail = command[-120:].strip()   # the end is what's particular to this command: the start is shell boilerplate every command shares
         if len(tail) < 20:
             return []
-        snips = {tail, tail.replace("/", chr(92)), tail.replace(chr(92), "/")}
+        snips = {tail, tail.replace("/", "\\"), tail.replace("\\", "/")}
         env = dict(os.environ, YC_SNIPS="\n".join(sorted(snips)))
-        ps = ("$s = $env:YC_SNIPS -split \"`n\"; Get-CimInstance Win32_Process | Where-Object { $c = $_.CommandLine; $c -and "
-              "(($s | Where-Object { $c.Contains($_) }).Count -gt 0) } | Select-Object ProcessId,ParentProcessId,Name,CommandLine,@{n='Started';e={$_.CreationDate.ToString('s')}} | ConvertTo-Json -Compress")
+        ps = ("$s = $env:YC_SNIPS -split \"`n\"; Get-CimInstance Win32_Process | Where-Object { $c = $_.CommandLine; if (-not $c) { $false } else { "
+              "$c = $c.Replace([string][char]92,'').Replace([string][char]34,'').Replace([string][char]39,'').Replace([string][char]96,''); "
+              "(($s | Where-Object { $c.Contains($_) }).Count -gt 0) } } | Select-Object ProcessId,ParentProcessId,Name,CommandLine,@{n='Started';e={$_.CreationDate.ToString('s')}} | ConvertTo-Json -Compress")
         try:
             r = subprocess.run(["powershell", "-NoProfile", "-Command", ps], capture_output=True, text=True, timeout=20, env=env,
                                creationflags=subprocess.CREATE_NO_WINDOW)
