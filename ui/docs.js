@@ -162,7 +162,7 @@ const docs = (() => {
   }
 
   async function buildText(t, view) {
-    const f = await api().read_any(t.m.path, null);
+    const f = await loadingWhile("docs", "#docs", api().read_any(t.m.path, null), t.m.name || "file");
     if (f.error) { view.appendChild(el("div", "pempty", esc(f.error))); return; }
     if (f.binary) { view.appendChild(el("div", "pempty dim", `binary file, ${f.size} bytes: use ⋯ → open with…`)); return; }
     const isMd = MD_EXT.test(t.m.path), canEdit = !!f.editable && !f.truncated;
@@ -251,7 +251,7 @@ const docs = (() => {
   }
 
   async function open(path, cwd) {
-    const m = await api().media(path, cwd);
+    const m = await loadingWhile("docs", "#docs", api().media(path, cwd), base(path));
     if (!m || m.error) return alertBox(m?.error || "Couldn't open that.");
     const key = norm(m.path);
     let t = tabs.find((o) => o.key === key);

@@ -38,7 +38,8 @@ window.gallery = {
     return out;
   },
   // find out which of them exist, with their dates and sizes (cached; the refresh button asks again)
-  async refresh(force) {
+  refresh(force) { return loadingWhile("media", "#panel", this.refreshNow(force), "media"); },
+  async refreshNow(force) {
     if (this.busy) return;
     this.busy = true;
     try {

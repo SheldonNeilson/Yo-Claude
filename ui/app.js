@@ -18,6 +18,31 @@ function loadingShow(sid) {
   t.classList.add("loading");
   document.querySelectorAll("#tree .session.active").forEach((row) => row.classList.add("loadingrow"));
 }
+// The same for any pane that's fetching (files, changes, tasks, media, a file, the sessions list): after 150 ms a small
+// "✻ loading <what>…" sits at the top of `box` until `promise` settles. Pills are kept per `key`, so a newer load of the same
+// pane replaces the older one's. Returns the promise, so a call can be wrapped in place.
+const paneLoads = new Map();
+function loadingWhile(key, box, promise, what) {
+  const token = {}; paneLoads.set(key, token);
+  const timer = setTimeout(() => {
+    const b = typeof box === "string" ? $(box) : box;
+    if (paneLoads.get(key) !== token || !b || b.offsetParent === null) return;
+    let n = document.querySelector(`.paneload[data-key="${key}"]`);
+    if (!n) { n = el("div", "paneload"); n.dataset.key = key; document.body.appendChild(n); }
+    const r = b.getBoundingClientRect();
+    n.innerHTML = `<span class="spin">✻</span> loading ${esc(what)}…`;
+    n.style.left = r.left + r.width / 2 + "px"; n.style.top = r.top + 8 + "px";
+    n.classList.remove("hidden");
+  }, 150);
+  const done = () => {
+    clearTimeout(timer);
+    if (paneLoads.get(key) !== token) return;
+    paneLoads.delete(key);
+    document.querySelector(`.paneload[data-key="${key}"]`)?.classList.add("hidden");
+  };
+  Promise.resolve(promise).then(done, done);
+  return promise;
+}
 function loadingHide(sid) {
   const n = $("#openLoading");
   if (n && n.dataset.sid !== sid) return;   // (another open took over meanwhile)
@@ -320,7 +345,8 @@ $("#focusBtn").onclick = () => panes.focus();
 new MutationObserver(() => panes.render()).observe($("#app"), { attributes: true, attributeFilter: ["class"] });   // (the panel opens itself too)
 
 // ---------- sidebar: folders and their sessions ----------
-async function loadLists() {
+function loadLists() { return loadingWhile("sessions", "#tree", loadListsNow(), "sessions"); }
+async function loadListsNow() {
   const first = await api().group_info().catch(() => null);   // (also the folders outside the sidebar that hold grouped sessions)
   if (first) { S.groups = first.groups; S.groupCwd = first.cwds || {}; S.groupParent = first.parents || {}; S.groupFolders = first.folders || []; }
   const keys = [null, ...S.workspaces, ...S.groupFolders];

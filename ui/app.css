@@ -883,6 +883,9 @@ button { white-space: nowrap; }
 #openLoading { position: fixed; transform: translateX(-50%); z-index: 60; background: var(--bg2); color: var(--orange2); border: 1px solid var(--orange);
   padding: 3px 12px; font-weight: bold; box-shadow: 3px 3px 0 #000; pointer-events: none; }
 #openLoading.hidden { display: none; }
+.paneload { position: fixed; transform: translateX(-50%); z-index: 60; background: var(--bg2); color: var(--orange2); border: 1px solid var(--line2);
+  padding: 1px 10px; font-size: 12px; box-shadow: 2px 2px 0 #000; pointer-events: none; }
+.paneload.hidden { display: none; }
 #transcript.loading { opacity: .35; transition: opacity .15s; }
 .session.loadingrow .t::before { content: "✻ "; color: var(--orange2); animation: spinload 1s linear infinite; display: inline-block; }
 @keyframes spinload { to { transform: rotate(360deg); } }

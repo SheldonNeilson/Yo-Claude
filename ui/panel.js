@@ -24,9 +24,9 @@ window.panel = {
     this.cwd = cwd;
     if (!cwd) { this.git = null; this.changes = null; this.dirs = {}; renderBranch(); if (this.shown()) this.render(); return; }
     const mine = (this.gen = (this.gen || 0) + 1);   // (a newer load supersedes this one: no stale redraws)
-    const slow = session ? Promise.all([api().git_info(), api().changes()]) : Promise.resolve([null, null]);   // (a snapshot of a big repo takes seconds: only the marks wait for it)
+    const slow = session ? loadingWhile("changes", "#panel", Promise.all([api().git_info(), api().changes()]), "changes") : Promise.resolve([null, null]);   // (a snapshot of a big repo takes seconds: only the marks wait for it)
     if (this.shown() && this.tab === "files") {
-      await this.loadDirs();
+      await loadingWhile("files", "#panel", this.loadDirs(), "files");
       if (mine !== this.gen) return;
       this.render();
     }

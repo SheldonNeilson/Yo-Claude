@@ -62,7 +62,7 @@ window.tasks = {
   },
   async loadOutput() {
     const key = this.open;
-    const out = await api().task_output(key);
+    const out = await loadingWhile("tasks", "#panel", api().task_output(key), "output");
     if (key !== this.open) return;
     this.output = out;
     const pre = $("#taskOut");
