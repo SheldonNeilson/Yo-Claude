@@ -326,7 +326,7 @@ code.pathlink:hover, .pathtxt.pathlink:hover { color: var(--orange2); background
 .foldhead .gtitle { color: var(--accent, var(--text)); }
 .foldhead .fcount { flex: none; min-width: 1.6em; padding: 0 6px; text-align: center; font-size: 11px; color: var(--bg); background: var(--accent, var(--dim)); border-radius: 9px; }
 .foldhead .gtog { color: var(--faint); font-size: 11px; flex: none; }
-.foldhead.fold-thought { --accent: #b79cf0; } .foldhead.fold-group { --accent: var(--orange2); } .foldhead.fold-task { --accent: var(--blue); }
+.foldhead.fold-thought { --accent: #b79cf0; } .foldhead.fold-work { --accent: var(--orange2); }
 .foldhead.fold-thought .gsum { font-style: italic; }
 #transcript > .folded { display: none; }
 #transcript > .infold { margin-left: 14px; border-left: 1px dashed var(--line2); }

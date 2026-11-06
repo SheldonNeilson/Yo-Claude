@@ -748,31 +748,37 @@ const transcript = {
     for (const n of t.children) n.classList.remove("folded", "infold");
     if (!want.thought && !want.group) return;
     const ids = new Map(); for (const [i, n] of this.els) ids.set(n, i);
-    const kindOf = (n) => (n.classList.contains("thought") && want.thought ? "thought" : n.classList.contains("group") && want.group ? "group"
-      : n.classList.contains("taskwrap") && want.group && !n.querySelector(".taskcard.running") ? "task" : null);   // (a task still running stays in view)
+    // commands, steps and finished background tasks sit together under one title; thoughts under another
+    const kindOf = (n) => (n.classList.contains("thought") && want.thought ? "thought"
+      : (n.classList.contains("group") || (n.classList.contains("taskwrap") && !n.querySelector(".taskcard.running"))) && want.group ? "work" : null);   // (a task still running stays in view)
     const kids = [...t.children].filter((n) => !n.classList.contains("queuebox"));
     for (let a = 0; a < kids.length;) {
       const k = kindOf(kids[a]);
       if (!k) { a++; continue; }
       let z = a; while (z + 1 < kids.length && kindOf(kids[z + 1]) === k) z++;
       const run = kids.slice(a, z + 1);
-      if (k === "thought" || run.length > 1) this.foldRun(k, run, ids);
+      if (k === "thought" || run.length > 1 || run[0].classList.contains("taskwrap")) this.foldRun(k, run, ids);   // (a lone group already has its own title; a lone finished task card is folded too)
       a = z + 1;
     }
   },
   foldRun(k, run, ids) {
-    const first = k === "thought" ? ids.get(run[0]) : k === "group" ? this.groups.find((g) => g.el === run[0])?.items[0] : run[0].dataset.task;
+    const groupOf = (n) => this.groups.find((g) => g.el === n);
+    const first = k === "thought" ? ids.get(run[0]) : (groupOf(run[0])?.items[0] ?? run[0].dataset.task);
     const key = k[0] + first, open = this.foldOpen.has(key);
     const live = run.some((n) => n.classList.contains("live") || n.classList.contains("running"));
-    let steps = 0, failed = 0, cmds = 0, agents = 0;
-    if (k === "group") for (const n of run) { const g = this.groups.find((x) => x.el === n); steps += g ? g.items.length : 0; if (n.classList.contains("has-errors")) failed++; }
-    if (k === "task") for (const n of run) { if (n.querySelector(".taskcard.failed")) failed++; if (/agent/.test(n.querySelector(".tlabel")?.textContent || "")) agents++; else cmds++; }
-    const title = { thought: "Thinking", group: "Commands & steps", task: "Background tasks" }[k];
-    const count = k === "thought" ? run.length : k === "group" ? steps : run.length;
-    const word = k === "thought" ? (run.length > 1 ? "thoughts" : "thought") : k === "group" ? `step${steps === 1 ? "" : "s"} in ${run.length} group${run.length > 1 ? "s" : ""}`
-      : [cmds && `${cmds} command${cmds > 1 ? "s" : ""}`, agents && `${agents} agent${agents > 1 ? "s" : ""}`].filter(Boolean).join(", ");
+    let steps = 0, groups = 0, failed = 0, cmds = 0, agents = 0;
+    if (k === "work") for (const n of run) {
+      const g = groupOf(n);
+      if (g) { steps += g.items.length; groups++; if (n.classList.contains("has-errors")) failed++; }
+      else { if (n.querySelector(".taskcard.failed")) failed++; if (/agent/.test(n.querySelector(".tlabel")?.textContent || "")) agents++; else cmds++; }
+    }
+    const title = k === "thought" ? "Thinking" : "Commands & steps";
+    const bg = cmds + agents;
+    const count = k === "thought" ? run.length : steps + bg;
+    const word = k === "thought" ? (run.length > 1 ? "thoughts" : "thought")
+      : [steps && `${steps} step${steps > 1 ? "s" : ""}`, cmds && `${cmds} background command${cmds > 1 ? "s" : ""}`, agents && `${agents} background agent${agents > 1 ? "s" : ""}`].filter(Boolean).join(", ");
     const head = el("div", `foldhead fold-${k}${live ? " running" : ""}${open ? " open" : ""}`);
-    head.innerHTML = `<span class="gst">${live ? '<span class="spin">✻</span>' : { thought: "✻", group: "●", task: "◆" }[k]}</span><span class="gtitle">${title}</span>` +
+    head.innerHTML = `<span class="gst">${live ? '<span class="spin">✻</span>' : k === "thought" ? "✻" : "●"}</span><span class="gtitle">${title}</span>` +
       `<span class="fcount">${count}</span><span class="gsum">${esc(word)}${failed ? ` · <span class="del">${failed} failed</span>` : ""}</span>` +
       `<span class="spacer"></span><span class="gtog">${open ? "▾ hide" : "▸ show"}</span>`;
     head.onclick = () => { open ? this.foldOpen.delete(key) : this.foldOpen.add(key); this.fold(); };
@@ -780,6 +786,7 @@ const transcript = {
     if (!open) run.forEach((n) => n.classList.add("folded"));
     else run.forEach((n) => n.classList.add("infold"));   // (opened: indented under its title)
   },
+
 
   // Queued messages wait in a box pinned at the bottom, below what Claude is still writing, until it takes them up.
   queue() {
