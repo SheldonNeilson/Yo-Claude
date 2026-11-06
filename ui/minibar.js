@@ -11,7 +11,7 @@ class MiniBar {
   // fires once charge beats a random threshold, so two pulses close together nearly always fire it); seconds charge leaks;
   // spontaneous firings per neuron per second (4x while nothing is in flight); most pulses in flight per neuron.
   static FLASH = 0.16; static REFRACT = 1.2; static SPEED = 7; static FANOUT = 0.65; static KICK = 0.75; static LEAK = 0.8;
-  static SPONT = 0.025; static PULSES = 0.45;
+  static SPONT = 0.025; static PULSES = 0.45; static WIDE_RATE = 0.65;   // WIDE_RATE: the speed (of everything) at 560 px and wider; 160 px and under run at 1
   static hash(n) { const s = Math.sin(n * 127.1 + 311.7) * 43758.5453; return s - Math.floor(s); }
   // smooth 1-D value noise in [0, 1] (the idle shimmer of the resting neurons)
   static noise(x) {
@@ -65,7 +65,8 @@ class MiniBar {
     L = this.think = { w: c.width, h: c.height, n, ne, x: new Int16Array(n), y: new Int16Array(n),
       fired: new Float32Array(n), v: new Float32Array(n), vt: new Float32Array(n),
       ea: Int16Array.from(ea), eb: Int16Array.from(eb), eoff: new Int16Array(ne + 1), adj: new Int16Array(ne * 2), aoff: new Int16Array(n + 1),
-      cap: Math.max(6, Math.min(40, Math.round(n * MiniBar.PULSES))), now: 0, last: -1 };
+      cap: Math.max(6, Math.min(40, Math.round(n * MiniBar.PULSES))), now: 0, last: -1,
+      rate: Math.max(MiniBar.WIDE_RATE, Math.min(1, 1 - (c.width - 160) / 400 * (1 - MiniBar.WIDE_RATE))) };   // (a wide bar has many more neurons: it runs slower, so the pulses stay easy to follow)
     for (let i = 0; i < n; i++) { L.x[i] = cx[i] * 5; L.y[i] = oy + cy[i] * 4; }
     let len = 0;   // branch cells, flat: edge e's run from its ea end to its eb end is eoff[e] .. eoff[e + 1] - 1
     for (let e = 0; e < ne; e++) { L.eoff[e] = len; len += path[e].length / 2; }
@@ -99,8 +100,8 @@ class MiniBar {
     }
   }
   stepThinking(L, t) {
-    const dt = L.last < 0 ? 0 : Math.min(0.1, Math.max(0, t - L.last));
-    L.last = t; L.now += dt;
+    let dt = L.last < 0 ? 0 : Math.min(0.1, Math.max(0, t - L.last));
+    L.last = t; L.now += dt *= L.rate;
     if (L.fresh) {   // a new thinking spell: everything at rest, and one cascade straight away
       L.fresh = false; L.fired.fill(-99); L.v.fill(0); L.pto.fill(-1);
       if (L.n) this.fire(L, Math.floor(Math.random() * L.n), -1, true);
@@ -116,7 +117,7 @@ class MiniBar {
       L.v[j] = L.v[j] * Math.exp(-(L.now - L.vt[j]) / MiniBar.LEAK) + MiniBar.KICK; L.vt[j] = L.now;
       if (L.v[j] > 0.2 + Math.random()) this.fire(L, j, e, false);
     }
-    if (L.n && Math.random() < L.n * MiniBar.SPONT * (busy ? 1 : 4) * dt) this.fire(L, Math.floor(Math.random() * L.n), -1, true);
+    if (L.n && Math.random() < L.n * MiniBar.SPONT * (busy ? 1 : 4) * dt * L.rate) this.fire(L, Math.floor(Math.random() * L.n), -1, true);
   }
   drawThinking(g, c, t, act) {
     const L = this.thinkLayout(c), on = act ? 1 : 0.55, F = MiniBar.FLASH, R = MiniBar.REFRACT;
