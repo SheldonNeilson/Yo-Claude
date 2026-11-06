@@ -1,4 +1,4 @@
-"""Plugins: small add-ons that put buttons on Yo Claude's toolbar (the row under the message box).
+"""Plugins: small add-ons that put buttons on Yo Claude's toolbars (the header row at the top by default).
 
 They live in `~/.yoclaude/plugins/<name>/plugin.json`, outside the app, so they are never part of what ships or is
 published, and survive updates. `YOCLAUDE_PLUGINS_DIR` points somewhere else (tests). Plugins are read at startup and
@@ -7,7 +7,15 @@ the others still load. Plugins run commands as you (like a script of your own): 
 
 plugin.json:
   {"name": "my-plugin", "description": "...", "version": "1.0.0",
-   "buttons": [{"id": "update", "icon": "🕒", "label": "update", "tooltip": "...", "run": <action>}]}
+   "placement": "header",
+   "buttons": [{"id": "update", "icon": "🕒", "label": "update", "tooltip": "...", "placement": "header", "order": 0,
+                "run": <action>}]}
+
+placement (on the plugin as the default for its buttons, and/or on a button) says where the button shows:
+  "header"   the row at the top with the mic / voice / awake toggles (the default; "top" means the same)
+  "menubar"  the menu bar at the very top, next to the pane buttons
+  "composer" the row under the message box
+order (optional number, default 0) sorts buttons within a place, lowest first. A bad placement skips the plugin and says why.
 
 An action is one of
   {"kind": "command", "command": ["pwsh", "-File", "{plugin_dir}/x.ps1"]}
@@ -30,6 +38,8 @@ import yo_claude
 log = logging.getLogger("yoclaude.plugins")
 PLUGINS_DIR = os.environ.get("YOCLAUDE_PLUGINS_DIR") or os.path.join(yo_claude.DATA_DIR, "plugins")
 KINDS = ("command", "review")
+PLACEMENTS = ("header", "menubar", "composer")
+PLACEMENT_ALIASES = {"top": "header"}
 
 
 class _Fields(dict):
@@ -57,12 +67,22 @@ def _action(run):
     return out
 
 
+def _placement(value, default):
+    if value is None or value == "":
+        return default
+    v = PLACEMENT_ALIASES.get(str(value).strip().lower(), str(value).strip().lower())
+    if v not in PLACEMENTS:
+        raise ValueError(f"placement must be one of {', '.join(PLACEMENTS)} (not {value!r})")
+    return v
+
+
 def _read(folder):
     with open(os.path.join(folder, "plugin.json"), encoding="utf-8-sig") as f:
         m = json.load(f)
     name = str(m.get("name") or "").strip()
     if not name or not isinstance(m.get("buttons"), list) or not m["buttons"]:
         raise ValueError("needs a name and at least one button")
+    default_place = _placement(m.get("placement"), "header")
     buttons, seen = [], set()
     for b in m["buttons"]:
         bid = str(b.get("id") or "").strip()
@@ -70,7 +90,8 @@ def _read(folder):
             raise ValueError("every button needs its own id")
         seen.add(bid)
         buttons.append({"id": bid, "icon": str(b.get("icon") or ""), "label": str(b.get("label") or bid),
-                        "tooltip": str(b.get("tooltip") or ""), "run": _action(b.get("run"))})
+                        "tooltip": str(b.get("tooltip") or ""), "run": _action(b.get("run")),
+                        "placement": _placement(b.get("placement"), default_place), "order": float(b.get("order") or 0)})
     return {"name": name, "description": str(m.get("description") or ""), "version": str(m.get("version") or ""),
             "dir": folder, "buttons": buttons}
 
@@ -100,7 +121,7 @@ def load():
 def public(plugins, errors):
     """What the window needs: the buttons, not the commands."""
     return {"plugins": [{"name": p["name"], "description": p["description"], "version": p["version"],
-                         "buttons": [{k: b[k] for k in ("id", "icon", "label", "tooltip")} for b in p["buttons"]]}
+                         "buttons": [{k: b[k] for k in ("id", "icon", "label", "tooltip", "placement", "order")} for b in p["buttons"]]}
                         for p in plugins], "errors": errors}
 
 

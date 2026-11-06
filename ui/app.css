@@ -181,6 +181,7 @@ pre:hover .codecopy { opacity: 1; }
 #input.tidied { box-shadow: 0 0 0 1px var(--amber); }   /* just fixed (Ctrl+Z undoes it) */
 .composer-actions { display: flex; gap: 8px; margin-top: 6px; align-items: center; }
 .pluginbtns { display: contents; }
+#top .pluginbtns button { white-space: nowrap; flex: none; }
 
 /* menus & modals */
 .menu { position: fixed; z-index: 80; background: var(--bg2); border: 2px solid var(--line2); min-width: 200px; padding: 4px 0;

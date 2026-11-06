@@ -41,14 +41,16 @@ https://github.com/SheldonNeilson/Yo-Claude (private); their installs update fro
 Not the Claude Code plugins/mods (those are Claude's own, switched in Options > MCP). These are Yo Claude's: folders in
 `~/.yoclaude/plugins/<name>/plugin.json`, **outside the repo and the installer**, so a private plugin is never shipped or pushed.
 Read at startup and by Tools > Reload plugins (Tools > Open plugins folder). Spec and manifest format: docstring of `plugins.py`.
-- Manifest: name, description, version, `buttons[]` (id, icon, label, tooltip, `run`). Each button shows as `[icon label]` on the
-  composer row. `run.kind` is `command` (run it, show output as a note) or `review` (run `preview`, which prints a JSON array;
+- Manifest: name, description, version, `buttons[]` (id, icon, label, tooltip, `run`, optional `placement` and `order`). Each button
+  shows as `[icon label]`. `placement` (on the plugin as the default, or on a button): `header` (default; the top row with the
+  mic/voice toggles, `top` is an alias), `menubar` (the very top, by the pane buttons) or `composer` (under the message box);
+  `order` sorts within a place. `run.kind` is `command` (run it, show output as a note) or `review` (run `preview`, which prints a JSON array;
   show it as Claude's tick-list card with a per-row why/note; on [submit] run `apply` with only the ticked rows in a temp JSON
   file, `{file}`). Review cards reuse `checklist` items; `Router.plugin_jobs` maps the card to the plugin, so [submit] goes to
   the plugin, not to Claude.
+- **Keep a plugin self-contained**: its scripts and config live in its own folder and the manifest refers to them as `{plugin_dir}` (also each command's working directory), so copying the folder shares it; per-user data goes under `%LOCALAPPDATA%`, never inside.
 - Failures are isolated: a bad manifest is skipped and reported in a toast; a failing command shows an error in the session.
 - Plugins run commands as the user (no sandbox): they are trusted local scripts. Keep any plugin with private data or
-- **Keep a plugin self-contained**: its scripts and config live in its own folder and the manifest refers to them as `{plugin_dir}` (also each command's working directory), so copying the folder shares it; per-user data goes under `%LOCALAPPDATA%`, never inside.
   private paths in `~/.yoclaude/plugins`, never in the repo. `YOCLAUDE_PLUGINS_DIR` overrides the folder (for tests).
 
 ## Avatar training plan (the six faces): status, next steps, open questions
