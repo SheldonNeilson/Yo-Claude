@@ -62,8 +62,8 @@ def draw(size, color, frame=CLAWD, dy=0, background=None, outline=None):
 
 def tray_frame(state, tick):
     """Tray icon for `state` at animation step `tick` (the app advances it ~5 times a second). Each state keeps
-    its own colour; the mascot moves instead: walks while Claude thinks, hops while it waits for you, strolls
-    slowly while a background task runs, bobs while listening, looks around while using your PC."""
+    its own colour; the mascot moves instead: shuffles (walks in place) while Claude thinks, hops while a background task
+    runs, wiggles when it needs you, bobs while listening, looks around while using your PC. ui/mascot.js does the same moves."""
     size = tray_size()
     color = STATE_COLORS.get(state, ORANGE)
     frame, dy = CLAWD, 0
@@ -88,10 +88,10 @@ def tray_frame(state, tick):
         frame = (LOOK_L, CLAWD, LOOK_R, CLAWD)[tick % 4]
         if tick % 2:
             frame = frame[:4] + [WALK[4]]
-    elif state == "approval":   # hop, hop, wait: it needs you
+    elif state == "approval":   # a wiggle: it needs you (the page's mascot shakes side to side)
+        frame = LOOK_L if tick % 2 else LOOK_R
+    elif state == "background":   # hop, then rest (the page's mascot does the same)
         dy = (0, 2 * up, 2 * up, up, 0, 0, 0, 0)[tick % 8]
-    elif state == "background":   # a slow stroll
-        frame = WALK if tick % 4 < 2 else CLAWD
     return draw(size, color, frame, dy, outline=(0, 0, 0))
 
 

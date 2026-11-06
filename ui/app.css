@@ -81,7 +81,7 @@ pre:hover .codecopy { opacity: 1; }
 #top { grid-column: 1 / -1; display: flex; align-items: center; gap: 8px; padding: 0 10px;
        border-bottom: 2px solid var(--line2); background: var(--bg2); }
 #logo { image-rendering: pixelated; }
-.brand { color: var(--orange); font-weight: bold; letter-spacing: 2px; margin-right: 6px; white-space: nowrap; }
+.brand { color: var(--orange); transition: color .35s; font-weight: bold; letter-spacing: 2px; margin-right: 6px; white-space: nowrap; }
 #top > button, #top .state { white-space: nowrap; flex: none; }
 #branchPill { min-width: 0; overflow: hidden; text-overflow: ellipsis; flex: 0 1 auto; }
 .pill { border: 1px solid var(--line2); padding: 2px 8px; color: var(--text); white-space: nowrap;

@@ -20,10 +20,15 @@ const MASCOT = {
     if (state === "speaking" && Math.floor(t * 4) % 2) frame = this.walk;
     if (state === "using_pc") frame = [this.lookL, this.base, this.lookR, this.base][Math.floor(t * 3) % 4];
     if (state === "approval" && Math.floor(t * 3) % 2) color = this.colors.idle;
-    if (state === "thinking") dy = -Math.abs(Math.sin(t * 5)) * 2;
     if (state === "listening") dy = -level * 4;
     const cw = Math.floor(W / 16), ch = Math.min(Math.floor((H - 4) / 5), cw * 3);
-    const ox = Math.floor((W - cw * 16) / 2), oy = Math.floor((H - ch * 5) / 2) + dy;
+    let dx = 0;   // each busy state has its own move, here and in the tray icon (icons.py): thinking shuffles, a background task hops, needing you wiggles
+    if (state === "thinking") { const k = Math.floor(t * 4) % 4; dx = [-1, 0, 1, 0][k] * cw; frame = k % 2 ? this.walk : this.base; }   // a step to one side and back to the other, feet alternating
+    if (state === "background") { const p = t % 1.5; dy = p < 0.45 ? -Math.sin(p / 0.45 * Math.PI) * Math.max(2, ch * 0.8) : 0; }   // hop, then rest
+    if (state === "approval") dx = (Math.floor(t * 14) % 2 ? 1 : -1) * Math.max(1, Math.round(cw / 2));   // a quick side-to-side wiggle
+    let ox = Math.floor((W - cw * 16) / 2);
+    const oy = Math.floor((H - ch * 5) / 2) + Math.round(dy);   // (whole pixels: a fractional offset leaves seams between the cells)
+    ox += Math.max(-ox, Math.min(dx, W - ox - cw * 16));   // (never off the canvas)
     g.fillStyle = color;
     frame.forEach((row, y) => [...row].forEach((c, x) => { if (c === "#") g.fillRect(ox + x * cw, oy + y * ch, cw, ch); }));
   },

@@ -306,6 +306,13 @@ function renderState() {}   // (the status text is gone from the header and the 
 function animate() {   // spinners: header state, busy sessions in the tree, running activity groups
   const t = performance.now();
   if ((S.local || S.display).state === "thinking") renderState();
+  if (t - (animate.logoAt || 0) > 33) {   // the header mascot does what the bar's mascot does: bounces while thinking, walks while speaking, looks about while using the PC...
+    animate.logoAt = t;
+    const logo = $("#logo");
+    if (logo) MASCOT.draw(logo, inbar.state, inbar.levels.at(-1) || 0, t / 1000);
+    const brand = $("#top .brand"), tint = MASCOT.colors[inbar.state] || MASCOT.colors.idle;   // (the name takes the state's colour too)
+    if (brand && animate.tint !== tint) { animate.tint = tint; brand.style.color = tint; }
+  }
   const glyph = SPIN[Math.floor(t / 120) % SPIN.length];
   document.querySelectorAll(".spin").forEach((n) => { n.textContent = glyph; });
   const dots = BRAILLE[Math.floor(t / 90) % BRAILLE.length];
