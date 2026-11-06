@@ -6,14 +6,34 @@ const REPORTS_ERRORS = new Set(["add_group", "rename_group", "open_path", "open_
 // A conversation being opened: its id -> the open_session call on its way (a second click while a big one loads joins it,
 // rather than loading and drawing it all again).
 const opening = new Map();
+// "loading <title>…" over the chat (the old one dimmed) and a spinner on its row, while a slow open is under way
+function loadingShow(sid) {
+  const t = $("#transcript"); if (!t) return;
+  let n = $("#openLoading");
+  if (!n) { n = document.createElement("div"); n.id = "openLoading"; document.body.appendChild(n); }
+  const r = t.getBoundingClientRect(), title = findSession(sid)?.title || "conversation";
+  n.innerHTML = `<span class="spin">✻</span> loading ${esc(title)}…`;
+  n.style.left = r.left + r.width / 2 + "px"; n.style.top = r.top + 14 + "px";
+  n.dataset.sid = sid; n.classList.remove("hidden");
+  t.classList.add("loading");
+  document.querySelectorAll("#tree .session.active").forEach((row) => row.classList.add("loadingrow"));
+}
+function loadingHide(sid) {
+  const n = $("#openLoading");
+  if (n && n.dataset.sid !== sid) return;   // (another open took over meanwhile)
+  n?.classList.add("hidden");
+  $("#transcript")?.classList.remove("loading");
+  document.querySelectorAll("#tree .loadingrow").forEach((row) => row.classList.remove("loadingrow"));
+}
 const api = () => new Proxy(window.pywebview.api, {
   get: (t, k) => {
     if (k === "open_session") return (sid, ...a) => {
       if (opening.has(sid)) return opening.get(sid);
+      const shown = setTimeout(() => loadingShow(sid), 150);   // (a quick switch shows nothing; a slow one says it's loading)
       const p = t.open_session(sid, ...a).then((r) => {
         if (r?.session && S.active?.id !== r.session.id) handle({ kind: "opened", ...r });
         return r;
-      }).finally(() => opening.delete(sid));
+      }).finally(() => { clearTimeout(shown); opening.delete(sid); loadingHide(sid); });
       opening.set(sid, p);
       return p;
     };
