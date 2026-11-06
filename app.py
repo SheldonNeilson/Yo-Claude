@@ -1338,6 +1338,9 @@ class Api:
         import consoles
         consoles.typing_at = time.time() if on else 0
 
+    def ui_note(self, text):   # the window's own diagnostics (e.g. the thinking animation's layout churning) go in the log
+        log.info("[ui] %s", str(text)[:300])
+
     def focus_lost(self, info):
         """The message box lost the keyboard while you were typing (ui/app.js): log where it went, including which window
         has the foreground (another program's window, a console flashing up...), now and a moment later."""

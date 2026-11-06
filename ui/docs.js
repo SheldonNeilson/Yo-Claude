@@ -154,7 +154,7 @@ const docs = (() => {
 
   async function buildMedia(t, view) {
     const m = t.m;
-    if (m.kind === "image") { const img = el("img", "doc-media"); img.src = m.url; view.appendChild(img); }
+    if (m.kind === "image") { const img = el("img", "doc-media"); img.src = m.url; view.appendChild(zoomable(img, true)); }
     else if (m.kind === "video") view.appendChild(retroPlayer(m, { autoplay: true, big: true, cwd: t.cwd }));
     else if (m.kind === "audio") { const a = el("audio"); a.src = m.url; a.controls = true; a.style.width = "100%"; view.appendChild(a); }
     else if (m.kind === "pdf") { const f = el("iframe", "doc-pdf"); f.src = m.url; view.appendChild(f); }
@@ -284,7 +284,7 @@ const docs = (() => {
     const s = S.settings || {};
     if (s.docs_width) st.w = s.docs_width;
     if (s.md_mode) st.mdMode = s.md_mode;
-    st.chat = s.chat_open !== false; st.docs = !!s.docs_open;
+    st.chat = s.chat_open !== false; st.docs = !!s.docs_open && tabs.length > 0;   // (no files are reopened after a restart: an empty editor pane is not worth showing)
     if (!st.chat && !st.docs) st.chat = true;
     render();
   });

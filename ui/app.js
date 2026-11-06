@@ -21,26 +21,38 @@ function loadingShow(sid) {
 // The same for any pane that's fetching (files, changes, tasks, media, a file, the sessions list): after 150 ms a small
 // "✻ loading <what>…" sits at the top of `box` until `promise` settles. Pills are kept per `key`, so a newer load of the same
 // pane replaces the older one's. Returns the promise, so a call can be wrapped in place.
-const paneLoads = new Map();
+const paneLoads = new Map();   // key -> its newest load's token (a newer load of the same key replaces the older)
+const boxLoads = new Map();    // pill (one per pane box) -> Map(token -> what): several loads into one box share ONE pill, "loading media, changes…"
 function loadingWhile(key, box, promise, what) {
   const token = {}; paneLoads.set(key, token);
-  const timer = setTimeout(() => {
-    const b = typeof box === "string" ? $(box) : box;
-    if (paneLoads.get(key) !== token || !b || b.offsetParent === null) return;
-    let n = document.querySelector(`.paneload[data-key="${key}"]`);
-    if (!n) { n = el("div", "paneload"); n.dataset.key = key; document.body.appendChild(n); }
+  const pill = typeof box === "string" ? box : key;
+  const drop = (old) => { for (const m of boxLoads.values()) m.delete(old); };
+  const paint = () => {
+    const b = typeof box === "string" ? $(box) : box, m = boxLoads.get(pill);
+    let n = document.querySelector(`.paneload[data-key="${CSS.escape(pill)}"]`);
+    if (!m || !m.size || !b || b.offsetParent === null) { n?.classList.add("hidden"); return; }
+    if (!n) { n = el("div", "paneload"); n.dataset.key = pill; document.body.appendChild(n); }
     const r = b.getBoundingClientRect();
-    n.innerHTML = `<span class="spin">✻</span> loading ${esc(what)}…`;
+    n.innerHTML = `<span class="spin">✻</span> loading ${esc([...new Set(m.values())].join(", "))}…`;
     n.style.left = r.left + r.width / 2 + "px"; n.style.top = r.top + 8 + "px";
     n.classList.remove("hidden");
+  };
+  let watch = 0, giveUp = 0;
+  const timer = setTimeout(() => {
+    if (paneLoads.get(key) !== token) return;
+    if (!boxLoads.has(pill)) boxLoads.set(pill, new Map());
+    boxLoads.get(pill).set(token, what);
+    paint();
   }, 150);
   const done = () => {
-    clearTimeout(timer);
-    if (paneLoads.get(key) !== token) return;
-    paneLoads.delete(key);
-    document.querySelector(`.paneload[data-key="${key}"]`)?.classList.add("hidden");
+    clearTimeout(timer); clearInterval(watch); clearTimeout(giveUp);
+    if (paneLoads.get(key) === token) paneLoads.delete(key);
+    drop(token); paint();
   };
   Promise.resolve(promise).then(done, done);
+  // a call that never answers (or a pane you've left) must not leave the pill up for ever
+  giveUp = setTimeout(done, 20000);
+  watch = setInterval(() => { const b = typeof box === "string" ? $(box) : box; if (!b || b.offsetParent === null) done(); }, 400);
   return promise;
 }
 function loadingHide(sid) {
@@ -181,7 +193,7 @@ function handle(e) {
     case "dictation": dictation(e); break;
     case "model_progress": models.event(e); break;
     case "live": if (S.active && e.session === S.active.id) transcript.live(e.image); break;
-    case "settings": S.settings = e.settings; renderToggles(); avatar.apply(); renderBusy(); renderName(); renderAwake(); break;
+    case "settings": S.settings = e.settings; transcript.fold(); renderToggles(); avatar.apply(); renderBusy(); renderName(); renderAwake(); break;
     case "folder": S.folder = e.folder; renderHead(); break;
     case "groups": S.groups = e.groups; S.groupCwd = e.cwds || {}; S.groupParent = e.parents || {}; S.groupFolders = e.folders || []; renderTree(); break;
     case "confirm_quit":
@@ -221,6 +233,7 @@ function handle(e) {
     case "update": renderUpdate(e); break;
     case "update_countdown": updateCountdown(e); break;
     case "notice": toast(e.text); break;
+    case "compose": if (S.active && e.session === S.active.id) window.plugins.compose(e.text); break;   // a plugin's "give it something to add"
     case "session_info":
       if (S.active && e.session.id === S.active.id) { Object.assign(S.active, e.session); renderExtraDirs(); renderFolder(); renderHead(); renderTree(); }
       break;
@@ -265,7 +278,11 @@ function renderAwake() {
       + (S.settings?.awake_while_working === false ? ": that's off too, in Options)" : ")");
 }
 function renderToggles() {
-  $("#tListen").classList.toggle("on", S.settings.listening !== false);
+  const hear = S.settings.listening !== false;   // the mic says which it is, in words, symbol and colour
+  $("#tListen").classList.toggle("on", hear);
+  $("#talkBtn").classList.toggle("hidden", !hear);   // nothing to talk to while the mic is off
+  $("#tListen").textContent = hear ? "● mic on" : "⊘ mic off";
+  $("#tListen").dataset.tip = hear ? `Listening for “Yo ${who()}”: click to turn the wake word off` : "Not listening for the wake word: click to turn it on";
   $("#tVoice").classList.toggle("on", S.settings.voice_replies !== false);
   $("#tPc").classList.toggle("on", S.settings.pc_control !== false);   // (on unless switched off, as in the app's own defaults)
 }
@@ -285,15 +302,7 @@ function showDisplay() {
   renderState();
   inbar.event({ ...S.local, kind: "display" });
 }
-function renderState() {
-  const st = (S.local || S.display).state || "idle";
-  let label = STATE_LABEL[st] || st;
-  if (st === "thinking") label = SPIN[Math.floor(performance.now() / 120) % SPIN.length] + " thinking…";
-  const others = S.local?.others || 0;
-  if (others) label += ` · ${others} other${others > 1 ? "s" : ""} working`;
-  $("#stateLabel").textContent = label;
-  $("#stateLabel").style.color = MASCOT.colors[st] || "";
-}
+function renderState() {}   // (the status text is gone from the header and the title bar: the bar's animation says it)
 function animate() {   // spinners: header state, busy sessions in the tree, running activity groups
   const t = performance.now();
   if ((S.local || S.display).state === "thinking") renderState();
@@ -727,7 +736,51 @@ const transcript = {
   groupOf: new Map(),  // item index -> group
   groups: [], last: null, liveImage: null,
 
-  reset() { this.els.clear(); this.groupOf.clear(); this.groups = []; this.last = null; this.liveImage = null; },
+  reset() { this.els.clear(); this.groupOf.clear(); this.groups = []; this.last = null; this.liveImage = null; this.foldOpen.clear(); },
+  // Options > Chat: back-to-back thoughts (and back-to-back command groups) shown as ONE title that opens and closes. Nothing
+  // moves in the DOM: runs of neighbours get a header put in front and the members hidden, so every render can still replace
+  // its own node; the pass runs again after each render (and when the options change).
+  foldOpen: new Set(),   // "t<first item>" / "g<first item>" of the runs you opened
+  fold() {
+    const t = $("#transcript");
+    t.querySelectorAll(":scope > .foldhead").forEach((h) => h.remove());
+    const want = { thought: S.settings.collapse_thinking !== false, group: S.settings.collapse_commands !== false };   // (on unless switched off)
+    for (const n of t.children) n.classList.remove("folded", "infold");
+    if (!want.thought && !want.group) return;
+    const ids = new Map(); for (const [i, n] of this.els) ids.set(n, i);
+    const kindOf = (n) => (n.classList.contains("thought") && want.thought ? "thought" : n.classList.contains("group") && want.group ? "group"
+      : n.classList.contains("taskwrap") && want.group && !n.querySelector(".taskcard.running") ? "task" : null);   // (a task still running stays in view)
+    const kids = [...t.children].filter((n) => !n.classList.contains("queuebox"));
+    for (let a = 0; a < kids.length;) {
+      const k = kindOf(kids[a]);
+      if (!k) { a++; continue; }
+      let z = a; while (z + 1 < kids.length && kindOf(kids[z + 1]) === k) z++;
+      const run = kids.slice(a, z + 1);
+      if (k === "thought" || run.length > 1) this.foldRun(k, run, ids);
+      a = z + 1;
+    }
+  },
+  foldRun(k, run, ids) {
+    const first = k === "thought" ? ids.get(run[0]) : k === "group" ? this.groups.find((g) => g.el === run[0])?.items[0] : run[0].dataset.task;
+    const key = k[0] + first, open = this.foldOpen.has(key);
+    const live = run.some((n) => n.classList.contains("live") || n.classList.contains("running"));
+    let steps = 0, failed = 0, cmds = 0, agents = 0;
+    if (k === "group") for (const n of run) { const g = this.groups.find((x) => x.el === n); steps += g ? g.items.length : 0; if (n.classList.contains("has-errors")) failed++; }
+    if (k === "task") for (const n of run) { if (n.querySelector(".taskcard.failed")) failed++; if (/agent/.test(n.querySelector(".tlabel")?.textContent || "")) agents++; else cmds++; }
+    const title = { thought: "Thinking", group: "Commands & steps", task: "Background tasks" }[k];
+    const count = k === "thought" ? run.length : k === "group" ? steps : run.length;
+    const word = k === "thought" ? (run.length > 1 ? "thoughts" : "thought") : k === "group" ? `step${steps === 1 ? "" : "s"} in ${run.length} group${run.length > 1 ? "s" : ""}`
+      : [cmds && `${cmds} command${cmds > 1 ? "s" : ""}`, agents && `${agents} agent${agents > 1 ? "s" : ""}`].filter(Boolean).join(", ");
+    const head = el("div", `foldhead fold-${k}${live ? " running" : ""}${open ? " open" : ""}`);
+    head.innerHTML = `<span class="gst">${live ? '<span class="spin">✻</span>' : { thought: "✻", group: "●", task: "◆" }[k]}</span><span class="gtitle">${title}</span>` +
+      `<span class="fcount">${count}</span><span class="gsum">${esc(word)}${failed ? ` · <span class="del">${failed} failed</span>` : ""}</span>` +
+      `<span class="spacer"></span><span class="gtog">${open ? "▾ hide" : "▸ show"}</span>`;
+    head.onclick = () => { open ? this.foldOpen.delete(key) : this.foldOpen.add(key); this.fold(); };
+    run[0].before(head);
+    if (!open) run.forEach((n) => n.classList.add("folded"));
+    else run.forEach((n) => n.classList.add("infold"));   // (opened: indented under its title)
+  },
+
   // Queued messages wait in a box pinned at the bottom, below what Claude is still writing, until it takes them up.
   queue() {
     const t = $("#transcript");
@@ -816,6 +869,7 @@ Click to open` : `What ${Who()} saw · click to enlarge`;
     const prev = this.last;
     this.renderInner(it, bulk);
     if (!bulk && prev && prev.items && prev !== this.last) this.renderHead(prev);   // something came after it: no longer "now"
+    if (!bulk) this.fold();
     if (!bulk) follow.stick("chat", t);   // stays put once you've scrolled up (the follow toggle is off)
   },
   renderInner(it, bulk) {
@@ -1048,6 +1102,7 @@ function renderTranscript() {
   const place = (it) => (it.at != null ? it.at - 0.5 : it.i);
   S.items.filter(Boolean).sort((a, b) => place(a) - place(b)).forEach((it) => transcript.render(it, true));
   transcript.refreshGroups();
+  transcript.fold();
   follow.bind("chat", t);
   follow.set("chat", true);             // a freshly opened conversation starts at the newest message
   t.scrollTop = t.scrollHeight;
@@ -1688,6 +1743,48 @@ function mediaUnder(node, it, { thumbs = true } = {}) {
   if (mediaCache.has(key)) return show(mediaCache.get(key));
   api().resolve_paths([...tokens], cwd).then((list) => { mediaCache.set(key, list || []); show(list || []); });
 }
+// A picture you can zoom and move: wheel or [+] [−] to zoom (toward the pointer), drag to move, double-click or [reset] to fit again.
+function zoomable(img, fill) {
+  const box = el("div", "zoomer" + (fill ? " fill" : "")), bar = el("div", "zbar");
+  let k = 1, x = 0, y = 0;
+  const apply = () => {
+    img.style.transform = `translate(${x}px, ${y}px) scale(${k})`;
+    box.classList.toggle("zoomed", k > 1.001);
+    label.textContent = Math.round(k * 100) + "%";
+  };
+  const zoomAt = (f, cx, cy) => {   // keep the point under (cx, cy) where it is
+    const nk = Math.min(16, Math.max(1, k * f));
+    x = cx - (cx - x) * nk / k; y = cy - (cy - y) * nk / k; k = nk;
+    if (k === 1) { x = 0; y = 0; }
+    apply();
+  };
+  const mid = () => [0, 0];   // (points are measured from the box centre, which is the picture's centre and scale origin)
+  const rel = (e) => { const r = box.getBoundingClientRect(); return [e.clientX - r.left - r.width / 2, e.clientY - r.top - r.height / 2]; };
+  const reset = () => { k = 1; x = 0; y = 0; apply(); };
+  const label = el("span", "zlabel", "100%");
+  const btn = (t, tip, fn) => { const b = el("button", "", t); b.dataset.tip = tip; b.onclick = (e) => { e.stopPropagation(); fn(); }; return b; };
+  bar.append(btn("−", "Zoom out", () => zoomAt(1 / 1.5, ...mid())), label, btn("+", "Zoom in", () => zoomAt(1.5, ...mid())),
+             btn("reset", "Fit the picture again", reset));
+  box.addEventListener("wheel", (e) => {
+    e.preventDefault();
+    zoomAt(e.deltaY < 0 ? 1.2 : 1 / 1.2, ...rel(e));
+  }, { passive: false });
+  box.addEventListener("pointerdown", (e) => {
+    if (k <= 1 || e.target.closest(".zbar")) return;
+    box.setPointerCapture(e.pointerId); box.classList.add("panning");
+    let px = e.clientX, py = e.clientY;
+    const move = (m) => { x += m.clientX - px; y += m.clientY - py; px = m.clientX; py = m.clientY; apply(); };
+    const up = () => { box.classList.remove("panning"); box.removeEventListener("pointermove", move); box.removeEventListener("pointerup", up); };
+    box.addEventListener("pointermove", move); box.addEventListener("pointerup", up);
+  });
+  box.addEventListener("dblclick", (e) => {
+    if (e.target.closest(".zbar")) return;
+    if (k > 1) reset(); else zoomAt(2.5, ...rel(e));
+  });
+  img.draggable = false;
+  box.append(img, bar);
+  return box;
+}
 function viewFile(path, cwd, opts = {}) { return docs.open(path, cwd, opts); }   // files open in the file pane (docs.js)
 async function viewFileModal(path, cwd, opts = {}) {   // (the old pop-up viewer, kept as a fallback)
   const m = await api().media(path, cwd);
@@ -1695,7 +1792,7 @@ async function viewFileModal(path, cwd, opts = {}) {   // (the old pop-up viewer
   const d = dialog(m.name);
   d.classList.add("wide");
   d.appendChild(el("div", "dim small", esc(m.path)));
-  if (m.kind === "image") { const img = el("img", "viewer-media"); img.src = m.url; d.appendChild(img); }
+  if (m.kind === "image") { const img = el("img", "viewer-media"); img.src = m.url; d.appendChild(zoomable(img)); }
   else if (m.kind === "video") d.appendChild(retroPlayer(m, { autoplay: true, big: true, cwd }));
   else if (m.kind === "audio") { const a = el("audio"); a.src = m.url; a.controls = true; a.autoplay = true; a.style.width = "100%"; d.appendChild(a); }
   else if (m.kind === "pdf") { const f = el("iframe", "viewer-pdf"); f.src = m.url; d.appendChild(f); }
@@ -1769,7 +1866,7 @@ async function showForClaude(e) {
 function showPicture(src, title) {   // a screenshot or picture from a tool result, big
   const d = dialog(title || "Picture");
   d.classList.add("wide");
-  const img = el("img", "viewer-media"); img.src = src; d.appendChild(img);
+  const img = el("img", "viewer-media"); img.src = src; d.appendChild(zoomable(img));
   addButtons(d, [["close", closeModal, "primary"]]);
 }
 

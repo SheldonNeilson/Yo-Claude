@@ -26,7 +26,9 @@ class MiniBar {
   // than 0.1 s a frame, so a throttled window pauses rather than bursts.
   thinkLayout(c) {
     let L = this.think;
-    if (L && L.w === c.width && L.h === c.height) return L;
+    if (L && Math.abs(L.w - c.width) < 24 && L.h === c.height) return L;   // (the bar's width jitters a few px as the label beside it changes: a rebuild would start the whole network over each time)
+    const nowMs = Date.now(), churn = (this.thinkBuilds = (this.thinkBuilds || []).filter((m) => nowMs - m < 3000).concat(nowMs));
+    if (churn.length === 4 && !this.thinkWarned) { this.thinkWarned = true; try { api().ui_note(`thinking layout rebuilt 4x in 3 s: canvas ${c.width}x${c.height}, client ${c.clientWidth}x${c.clientHeight}, was ${L?.w}x${L?.h}`); } catch (_) {} }
     const cols = Math.max(1, Math.floor((c.width + 1) / 5)), rows = Math.max(1, Math.floor((c.height + 1) / 4));
     const oy = Math.floor((c.height - (rows * 4 - 1)) / 2), cell = new Int16Array(cols * rows).fill(-1);
     const bands = Math.max(1, Math.round(rows / 4)), bins = Math.max(1, Math.floor(cols / 4)), cx = [], cy = [];
@@ -59,6 +61,27 @@ class MiniBar {
           if (cell[y * cols + x] >= 0) clear = false; else cells.push(x, y);
         }
         if (clear) { ea.push(i); eb.push(j); path.push(cells); made++; }
+      }
+    }
+    {   // a wide bar can split into islands that no branch joins, and a thought can only cross one: bridge the nearest two islands (clear stepped path) until there is one
+      const par = Array.from({ length: n }, (_, i) => i), root = (i) => (par[i] === i ? i : (par[i] = root(par[i])));
+      for (let e = 0; e < ea.length; e++) par[root(ea[e])] = root(eb[e]);
+      for (let guard = 0; guard < n; guard++) {
+        const pairs = [];
+        for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) if (root(i) !== root(j)) pairs.push([d2(i, j), i, j]);
+        if (!pairs.length) break;
+        pairs.sort((p, q) => p[0] - q[0]);
+        let joined = false;
+        for (const [, i, j] of pairs) {
+          const dx = cx[j] - cx[i], dy = cy[j] - cy[i], steps = Math.max(Math.abs(dx), Math.abs(dy)), cells = [];
+          let clear = true;
+          for (let s = 1; s < steps && clear; s++) {
+            const x = cx[i] + Math.round(dx * s / steps), y = cy[i] + Math.round(dy * s / steps);
+            if (cell[y * cols + x] >= 0) clear = false; else cells.push(x, y);
+          }
+          if (clear) { ea.push(i); eb.push(j); path.push(cells); par[root(i)] = root(j); joined = true; break; }
+        }
+        if (!joined) break;
       }
     }
     const ne = ea.length;
@@ -241,6 +264,8 @@ class MiniBar {
   }
   label(t) {
     const cur = Math.floor(t * 2) % 2 ? "█" : " ";
+    const own = this.labels?.[this.state];   // (a panel with its own words for a state, e.g. the /btw side chat)
+    if (own) return typeof own === "function" ? own(t) : own;
     return {
       starting: "> booting" + cur, idle: `> say "yo ${who()}"` + cur, paused: "> wake word off · click to talk",
       listening: (this.text ? "> follow-up? " : "> listening ") + cur,

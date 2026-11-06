@@ -1336,8 +1336,9 @@ class Session:
                   "- expand_group / collapse_group, target = group name or 'all' | focus_group, target = group name ('' shows all)\n"
                   "- editor_tab / close_tab, target = file name (close_tab also 'all') | markdown_view, value = edit|split|preview\n"
                   "- scroll, target = chat|panel|sessions, value = top|bottom|up|down\n"
-                  "- switch, target = mic|voice_replies|keep_awake|prediction|autocorrect|suggest_next|learn_from_messages|say_when_done, "
-                  "value = on|off\n"
+                  "- switch, target = mic|voice_replies|keep_awake|prediction|autocorrect|suggest_next|learn_from_messages|say_when_done|"
+                  "fold_thinking|fold_commands, value = on|off (the last two fold back-to-back thinking / commands into one title in the chat)\n"
+                  "- btw, text = a side question for the /btw window (not added to the conversation; empty text just opens it)\n"
                   "To open a file or folder use show_file / show_folder. Opening another session moves the window off this "
                   "conversation, so later UI calls from here won't act. PC control, permissions and approvals can't be changed with this.",
                   {"type": "object", "properties": {
@@ -2203,7 +2204,7 @@ def history_cache_write(sid, key, items):
 
 
 def agent_items(path, limit=400):
-    """A subagent's transcript as items to show: its brief ("user"), what it said ("assistant", Markdown), each
+    """A subagent's transcript as items to show: its brief ("user"), what it said ("assistant", Markdown), its thinking ("thinking"), each
     tool it used ("tool": name, a one-line brief, whether it failed) and its report back ("report")."""
     items, tools = [], {}
 
@@ -2232,6 +2233,8 @@ def agent_items(path, limit=400):
                 for b in content:
                     if b.get("type") == "text" and b.get("text", "").strip():
                         items.append({"kind": "assistant", "text": b["text"].strip(), "ts": ts})
+                    elif b.get("type") == "thinking" and str(b.get("thinking") or "").strip():
+                        items.append({"kind": "thinking", "text": str(b["thinking"]).strip(), "ts": ts})
                     elif b.get("type") == "tool_use" and b.get("name") == "SubagentHandback":
                         items.append({"kind": "report", "text": str((b.get("input") or {}).get("message", "")), "ts": ts})
                     elif b.get("type") == "tool_use":
@@ -2248,7 +2251,7 @@ def agent_steps(path, limit=400):
     except OSError as e:
         return f"Couldn't read its transcript: {e}"
     return "\n".join({"user": lambda i: "> " + i["text"], "assistant": lambda i: i["text"],
-                      "report": lambda i: "✓ reported back:\n" + i["text"],
+                      "report": lambda i: "✓ reported back:\n" + i["text"], "thinking": lambda i: "✻ " + i["text"],
                       "tool": lambda i: f"⚙ {i['name']}  {i['brief']}".rstrip() + ("  (failed)" if i.get("error") else "")}
                      [i["kind"]](i) for i in items)
 
@@ -3437,6 +3440,8 @@ class Router:
             entries, labels = plugins.preview_rows(plugin, action)
             if not entries:
                 s.add({"kind": "note", "text": f"{label}: nothing to propose."})
+                if action.get("when_empty"):   # a way to give it something to add: the window fills the message box
+                    self.emit("compose", session=s.id, text=action["when_empty"])
                 return
             cid = uuid.uuid4().hex[:12]
             self.plugin_jobs[cid] = {"plugin": plugin, "action": action, "entries": entries, "label": label}

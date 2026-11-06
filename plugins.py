@@ -25,6 +25,11 @@ An action is one of
       tick, untick and add a note per row). Nothing else happens until [submit]: then `apply` runs with {file} = a
       temp JSON file of only the ticked objects (a ticked row's note is added to its object as "note"). `label` is
       a Python format string over the object's fields. Nothing goes to Claude.
+  {"kind": "compose", "text": "Add to my timesheet: "}
+      puts `text` in the message box (on a new line if it already holds text) and focuses it; nothing is sent, you finish
+      the sentence and send it yourself. Nothing is run.
+A review action may also have "when_empty": "<text>": when its preview prints an empty array, it still says there is
+nothing to propose, and puts `when_empty` in the message box the same way (so there is a way to add something).
 Placeholders in argv: {plugin_dir}. Timeouts: "timeout" seconds on the action (default 300).
 """
 import json
@@ -37,7 +42,7 @@ import yo_claude
 
 log = logging.getLogger("yoclaude.plugins")
 PLUGINS_DIR = os.environ.get("YOCLAUDE_PLUGINS_DIR") or os.path.join(yo_claude.DATA_DIR, "plugins")
-KINDS = ("command", "review")
+KINDS = ("command", "review", "compose")
 PLACEMENTS = ("header", "menubar", "composer")
 PLACEMENT_ALIASES = {"top": "header"}
 
@@ -59,11 +64,16 @@ def _action(run):
     out = {"kind": run["kind"], "timeout": float(run.get("timeout") or 300)}
     if run["kind"] == "command":
         out["command"] = _argv(run.get("command"), "run.command")
+    elif run["kind"] == "compose":
+        if not isinstance(run.get("text"), str) or not run["text"].strip():
+            raise ValueError("run.text must be a non-empty string")
+        out["text"] = run["text"]
     else:
         out["preview"] = _argv(run.get("preview"), "run.preview")
         out["apply"] = _argv(run.get("apply"), "run.apply")
         out["label"] = str(run.get("label") or "")
         out["title"] = str(run.get("title") or "")
+        out["when_empty"] = str(run.get("when_empty") or "")
     return out
 
 
@@ -121,7 +131,9 @@ def load():
 def public(plugins, errors):
     """What the window needs: the buttons, not the commands."""
     return {"plugins": [{"name": p["name"], "description": p["description"], "version": p["version"],
-                         "buttons": [{k: b[k] for k in ("id", "icon", "label", "tooltip", "placement", "order")} for b in p["buttons"]]}
+                         "buttons": [dict({k: b[k] for k in ("id", "icon", "label", "tooltip", "placement", "order")},
+                                          **({"compose": b["run"]["text"]} if b["run"]["kind"] == "compose" else {}))
+                                     for b in p["buttons"]]}
                         for p in plugins], "errors": errors}
 
 

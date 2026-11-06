@@ -105,7 +105,7 @@ const avatar = {
     const typical = Math.min(PACE_TYPICAL, vals[Math.floor(vals.length / 2)] || 0);
     this.pace = {};
     if (!typical) return;
-    for (const [name, m] of Object.entries(peak)) this.pace[name] = m > typical * PACE_ABOVE ? Math.max(0.4, (typical * PACE_ABOVE) / m) : 1;
+    for (const [name, m] of Object.entries(peak)) this.pace[name] = m > typical * PACE_ABOVE ? Math.max(0.3, (typical * PACE_ABOVE) / m) : 1;
   },
   // frame `f`, or if that's in a blink, the first frame past it going `dir` (past back-to-back blinks too)
   stepPast(f, dir, frames) {
@@ -399,7 +399,7 @@ const avatar = {
       const end = Math.min(frames.length - 1, this.turnAt || Infinity);   // a short play turns back early
       const resting = st === "idle" && this.clip === "idle" && now < this.restUntil;
       const idleish = st !== "speaking" && this.clip !== "talking";   // (every calm state: own speed, holds)
-      this.acc = (this.acc || 0) + (idleish ? (this.speed || 1) * (this.pace?.[this.clip] ?? 1) : 1);   // (idle plays at this play's own speed, slower for the fast clips)
+      this.acc = (this.acc || 0) + (idleish ? this.speed || 1 : 1) * (this.pace?.[this.clip] ?? 1);   // (calm states play at this play's own speed; the fast clips are slowed in every state, speaking too)
       const step = this.acc >= 1 && !(idleish && now < (this.heldUntil || 0));
       if (step) this.acc -= 1;
       if (step && (!resting || this.frame < (this.restFrom || REST[0]) || Math.random() < 0.5)) this.frame += this.dir;   // resting: slower sways

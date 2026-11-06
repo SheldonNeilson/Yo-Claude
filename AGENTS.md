@@ -44,7 +44,9 @@ Read at startup and by Tools > Reload plugins (Tools > Open plugins folder). Spe
 - Manifest: name, description, version, `buttons[]` (id, icon, label, tooltip, `run`, optional `placement` and `order`). Each button
   shows as `[icon label]`. `placement` (on the plugin as the default, or on a button): `header` (default; the top row with the
   mic/voice toggles, `top` is an alias), `menubar` (the very top, by the pane buttons) or `composer` (under the message box);
-  `order` sorts within a place. `run.kind` is `command` (run it, show output as a note) or `review` (run `preview`, which prints a JSON array;
+  `order` sorts within a place. `run.kind` `compose` (`text`) puts the text in the message box and focuses it, sending nothing; a
+  `review` action may set `when_empty` (text) so that an empty preview also fills the message box (a way to give it something to add).
+  `run.kind` is `command` (run it, show output as a note) or `review` (run `preview`, which prints a JSON array;
   show it as Claude's tick-list card with a per-row why/note; on [submit] run `apply` with only the ticked rows in a temp JSON
   file, `{file}`). Review cards reuse `checklist` items; `Router.plugin_jobs` maps the card to the plugin, so [submit] goes to
   the plugin, not to Claude.

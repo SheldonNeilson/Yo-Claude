@@ -185,6 +185,10 @@ const MENUS = {
         "-",
         tog("PC Control (Screen, Keyboard, Mouse)", "pc_control"),
       ] }],
+      ["Chat", null, { sub: [
+        tog("Fold Thinking", "collapse_thinking"),
+        tog("Fold Commands", "collapse_commands"),
+      ] }],
       ["Face & Fun", null, { sub: [
         // the assistant's look and voice: three of each (the keys are what settings already hold)
         look("Female · Yo Claudia", [["female", "1"], ["female2", "2"], ["female3", "3"]]),

@@ -62,7 +62,8 @@ window.tasks = {
   },
   async loadOutput() {
     const key = this.open;
-    const out = await loadingWhile("tasks", "#panel", api().task_output(key), "output");
+    const slow = new Promise((r) => setTimeout(() => r({ error: "Couldn't load its output (no answer after 15 s). Click the refresh button to try again." }), 15000));
+    const out = await Promise.race([loadingWhile("tasks", "#panel", api().task_output(key), "output").catch((e) => ({ error: String(e) })), slow]);
     if (key !== this.open) return;
     this.output = out;
     const pre = $("#taskOut");
@@ -70,6 +71,7 @@ window.tasks = {
     if (out.items) {   // a subagent: redraw its log when it has new steps; follow it only while the toggle is on
       if (+pre.dataset.n === out.items.length) return;
       const pb = $("#pbody"), keep = pb.scrollTop;
+      follow.bind("task", pb);   // (watching your scrolling from the first draw on: before, the first scroll up was not noticed and the next refresh took you back down)
       const t = this.list.find((x) => x.key === key);
       pre.replaceWith(this.agentLog(out.items, t?.status === "running"));
       if (follow.on.task) follow.stick("task", pb); else pb.scrollTop = keep;
@@ -278,11 +280,55 @@ Click to see its output`;
         log.appendChild(g);
         continue;
       }
-      i++;
-      const at = whenHtml(it.ts, "alog-when");
-      if (it.kind === "user") log.appendChild(el("div", "alog-user", at + esc(it.text)));
-      else if (it.kind === "report") log.appendChild(el("div", "alog-report", `<div class="alog-rh">✓ reported back ${at}</div>${md(it.text)}`));
-      else log.appendChild(el("div", "alog-assistant", at + md(it.text)));
+      if (it.kind === "thinking") {   // back-to-back thoughts under one title (click to read them)
+        const start = i, run = [];
+        while (i < items.length && items[i].kind === "thinking") run.push(items[i++]);
+        const key = "t" + start, open = this.runOpen?.has(key) ? this.runOpen.get(key) : false;
+        const g = el("div", "alog-steps alog-thinking" + (open ? " open" : ""));
+        const head = el("div", "alog-head", `<span class="tw">${open ? "▾" : "▸"}</span><b>✻ Thinking</b>` +
+          `<span class="dim">${run.length} thought${run.length > 1 ? "s" : ""}</span><span class="spacer"></span>${whenHtml(run[0].ts)}`);
+        head.onclick = () => {
+          this.runOpen = this.runOpen || new Map();
+          this.runOpen.set(key, !open);
+          log.replaceWith(this.agentLog(items, running));
+        };
+        g.appendChild(head);
+        if (open) { const list = el("div", "alog-list"); for (const r of run) list.appendChild(el("div", "alog-thought", esc(r.text))); g.appendChild(list); }
+        log.appendChild(g);
+        continue;
+      }
+      const at = i++;   // (this item's place: the key for what you've opened)
+      const when = whenHtml(it.ts, "bubble-when");
+      const opened = (k) => !!this.runOpen?.get(k);
+      const toggle = (k, node, cls) => { this.runOpen = this.runOpen || new Map(); const on = !opened(k); this.runOpen.set(k, on); node.classList.toggle(cls, on); };
+      if (it.kind === "user") {
+        // like the main chat: your brief as a message, a few lines of it (click for the rest); injected <system-reminder> text as a small folded note
+        const parts = String(it.text || "").split(/<system-reminder>([\s\S]*?)(?:<\/system-reminder>|$)/);
+        for (let p = 0; p < parts.length; p++) {
+          const text = parts[p].trim();
+          if (!text) continue;
+          const k = `u${at}.${p}`;
+          if (p % 2) {
+            const note = el("div", "alog-sysnote" + (opened(k) ? " open" : ""));
+            note.appendChild(el("div", "alog-head", `<span class="tw">ⓘ</span><b>System note</b><span class="dim">${esc(text.replace(/\s+/g, " ").slice(0, 120))}</span>`));
+            note.appendChild(el("div", "alog-sysbody", esc(text)));
+            note.firstChild.onclick = () => toggle(k, note, "open");
+            log.appendChild(note);
+          } else {
+            const m = el("div", "msg user alog-msg" + (opened(k) ? " open" : ""));
+            m.appendChild(el("div", "alog-msgtext", esc(text)));
+            if (text.length > 260 || text.split(String.fromCharCode(10)).length > 5) {
+              const more = el("div", "alog-more", opened(k) ? "▾ less" : "▸ all of it");
+              m.appendChild(more);
+              m.onclick = () => { if (!getSelection().toString()) { toggle(k, m, "open"); more.textContent = opened(k) ? "▾ less" : "▸ all of it"; } };
+            }
+            m.insertAdjacentHTML("beforeend", when);
+            log.appendChild(m);
+          }
+        }
+      }
+      else if (it.kind === "report") { const m = el("div", "msg assistant alog-msg open", `<div class="alog-rh">✓ reported back</div>${md(it.text)}`); m.insertAdjacentHTML("beforeend", when); log.appendChild(m); }
+      else { const m = el("div", "msg assistant alog-msg open", md(it.text)); m.insertAdjacentHTML("beforeend", when); log.appendChild(m); }
     }
     if (!items.length) log.appendChild(el("div", "pempty", "Nothing yet."));
     return log;
@@ -328,7 +374,7 @@ function taskIcon(t) {
   const st = taskState(t);
   return t.kind === "agent"
     ? `<span class="ticon agent ${st}" title="Subagent · ${esc(statusWord(t))}">✻</span>`
-    : `<span class="ticon cmd ${st}" title="Command · ${esc(statusWord(t))}">&gt;_</span>${st === "running" ? '<span class="bspin">⠋</span>' : ""}`;   // (running: the terminal spinner beside it)
+    : `<span class="ticon cmd ${st}" title="Command · ${esc(statusWord(t))}">&gt;${st === "running" ? '<span class="bspin">⠋</span>' : "_"}</span>`;   // (running: the terminal spinner inside the box, where the cursor would be)
 }
 // A short id for each, quiet but findable: a subagent's, or a command's task id (the whole of it is in the tooltip and the detail)
 const taskId = (t) => String((t.kind === "agent" ? t.agent_id : t.task_id) || "").slice(0, 7);

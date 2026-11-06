@@ -6,6 +6,7 @@ window.selfctl = (() => {
   const SETTINGS = {   // friendly name -> setting key: the harmless switches Claude may flip
     mic: "listening", voice_replies: "voice_replies", keep_awake: "keep_awake", prediction: "predict_words",
     autocorrect: "fix_text", suggest_next: "suggest_next", learn_from_messages: "predict_learn", say_when_done: "notify_done",
+    fold_thinking: "collapse_thinking", fold_commands: "collapse_commands",   // (Options > Chat: back-to-back thoughts / command groups under one title)
   };
   const on = (k, d = true) => (S.settings[k] === undefined ? d : !!S.settings[k]);
   const clip = (t, n = 80) => String(t || "").replace(/\s+/g, " ").slice(0, n);
@@ -149,6 +150,12 @@ window.selfctl = (() => {
         if (v === "top") el_.scrollTop = 0; else if (v === "bottom") el_.scrollTop = el_.scrollHeight; else if (v === "up") el_.scrollTop -= el_.clientHeight * 0.8; else if (v === "down") el_.scrollTop += el_.clientHeight * 0.8;
         else return "Scroll value: top, bottom, up or down.";
         return `Scrolled the ${target} ${v}.`;
+      }
+      case "btw": {   // a side question in the /btw window (not added to the conversation)
+        if (!window.btw) return "The side chat isn't available.";
+        if (!text && !target) { btw.show(); return "Opened the /btw side chat."; }
+        btw.ask(String(text || target));
+        return "Asked in the /btw side chat; the answer shows there, not in the conversation.";
       }
       case "switch": {
         const k = SETTINGS[target];

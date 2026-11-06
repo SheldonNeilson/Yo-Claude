@@ -38,6 +38,32 @@ window.btw = {
   show() {
     $("#btw").classList.remove("hidden");
   },
+  // The strip under the header shows what the side answer is doing, in the same animations as the main bar:
+  // violet net while it thinks, blue while it runs a tool, orange wave while the answer comes in, then a short "done".
+  look() {
+    const bar = this.bar ||= (() => {
+      const root = $("#btwBar"), b = new MiniBar(root);
+      b.colors.thinking = "#b79cf0"; b.colors.using_pc = "#5ab0ff"; b.colors.speaking = "#ff8c60"; b.colors.idle = "#9fd17f"; b.colors.error = "#ff6b6b";
+      b.q(".mb-m").onclick = null;   // (not a talk button here)
+      b.labels = {
+        thinking: (t) => MiniBar.SPIN[Math.floor(t * 8) % MiniBar.SPIN.length] + " thinking…",
+        using_pc: (t) => "⚙ " + (this.turns.at(-1)?.tool || "working") + "…",
+        speaking: (t) => "✎ answering" + ".".repeat(1 + Math.floor(t * 3) % 3),
+        idle: "✓ done", error: "! couldn't answer",
+      };
+      return b;
+    })();
+    const t = this.turns.at(-1), root = $("#btwBar"), panel = $("#btw");
+    let state = "idle";
+    if (t?.state === "asking") state = t.tool ? "using_pc" : t.a ? "speaking" : "thinking";
+    else if (t?.state === "error") state = "error";
+    if (state === "speaking") { bar.levels.push(0.25 + Math.random() * 0.65); bar.levels.shift(); }   // (the wave moves as text arrives)
+    if (bar.state !== state) bar.event({ kind: "display", state, text: "" });
+    panel.dataset.state = t ? (t.state === "asking" ? state : t.state) : "";
+    clearTimeout(this.hideBar);
+    root.classList.toggle("hidden", !t);
+    if (t && t.state === "done") this.hideBar = setTimeout(() => root.classList.add("hidden"), 2500);
+  },
   close() {
     if (this.session) api().btw_close(this.session, this.id);
     this.reset();
@@ -57,6 +83,7 @@ window.btw = {
     }
     log.scrollTop = log.scrollHeight;
     $("#btwInput").disabled = this.busy();
+    this.look();
   },
 };
 $("#btwBtn").onclick = () => {

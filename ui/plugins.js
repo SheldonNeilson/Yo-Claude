@@ -3,6 +3,15 @@
 // or the composer's row. A plugin that failed to load is reported in a toast, the rest still show.
 "use strict";
 window.plugins = {
+  // Put text in the message box (on a new line if it already holds some) and focus it; nothing is sent.
+  compose(text) {
+    const box = $("#input");
+    if (!box || !text) return;
+    box.value = box.value.trim() ? box.value.replace(/\s+$/, "") + "\n" + text : text;
+    autosize();
+    box.focus();
+    box.setSelectionRange(box.value.length, box.value.length);
+  },
   boxes() {
     return { header: $("#pluginBtnsTop"), menubar: $("#pluginBtnsMenu"), composer: $("#pluginBtns") };
   },
@@ -20,6 +29,7 @@ window.plugins = {
       const btn = el("button", place === "header" ? "toggle" : "", `[${b.icon ? b.icon + " " : ""}${b.label}]`);
       btn.title = b.tooltip || p.description || `${p.name}: ${b.label}`;
       btn.onclick = async () => {
+        if (b.compose) return window.plugins.compose(b.compose);   // nothing to run: just fill the message box
         if (!S.active) return toast("Open a session first.", "error");
         btn.disabled = true;
         try {

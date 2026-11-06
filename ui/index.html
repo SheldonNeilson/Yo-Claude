@@ -15,6 +15,7 @@
     <button data-menu="session">Session</button><button data-menu="voice">Voice</button><button data-menu="tools">Tools</button>
     <button data-menu="options">Options</button><button data-menu="help">Help</button>
     <span class="spacer"></span>
+    <button id="invadersBtn" title="Bug Invaders: play while you wait (Esc hides it)">[👾]</button>
     <span id="pluginBtnsMenu" class="pluginbtns"></span>
     <span id="paneBtns" title="Which panes show beside the chat">
       <button id="sideBtn" class="panebtn" title="Sessions list (Ctrl+Shift+B)"><b>◧</b> sessions</button><button id="focusBtn" class="panebtn" title="Just the chat: hide both panes, or bring them back"><b>▣</b> focus</button><button id="chatBtn" class="panebtn on" title="Show or hide the chat"><b>▤</b> chat</button><button id="editorBtn" class="panebtn" title="Show or hide the file pane (files open here)"><b>▥</b> editor</button><button id="panelBtn" class="panebtn" title="Files, changes and git (Ctrl+B)"><b>◨</b> files</button>
@@ -35,9 +36,6 @@
     <span id="branchPill" class="pill hidden"></span>
     <span class="spacer"></span>
     <span id="pluginBtnsTop" class="pluginbtns"></span>
-    <span id="stateLabel" class="state"></span>
-    <button id="tListen" class="toggle" title="Listen for “Yo Claude”">[mic]</button>
-    <button id="tVoice" class="toggle" title="Read replies aloud">[voice]</button>
     <button id="awakeBtn" class="toggle" title="Keep the PC awake while Yo Claude runs">[staying awake]</button>
     <button id="tPc" class="toggle pc" title="Let Claude use your screen, keyboard and mouse. Adds ~11k tokens to every question, and screenshots add more.">[pc control]</button>
     <button id="compactBtn" title="Compact mode: hide this window, keep the bar">[compact]</button>
@@ -57,6 +55,7 @@
     <div class="sidefoot">
       <button id="cleanBtn" title="Suggest stale conversations to move to the trash">clean up</button>
       <span class="spacer"></span>
+      <button id="tVoice" class="toggle" title="Read replies aloud">[voice]</button>
       <button id="faceBtn" class="toggle" title="Show or hide the face (drag its top edge to resize it)">show Claude</button>
       <button id="trashBtn" title="Restore sessions you cleaned up or deleted">trash</button>
     </div>
@@ -77,6 +76,11 @@
     <div id="planBox" class="hidden" title="Claude's plan for this task (click to fold)"></div>
     <div id="btw" class="hidden">
       <div class="btw-head"><b>btw</b><span class="dim">side chat, not added to the conversation</span><span class="spacer"></span><button id="btwClose" title="Close and discard the side chat (Esc)">[✕]</button></div>
+      <div id="btwBar" class="minibar hidden">
+        <canvas class="mb-m" width="40" height="26"></canvas>
+        <canvas class="mb-meter" width="120" height="30"></canvas>
+        <div class="mb-txt"><div class="mb-label"></div><div class="mb-text hidden"></div></div>
+      </div>
       <div id="btwLog"></div>
       <input id="btwInput" placeholder="&gt; ask a side question…  (Enter asks · Esc closes)">
     </div>
@@ -99,11 +103,10 @@
         <div id="ghost" aria-hidden="true"></div>
       </div>
       <div class="composer-actions">
-        <button id="talkBtn" title="Talk instead of typing">[talk]</button>
-        <button id="btwBtn" title="btw: ask a side question about this conversation without adding it to the conversation (or type /btw …)">[btw]</button>
-        <button id="termBtn" title="Terminal (Ctrl+`)">[term]</button>
-        <button id="invadersBtn" title="Bug Invaders: play while you wait (Esc hides it)">[👾]</button>
+        <button id="termBtn" title="Terminal (Ctrl+`)">[>_]</button>
         <span id="pluginBtns" class="pluginbtns"></span>
+        <button id="tListen" class="toggle" title="Listen for “Yo Claude”">[mic]</button>
+        <button id="talkBtn" title="Talk instead of typing">[talk]</button>
         <div id="inbar" class="minibar" title="What Yo Claude is doing">
           <canvas class="mb-m" width="40" height="26" title="Talk"></canvas>
           <canvas class="mb-meter" width="120" height="30"></canvas>
@@ -111,6 +114,7 @@
           <button class="mb-stop btn hidden" title="Stop (Esc)">[■]</button>
         </div>
         <button id="sendBtn" class="primary">[send ⏎]</button>
+        <button id="btwBtn" title="btw: ask a side question about this conversation without adding it to the conversation (or type /btw …)">/btw</button>
       </div>
     </div>
   </main>
