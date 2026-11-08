@@ -646,7 +646,7 @@ class Assistant:
                 self.quit = True
             elif cmd == "stop":
                 self.stop()
-            elif cmd == "talk" and self.state in (IDLE, PAUSED):   # while active, only "stop" stops it
+            elif cmd == "talk" and self.state == IDLE:   # (not with the mic off: nothing listens then, a stray click included) while active, only "stop" stops it
                 self.start_conversation()
             elif cmd == "settings":
                 if getattr(self, "wake", None):   # (the character may have changed: its name wakes it)

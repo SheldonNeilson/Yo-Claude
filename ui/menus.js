@@ -202,6 +202,7 @@ const MENUS = {
         tog("Chat Sliver Under the Arcade", "invaders_peek"),
         "-",
         ["Play Bug Invaders Now", () => window.invaders?.show()],
+        ["Share Scores on the Global Board", () => window.invaders?.toggleShare?.(), { checked: window.invaders?.sharing?.() !== false }],
       ] }],
       ["Power", null, { sub: [
         tog("Keep PC Awake While Claude Works", "awake_while_working"),

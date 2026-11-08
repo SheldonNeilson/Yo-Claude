@@ -267,7 +267,7 @@ class MiniBar {
     const own = this.labels?.[this.state];   // (a panel with its own words for a state, e.g. the /btw side chat)
     if (own) return typeof own === "function" ? own(t) : own;
     return {
-      starting: "> booting" + cur, idle: `> say "yo ${who()}"` + cur, paused: "> wake word off · click to talk",
+      starting: "> booting" + cur, idle: `> say "yo ${who()}"` + cur, paused: "> mic off",
       listening: (this.text ? "> follow-up? " : "> listening ") + cur,
       thinking: MiniBar.SPIN[Math.floor(t * 8) % MiniBar.SPIN.length] + " thinking…", speaking: "● " + who(),
       using_pc: "⌖ using your pc…", approval: "! " + who() + " needs your ok", error: "! microphone unavailable",

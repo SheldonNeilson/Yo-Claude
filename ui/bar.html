@@ -12,6 +12,7 @@
   /* under the bar (each optional, View menu): her face, and a few lines on what's happening in the open session */
   #more { display: flex; gap: 10px; border-top: 1px solid var(--line); padding: 6px 12px 8px; }
   #face { flex: none; width: 128px; height: 170px; }
+  #face[data-loading]::before { content: "✻ loading face…"; color: var(--dim); font-size: 11px; }
   #face .avatar { border: 0; padding: 0; height: 100%; align-items: flex-start; }
   #feed { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: flex-end; gap: 3px; font-size: 12px;
     line-height: 1.35; min-height: 18px; }
@@ -55,7 +56,7 @@ function relayout() {
 const bar = new MiniBar($("#bar"), { onLayout: relayout });
 
 // ---------- what's happening: your messages, Claude's thinking and what it's doing, its replies in a line ----------
-const FEED_LINES = 5;
+const feedMax = () => (S.settings.bar_avatar === true ? 8 : 5);   // with her face beside it (170 px tall) the feed fills that height, so no empty gap above the lines
 const plain = (t) => (t || "").replace(/```[\s\S]*?(```|$)/g, " [code] ").replace(/<advisor>[\s\S]*?(<\/advisor>|$)/g, "")
   .replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/[#*_`>|]+/g, "").replace(/\s+/g, " ").trim();
 const firstBit = (t, n = 170) => { const p = plain(t), m = p.match(/^.{20,}?[.!?](\s|$)/); return (m ? m[0] : p).slice(0, n).trim(); };
@@ -82,7 +83,7 @@ function feedLines() {
       if (prev?.[0] === "claude") prev[1] = line; else out.push(["claude", line]);
     }
   }
-  return out.slice(-FEED_LINES);
+  return out.slice(-feedMax());
 }
 let feedQueued = false;
 function renderFeed() {
@@ -107,12 +108,22 @@ function applyMore() {
   $("#more").classList.toggle("hidden", !face && !feed);
   if (face && !avatar.el && !document.hidden) {   // decoded only once she's first shown; fewer, bigger characters
     avatar.colsWanted = 44; avatar.init($("#face"));
+    $("#face").dataset.loading = "1";   // (she takes a few seconds to decode the first time: say so, not a blank gap)
+    const wait = setInterval(() => { if (avatar.ready || avatar.noClips) { clearInterval(wait); delete $("#face").dataset.loading; } }, 300);
+    for (const sec of [6, 25]) setTimeout(() => {   // what the face looks like after a while, in the log (Yo Claude's log: [ui] compact face)
+      const p = avatar.pre, r = $("#face").getBoundingClientRect();
+      try { api().ui_note(`compact face ${sec}s: ready=${avatar.ready} noClips=${avatar.noClips} clips=${Object.keys(avatar.clips).length} cols=${avatar.cols} rows=${avatar.rows} font=${p && p.style.fontSize} chars=${p && p.textContent.length} box=${Math.round(r.width)}x${Math.round(r.height)} hidden=${document.hidden} char=${S.settings.character}`); } catch (_) {}
+    }, sec * 1000);
   }
   avatar.apply();
   if (feed) renderFeed();
   requestAnimationFrame(relayout);
 }
 document.addEventListener("visibilitychange", applyMore);
+window.addEventListener("focus", applyMore);
+// The window is hidden and shown without the page always being told (no visibilitychange): while her face is wanted but not
+// started, look again each second, so she appears when the bar is first shown instead of waiting for the next settings change.
+setInterval(() => { if (S.settings.bar_avatar === true && !avatar.el && !document.hidden) applyMore(); }, 1000);
 
 window.app = {
   events(list) {

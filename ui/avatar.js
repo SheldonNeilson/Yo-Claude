@@ -368,6 +368,7 @@ const avatar = {
 
   tick() {
     if (!this.el || this.el.offsetParent === null || document.hidden || !this.cols) return;   // (not shown: no work)
+    if (!(parseFloat(this.pre.style.fontSize) > 0)) this.fit();   // (laid out at zero size when it started: size it now)
     const st = this.state(), now = Date.now(), group = this.group(st);
     if (st !== this.lastSt) { this.lastSt = st; this.bigNext = true; }   // a change of state: one bigger move allowed
     this.beat = (this.beat || 0) + 1;

@@ -1249,6 +1249,51 @@ const scores = () => { const l = store.get("scores", []); return Array.isArray(l
 const qualifies = (n) => n > 0 && (scores().length < 10 || n > scores()[9].s);
 const ALPHA = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
 G.hi = Math.max(G.hi, scores()[0]?.s || 0);
+// ---------- the global board (neilson.co.za): everyone's top 10, shared by this copy and the one on the web page ----------
+// Only initials, a score and a wave are sent, with a random player id this browser/app makes for itself. Your best local scores
+// are sent once, the first time, so you are on the board from the start; after that each score you sign is sent as you sign it.
+// Switch it off with X on the board screen (nothing more is sent; what is already there stays).
+const GLOBAL_URL = STANDALONE ? "scores.php" : "https://neilson.co.za/bug-invaders/scores.php";
+const GB = { rows: null, state: "idle", at: 0, note: "", noteAt: 0 };   // state: idle | loading | ok | offline
+const sharing = () => store.get("share", true) !== false;
+function playerId() {
+  let id = store.get("pid", "");
+  if (!/^[a-f0-9]{24}$/.test(id)) {
+    id = Array.from(crypto.getRandomValues(new Uint8Array(12)), (x) => x.toString(16).padStart(2, "0")).join("");
+    store.set("pid", id);
+  }
+  return id;
+}
+function gFetch(url, opts) {
+  const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), 8000);
+  return fetch(url, Object.assign({ cache: "no-store", signal: ctl.signal }, opts)).then((r) => { if (!r.ok) throw new Error(r.status); return r.json(); })
+    .finally(() => clearTimeout(timer));
+}
+function gLoad(force) {
+  if (GB.state === "loading" || (!force && GB.state === "ok" && Date.now() - GB.at < 30000)) return;
+  GB.state = "loading";
+  gFetch(`${GLOBAL_URL}?id=${playerId()}`).then((j) => { GB.rows = j.top || []; GB.state = "ok"; GB.at = Date.now(); })
+    .catch(() => { GB.state = GB.rows ? "ok" : "offline"; GB.at = Date.now(); });
+}
+// send rows (the local score shape: n, s, w, t, c); the answer is the new global top 10. Rows that couldn't go wait for next time.
+function gSend(rows) {
+  rows = rows.filter((r) => r && !r.c).sort((a, b) => b.s - a.s);   // (best first: a request carries ten at most)
+  if (!sharing() || !rows.length) return Promise.resolve(0);
+  return gFetch(GLOBAL_URL, { method: "POST", headers: { "Content-Type": "text/plain;charset=UTF-8" },   // (plain text: no pre-flight from a local page)
+    body: JSON.stringify({ id: playerId(), rows: rows.slice(0, 10).map((r) => ({ n: r.n, s: r.s, w: r.w, t: r.t })) }) })
+    .then((j) => { GB.rows = j.top || GB.rows; GB.state = "ok"; GB.at = Date.now(); return j.accepted || 0; });
+}
+function gFlush() {   // the first sync of your local top scores, and any scores that could not be sent when you signed them
+  if (!sharing()) return;
+  const wait = store.get("pending", []), first = !store.get("synced", false);
+  const rows = first ? scores().concat(wait) : wait;
+  if (!rows.length) { if (first) store.set("synced", true); return; }
+  gSend(rows).then((n) => {
+    store.set("synced", true); store.set("pending", []);
+    if (first && n > 0) { GB.note = "your best local scores have joined the global board"; GB.noteAt = Date.now(); }
+  }).catch(() => {});
+}
+setTimeout(gFlush, 4000);   // (a few seconds after the page loads, not in its way)
 function beginEntry() {
   const last = String(store.get("last", "AAA")).toUpperCase().replace(/[^A-Z0-9]/g, "A").padEnd(3, "A").slice(0, 3);
   G.entry = { c: last.split(""), pos: 0, warn: -9 }; G.state = "entry"; keys.clear();
@@ -1274,9 +1319,15 @@ function submitScore() {
   list.push(row); list.sort((a, b) => b.s - a.s || a.t - b.t);
   const top = list.slice(0, 10); store.set("scores", top);
   G.scored = true; G.entry = null; SFX.reply();
+  if (sharing() && !row.c) { store.set("pending", (store.get("pending", []) || []).concat(row).slice(-20)); gFlush(); }   // and onto the global board
+  G.boardTab = "local";
   openBoard("over", top.indexOf(row));
 }
-function openBoard(from, rank) { G.state = "board"; G.boardFrom = from; G.boardAt = G.rt; G.rank = rank; }
+function openBoard(from, rank) {
+  G.state = "board"; G.boardFrom = from; G.boardAt = G.rt; G.rank = rank;
+  if (from === "title" || rank < 0) G.boardTab = "global";   // asked for it: the global one (your own signed score opens on the local board, at its rank)
+  gLoad(true); gFlush();
+}
 function drawEntry() {
   const W = view.W, H = view.H, cx = W / 2, E = G.entry;
   ctx.fillStyle = "rgba(11,11,10,.84)"; ctx.fillRect(0, 0, W, H);
@@ -1297,13 +1348,18 @@ function drawEntry() {
   txt("↑ ↓ change the letter · ← → move · type to set it · ⌫ clears · ENTER saves", cx, y, C.dim, 11, "center");
 }
 function drawBoard() {
-  const W = view.W, H = view.H, cx = W / 2, list = scores();
-  let y = Math.max(8, (H - 330) / 2);
-  y += drawPixelText("TOP 10", cx, y, W * 0.4, 5, C.amber, C.orange) + 12;
+  const W = view.W, H = view.H, cx = W / 2, global = G.boardTab === "global";
+  const list = global ? GB.rows || [] : scores();
+  let y = Math.max(6, (H - 360) / 2);
+  y += drawPixelText("TOP 10", cx, y, W * 0.4, 5, C.amber, C.orange) + 8;
+  txt("LOCAL", cx - 56, y, global ? C.dim : C.amber, 12, "center", global ? 0 : 5);   // the two boards: TAB (or G) switches
+  txt("GLOBAL", cx + 56, y, global ? C.amber : C.dim, 12, "center", global ? 5 : 0);
+  ctx.fillStyle = C.amber; ctx.fillRect(global ? cx + 56 - 24 : cx - 56 - 20, y + 15, global ? 48 : 40, 2);
+  y += 28;
   const x0 = cx - 140;
   txt("RANK  NAME   SCORE    WAVE", x0, y, C.dim, 11); y += 20;
   for (let i = 0; i < 10; i++) {
-    const r = list[i], mine = i === G.rank, blink = mine && Math.floor(G.rt * 3) % 2 === 0;
+    const r = list[i], mine = global ? !!(r && r.me) : i === G.rank, blink = mine && !global && Math.floor(G.rt * 3) % 2 === 0;
     const col = mine ? (blink ? C.amber : C.orange2) : r ? (i < 3 ? C.text : C.dim) : C.faint;
     txt(String(i + 1).padStart(2, " ") + ".", x0, y, col, 12, "left", mine ? 5 : 0);
     txt(r ? r.n + (r.c ? "*" : "") : "---", x0 + 52, y, col, 12, "left", mine ? 5 : 0);
@@ -1311,7 +1367,14 @@ function drawBoard() {
     txt(r ? String(r.w) : "-", x0 + 200, y, col, 12, "left");
     y += 20;
   }
-  y += 8;
+  if (global && !list.length) {
+    const msg = GB.state === "offline" ? "can't reach the global board" : GB.state === "ok" ? "no scores yet: be the first" : "loading the global board…";
+    txt(msg, cx, y - 150, GB.state === "offline" ? C.red : C.dim, 12, "center");
+  }
+  y += 4;
+  if (GB.note && Date.now() - GB.noteAt < 12000) { txt(GB.note, cx, y, C.green, 11, "center", 4); }
+  else txt(`TAB: ${global ? "local" : "global"} board · X: sharing ${sharing() ? "on" : "off"}`, cx, y, C.dim, 11, "center");
+  y += 20;
   const blink = Math.floor(G.rt * 2.5) % 2 ? 1 : 0.4;
   txt(G.boardFrom === "title" ? "press SPACE to go back" : "press SPACE to play again", cx, y, C.amber, 13, "center", 5, blink);
 }
@@ -1369,7 +1432,7 @@ function paintCtl() {
 // ---------- keys: only while the game has focus; game keys never reach the app (Esc there would stop Claude) ----------
 const keys = new Set();
 const KEYMAP = { ArrowLeft: "left", a: "left", A: "left", ArrowRight: "right", d: "right", D: "right", " ": "fire", ArrowUp: "fire",
-  w: "fire", W: "fire", Enter: "start", p: "pause", P: "pause", m: "mute", M: "mute", ArrowDown: "none", l: "scores", L: "scores" };
+  w: "fire", W: "fire", Enter: "start", p: "pause", P: "pause", m: "mute", M: "mute", ArrowDown: "none", l: "scores", L: "scores", Tab: "tab", g: "tab", G: "tab", x: "share", X: "share" };
 // Easter eggs: the Konami code, and a few words typed while playing
 let typed = "", seq = [];
 const KONAMI = ["arrowup", "arrowup", "arrowdown", "arrowdown", "arrowleft", "arrowright", "arrowleft", "arrowright", "b", "a"];
@@ -1423,6 +1486,8 @@ function press(k) {
   if (V.bannerUntil) return;
   if (k === "mute") return toggleSound();
   if (G.state === "board") {
+    if (k === "tab") { G.boardTab = G.boardTab === "global" ? "local" : "global"; if (G.boardTab === "global") gLoad(false); return; }
+    if (k === "share") { store.set("share", !sharing()); if (sharing()) gFlush(); return; }
     if ((k === "fire" || k === "start" || k === "scores") && G.rt - G.boardAt > 0.4) {
       if (G.boardFrom === "title") G.state = "title";
       else if (!G.scored && qualifies(G.score)) beginEntry();
@@ -1552,6 +1617,9 @@ window.invaders = {
     return V.visible ? (root.focus({ preventScroll: true }), true) : showNow(true, true);
   },
   hide() { if (V.visible) hideNow(true); },
+  // Options > Arcade: send your scores to the global board (on unless you switch it off)
+  sharing: () => sharing(),
+  toggleShare() { store.set("share", !sharing()); if (sharing()) gFlush(); return sharing(); },
   // touch buttons (standalone pages): input("left", true) on press, input("left", false) on release; keys: left, right, fire, pause
   input(k, down) { if (down) { keys.add(k); press(k); } else keys.delete(k); },
   toggle() { return V.visible ? this.hide() : this.show(); },
