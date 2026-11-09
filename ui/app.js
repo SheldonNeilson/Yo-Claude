@@ -2191,6 +2191,7 @@ document.addEventListener("keydown", (e) => {
   if (e.key !== "Escape" || !$("#modal").classList.contains("hidden")) return;
   if (!$("#atlist").classList.contains("hidden")) return composer.closeList();   // close what's open first
   if (!$("#menu").classList.contains("hidden")) return hideMenu();
+  if (window.invaders?.visible) { e.preventDefault(); return window.invaders.hide(); }   // Bug Invaders showing: Esc closes it, even when it hasn't the keyboard (it must never stop Claude's work)
   if (inbar.active()) api().stop();
 });
 $("#input").addEventListener("blur", () => setTimeout(() => { if (document.activeElement !== $("#input")) composer.closeList(); }, 150));
