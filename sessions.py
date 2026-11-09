@@ -2901,7 +2901,7 @@ class Router:
                 self.set_workspace(cwd, True)
         s = Session(self, cwd)
         s.picked = picked
-        log.info("New session %s in %s, started by %s", s.id[:8], cwd, " < ".join(f.name for f in inspect.stack()[1:5]))
+        log.info("New session %s in %s, started by %s", s.id[:8], cwd, " < ".join(f.function for f in inspect.stack()[1:5]))
         self.live[s.id] = s
         self.active = s
         self.folder = cwd
