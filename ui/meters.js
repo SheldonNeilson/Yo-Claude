@@ -164,9 +164,19 @@ function loadoutView(c) {
 }
 
 // ---------- plan usage limits (account-wide, in the menu bar) ----------
+// A window whose reset time has passed is empty again, even though the last figure we were sent (with a reply) still says full.
+function limitsNow(l) {
+  if (!l) return l;
+  const windows = {};
+  for (const [k, w] of Object.entries(l.windows || {})) {
+    windows[k] = w.resets_at && w.resets_at * 1000 <= Date.now() && w.utilization != null ? { ...w, utilization: 0 } : w;
+  }
+  const blocked = Object.values(windows).some((w) => w.utilization != null && w.utilization >= 1);
+  return { ...l, windows, status: l.status === "rejected" && !blocked ? "allowed" : l.status };
+}
 function renderLimits(l) {
   if (l !== undefined) S.limits = l;
-  l = S.limits;
+  l = limitsNow(S.limits);
   const m = $("#limitsMeter");
   const wins = Object.entries(l?.windows || {}).filter(([, w]) => w.utilization != null);
   m.classList.toggle("hidden", !wins.length);
@@ -180,7 +190,7 @@ function renderLimits(l) {
   m.classList.toggle("warn", l.status && l.status !== "allowed");
 }
 function showLimits() {
-  const l = S.limits;
+  const l = limitsNow(S.limits);
   const d = dialog("Usage limits");
   d.classList.add("limview");
   if (!l) { d.appendChild(el("div", "dim", "Not known yet: they're reported with each reply.")); addButtons(d, [["close", closeModal, "primary"]]); return; }
