@@ -2286,6 +2286,46 @@ class Router:
         self.restore_detached()
         self.agent_bg = {}                  # session id -> descriptions of subagents still writing their transcript (see watch_agents)
         threading.Thread(target=self.watch_agents, name="agent-watch", daemon=True).start()
+        threading.Thread(target=self.poll_limits, name="limits-poll", daemon=True).start()
+
+    def poll_limits(self):
+        """Claude Code only reports the plan limits when their status changes, so the meter would sit on a stale figure.
+        With a subscription login, ask Anthropic for the current ones every few minutes, using the login Claude Code keeps in
+        ~/.claude/.credentials.json. Read-only: an expired token is left for Claude Code to refresh (refresh tokens rotate, and
+        using one here could log the CLI out). Without such a login (API key, third party) this quietly does nothing."""
+        while True:
+            try:
+                self.fetch_limits()
+            except Exception as e:
+                log.debug("usage poll: %s", e)
+            time.sleep(300)
+
+    def fetch_limits(self):
+        import urllib.request
+        with open(os.path.join(os.path.expanduser("~"), ".claude", ".credentials.json"), encoding="utf-8") as f:
+            oauth = (json.load(f) or {}).get("claudeAiOauth") or {}
+        if not oauth.get("accessToken") or (oauth.get("expiresAt") or 0) <= time.time() * 1000:
+            return
+        req = urllib.request.Request("https://api.anthropic.com/api/oauth/usage", headers={
+            "Authorization": "Bearer " + oauth["accessToken"], "anthropic-beta": "oauth-2025-04-01", "User-Agent": "yo-claude"})
+        with urllib.request.urlopen(req, timeout=15) as r:
+            data = json.load(r)
+        windows = {}
+        for key in ("five_hour", "seven_day", "seven_day_opus", "seven_day_sonnet"):
+            w = data.get(key)
+            if isinstance(w, dict) and w.get("utilization") is not None:
+                resets = w.get("resets_at")
+                windows[key] = {"utilization": w["utilization"] / 100,      # (this endpoint speaks percent, events speak fractions)
+                                "resets_at": datetime.datetime.fromisoformat(resets).timestamp() if resets else None}
+        if not windows:
+            return
+        old = self.limits or {}
+        top = max(w["utilization"] for w in windows.values())
+        self.limits = {**old, "windows": windows, "status": "rejected" if top >= 1 else "allowed_warning" if top >= 0.8 else "allowed",
+                       "type": max(windows, key=lambda k: windows[k]["utilization"]), "updated": time.time()}
+        self.meta.data["limits"] = self.limits
+        self.meta.save()
+        self.emit("limits", limits=self.limits)
 
     def watch_agents(self):
         """A subagent can be at work without Claude Code having told us of it as a task (one resumed with a message, one started
