@@ -1,7 +1,7 @@
 """Claude sessions for Yo Claude, on the Claude Agent SDK.
 
 A session is either a **chat** (no folder: web tools only, cheap) or **code** (a folder: Claude Code's full toolset,
-your user + project settings minus hooks). The router runs every session on one asyncio loop in its own thread,
+your user + project settings, hooks included). The router runs every session on one asyncio loop in its own thread,
 keeps a live connection per open session so follow-ups skip the CLI start-up, turns SDK messages into transcript
 items for the UI, and routes tool approvals to the UI and to voice.
 """
@@ -2720,8 +2720,10 @@ class Router:
 
     # --- MCP servers ---
     def loadout_settings(self):
-        """Claude Code settings for Yo Claude's sessions: no hooks, and the skills and plugins you turned off."""
-        out = {"disableAllHooks": True}
+        """Claude Code settings for Yo Claude's sessions: the skills and plugins you turned off, and hooks only if you
+        set "disable_hooks" (true) in settings.json. Hooks used to be off always; that silently stopped team hooks
+        (usage collectors, notifications) that Claude Code runs for you in the terminal."""
+        out = {"disableAllHooks": True} if self.settings.get("disable_hooks") else {}
         skills = self.settings.get("off_skills") or []
         plugins = self.settings.get("off_plugins") or []
         if skills:
