@@ -186,7 +186,7 @@ const MENUS = {
         tog("PC Control (Screen, Keyboard, Mouse)", "pc_control"),
       ] }],
       ["Chat", null, { sub: [
-        tog("Fold Thinking", "collapse_thinking"),
+        tog("Fold Thinking", "collapse_thinking", false),
         tog("Fold Commands", "collapse_commands"),
       ] }],
       ["Face & Fun", null, { sub: [

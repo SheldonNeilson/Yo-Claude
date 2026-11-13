@@ -2212,7 +2212,7 @@ def agent_items(path, limit=400):
         inp = inp or {}
         for k in ("description", "command", "file_path", "pattern", "url", "query", "prompt"):
             if inp.get(k):
-                return " ".join(str(inp[k]).split())[:200]
+                return " ".join(str(inp[k]).split())[:600]
         return ""
     with open(path, encoding="utf-8") as f:
         for raw in f:

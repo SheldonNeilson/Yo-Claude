@@ -751,7 +751,7 @@ const transcript = {
   fold() {
     const t = $("#transcript");
     t.querySelectorAll(":scope > .foldhead").forEach((h) => h.remove());
-    const want = { thought: S.settings.collapse_thinking !== false, group: S.settings.collapse_commands !== false };   // (on unless switched off)
+    const want = { thought: S.settings.collapse_thinking === true, group: S.settings.collapse_commands !== false };   // (thinking: off unless switched on; commands: on unless switched off)
     for (const n of t.children) n.classList.remove("folded", "infold");
     if (!want.thought && !want.group) return;
     const ids = new Map(); for (const [i, n] of this.els) ids.set(n, i);

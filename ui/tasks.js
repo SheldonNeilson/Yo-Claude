@@ -247,6 +247,8 @@ Click to see its output`;
   // A subagent's work laid out like the conversation: its brief, what it said, its tool calls folded into
   // "N steps" (click to see each one; the latest run stays open while it works) and its report back.
   agentLog(items, running) {
+    // the same Options > Chat switches as the main chat: thoughts are shown in full unless Fold Thinking is on; steps stay open unless Fold Commands is on
+    const foldThoughts = S.settings.collapse_thinking === true, foldCommands = S.settings.collapse_commands !== false;
     const log = el("div", "agentlog");
     log.id = "taskOut"; log.dataset.n = items.length;
     for (let i = 0; i < items.length;) {
@@ -255,7 +257,7 @@ Click to see its output`;
         const start = i, run = [];
         while (i < items.length && items[i].kind === "tool") run.push(items[i++]);
         const live = running && i === items.length;   // the run it's on now lists its steps, unless you fold it
-        const open = this.runOpen?.has(start) ? this.runOpen.get(start) : live;
+        const open = this.runOpen?.has(start) ? this.runOpen.get(start) : live || !foldCommands;
         const counts = {};
         for (const r of run) counts[r.name] = (counts[r.name] || 0) + 1;
         const failed = run.filter((r) => r.error).length;
@@ -278,6 +280,11 @@ Click to see its output`;
           g.appendChild(list);
         }
         log.appendChild(g);
+        continue;
+      }
+      if (it.kind === "thinking" && !foldThoughts) {   // like the main chat: each thought in full, wrapped
+        log.appendChild(el("div", "alog-thinkbox", `<div class="alog-th">✻ thinking${whenHtml(it.ts)}</div>${esc(it.text)}`));
+        i++;
         continue;
       }
       if (it.kind === "thinking") {   // back-to-back thoughts under one title (click to read them)
