@@ -2,7 +2,7 @@
   --bg: #111110; --bg2: #181816; --bg3: #20201d; --line: #3a332d; --line2: #4a3e36;
   --text: #e8e4da; --dim: #8f8a80; --faint: #5c5a56;
   --orange: #d97757; --orange2: #ff8c60; --amber: #e8b04b; --green: #9fd17f; --blue: #5ab0ff; --red: #ff6b6b;
-  --mono: "Cascadia Mono", "Cascadia Code", Consolas, "Courier New", monospace;
+  --mono: "Cascadia Mono", "Cascadia Code", Consolas, "Courier New", "Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji", monospace;
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font: 13px/1.5 var(--mono); }
@@ -708,6 +708,17 @@ b.lo { color: var(--green); } b.mid { color: var(--amber); } b.hi { color: var(-
 .chip.small { margin-left: 8px; font-size: 11px; }
 #atlist { position: absolute; bottom: 100%; left: 12px; max-height: 300px; overflow-y: auto; min-width: 360px; }
 #atlist div.on { background: var(--bg3); color: var(--orange); }
+
+#emojiPick { position: absolute; bottom: 100%; left: 12px; width: 340px; max-height: 46vh; overflow-y: auto; padding: 6px 8px; }
+#emojiPick .epname { color: var(--faint); font-size: 11px; margin: 4px 0 2px; }
+#emojiPick .epgrid { display: flex; flex-wrap: wrap; }
+#emojiPick .ep { border: 0; background: none; font-size: 18px; line-height: 1; padding: 4px; cursor: pointer; }
+#emojiPick .ep:hover { background: var(--bg3); }
+
+#bugBtn, #featBtn { color: var(--amber); }
+.dialog.feedback input:not([type=checkbox]), .dialog.feedback textarea { margin: 6px 0; }
+.dialog.feedback .fbkinds { display: flex; gap: 8px; margin: 8px 0; }
+.dialog.feedback .fbk.on { border-color: var(--orange); color: var(--orange); }
 
 /* file explorer */
 .ftools { padding: 3px 10px; gap: 4px; }

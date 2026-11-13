@@ -139,6 +139,10 @@ UI_PROMPT = (
     "type_in_terminal: it opens Yo Claude's terminal pane and types the command at the prompt WITHOUT pressing Enter, "
     "so they read it and run it. You can't see the terminal's output: ask them to paste it back if you need it."
 )
+EMOJI_PROMPT = (
+    " The user likes emojis: use them naturally in your written replies where they add warmth or make a list easier to "
+    "scan, and enjoy the ones they send you. Keep them out of the first one or two spoken sentences of a [voice] reply."
+)
 LINKS_PROMPT = (
     " Make everything you mention in the chat linkable, so the user can click it. Files and folders: write the full "
     "path in `inline code` (a path inside a code block is not a link); a click previews it in Yo Claude's file pane, "
@@ -1198,6 +1202,8 @@ class Session:
             system += PC_CONTROL_PROMPT
         servers[UI_SERVER] = self.ui_tools()
         system += UI_PROMPT + LINKS_PROMPT   # (the Options menu: tick lists, advisor notes; from the session's next start)
+        if r.settings.get("emoji_replies", True):
+            system += EMOJI_PROMPT
         if r.settings.get("checklist_tool", True):
             system += CHECKLIST_PROMPT
         if r.settings.get("advisor_relay", True):

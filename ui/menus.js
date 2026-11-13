@@ -27,6 +27,13 @@ async function resetLayoutNow() {
   try { localStorage.removeItem("yoc.term.h"); } catch (_) { /* nothing saved */ }
   location.reload();
 }
+// Reload only the window: a change to ui/*.js, .css or .html shows up, while Python keeps running (replies, background tasks, terminals and
+// open sessions carry on). Changes to the .py files still need a restart.
+function reloadWindow() {
+  if (typeof docs !== "undefined" && docs.dirty()) return alertBox("A file in the editor has unsaved changes: save or close it first, then reload.");
+  location.reload();
+}
+document.addEventListener("keydown", (e) => { if (e.key === "F5" && !e.ctrlKey && !e.altKey) { e.preventDefault(); reloadWindow(); } });
 function resetWorkspace() {
   if (typeof docs !== "undefined" && docs.dirty()) return alertBox("A file in the editor has unsaved changes: save or close it first, then reset.");
   confirmBox("Reset the workspace to the default layout? Pane sizes, which panes are open, the face's height, zoom and which groups are open go back to how they start. Your sessions, files, terminals and other settings are not touched.", async () => {
@@ -112,6 +119,7 @@ const MENUS = {
     ["Launch with Windows", () => toggleSetting("launch_at_login"), { checked: setting("launch_at_login") }],
     ["Update automatically", () => toggleSetting("auto_update"), { checked: setting("auto_update") }],
     "-",
+    ["Reload window (picks up changes to the screen's files)", () => reloadWindow(), { kbd: "F5" }],
     ["Reset Workspace to Default…", () => resetWorkspace()],
   ],
   session: () => {
@@ -189,6 +197,7 @@ const MENUS = {
       ["Chat", null, { sub: [
         tog("Fold Thinking", "collapse_thinking", false),
         tog("Fold Commands", "collapse_commands"),
+        tog("Emojis in Replies", "emoji_replies"),
       ] }],
       ["Face & Fun", null, { sub: [
         // the assistant's look and voice: three of each (the keys are what settings already hold)
@@ -217,7 +226,9 @@ const MENUS = {
     ["Keyboard shortcuts", showShortcuts],
     "-",
     ["What's new", async () => api().open_url((await api().repo_url()) + "/commits/main")],
-    ["Report a problem", async () => { api().open_log(); api().open_url((await api().repo_url()) + "/issues"); }],
+    ["🪲 Report a bug…", () => feedback.open("bug")],
+    ["💡 Ask for a feature…", () => feedback.open("feature")],
+    ["Open the log folder", () => api().open_log()],
     "-",
     ["About Yo Claude", showAbout],
   ],

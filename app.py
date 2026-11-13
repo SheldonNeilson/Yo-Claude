@@ -15,6 +15,7 @@ import logging
 import logging.handlers
 import os
 import queue
+import re
 import subprocess
 import sys
 import threading
@@ -1684,6 +1685,20 @@ class Api:
             return ""
         finally:
             win32clipboard.CloseClipboard()
+
+    def issue_info(self):
+        """For the bug / feature form: the repo, this version, the PC, and the latest warnings and errors from the log."""
+        import platform
+        log_lines = []
+        try:
+            with open(LOG_PATH, encoding="utf-8", errors="replace") as f:
+                tail = f.readlines()[-400:]
+            hits = [i for i, l in enumerate(tail) if re.search(r"traceback|error|failed|exception", l, re.I)][-3:]
+            keep = sorted({j for i in hits for j in range(max(0, i - 2), min(len(tail), i + 7))})   # (each problem with a little around it)
+            log_lines = [tail[j].rstrip()[:300] for j in keep]
+        except OSError:
+            pass
+        return {"repo": self.repo_url(), "version": VERSION, "os": platform.platform(), "log": log_lines}
 
     def repo_url(self):
         url = self._app.git("remote", "get-url", "origin").stdout.strip()
