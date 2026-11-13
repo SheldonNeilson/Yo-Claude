@@ -184,6 +184,7 @@ const MENUS = {
         tog("Send Queued Messages Together", "batch_queue"),
         "-",
         tog("PC Control (Screen, Keyboard, Mouse)", "pc_control"),
+        tog("Claude in Chrome (browser extension)", "chrome"),
       ] }],
       ["Chat", null, { sub: [
         tog("Fold Thinking", "collapse_thinking", false),

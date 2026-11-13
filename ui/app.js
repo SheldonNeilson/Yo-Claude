@@ -178,7 +178,7 @@ function handle(e) {
       const s = findSession(S.active.id); if (s) s.unseen = false;
       renderTranscript(); renderHead(); renderTree();   // its folder opens by itself (it holds the active session)
       gallery.session = null; gallery.entries = []; gallery.count = 0; gallery.touch();
-      tasks.sessionChanged();
+      tasks.sessionChanged(); term.sessionChanged();
       planBox.collapsed = null; planBox.update();
       if (window.btw?.session && btw.session !== S.active.id) btw.close();   // side chats belong to their conversation
       setSuggest("");
@@ -583,6 +583,15 @@ function groupMenu(e, g) {
   ].filter(Boolean));
 }
 $("#newGroupBtn").onclick = () => ask("New group", "", async (n) => { const err = await api().add_group(n); if (err) alertBox(err); });
+// Continue a session in Claude Code's own CLI. Yo Claude lets go of its connection first, so it opens in the terminal pane of
+// that session (selected first, so the pane shows it) or in a separate window.
+async function openInCli(s, external) {
+  if (!external && S.active?.id !== s.id) { await api().open_session(s.id, s.cwd); await new Promise((r) => setTimeout(r, 400)); }
+  const r = await api().open_in_cli(s.id, s.cwd || null, external, 100, 14);
+  if (r.error) return alertBox(r.error);
+  if (!external) term.adopt(r, s.id);
+  toast("Yo Claude let go of this session: carry on in the CLI. A message here later picks it up again.");
+}
 function sessionMenu(e, s) {
   const groups = S.groups.filter((g) => g !== s.group).map((g) => ["  → " + g, () => api().set_group(s.id, s.cwd, g)]);
   showMenu(e, [
@@ -592,6 +601,8 @@ function sessionMenu(e, s) {
     ["  → new group…", () => ask("New group", "", (g) => { if (!S.groups.includes(g)) S.groups.push(g); api().set_group(s.id, s.cwd, g); })],
     ["  → its folder's group", () => api().set_group(s.id, s.cwd, null), { disabled: inFolderGroup(s) }],
     "-",
+    ["open in CLI (terminal pane)", () => openInCli(s, false)],
+    ["open in CLI (new window)", () => openInCli(s, true)],
     ["fork (branch the conversation)", async () => { const err = await api().fork(s.id, s.cwd); if (err) alertBox(err); }],
     ["move to trash", () => confirmBox(`Move “${s.title}” to the trash? You can restore it from the trash.`,
       async () => { const err = await api().delete(s.id, s.cwd); if (err) alertBox(err); })],

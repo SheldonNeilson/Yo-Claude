@@ -5,7 +5,12 @@
 const term = (() => {
   const box = $("#term"), tabsEl = $("#termTabs"), bodyEl = $("#termBody");
   const tabs = new Map();   // id -> { id, title, cwd, alive, xt, fit, div, opened }
-  const st = { active: null, ok: true, loaded: false, h: Number(localStorage.getItem("yoc.term.h")) || 260 };
+  const st = { active: null, ok: true, loaded: false, h: Number(localStorage.getItem("yoc.term.h")) || 260,
+               activeBy: new Map(), openFor: new Set() };   // per session: the tab it had up, and whether its pane was open
+  // Every terminal belongs to the session it was opened from; the pane shows only the selected session's own.
+  const curSid = () => S.active?.id ?? null;
+  const mine = (t) => (t.session ?? null) === curSid();
+  const visible = () => [...tabs.values()].filter(mine);
   const css = (k) => getComputedStyle(document.documentElement).getPropertyValue(k).trim();
   const theme = () => ({
     background: css("--bg"), foreground: css("--text"), cursor: css("--orange"), cursorAccent: css("--bg"), selectionBackground: "#5a4a40",
@@ -69,7 +74,7 @@ const term = (() => {
 
   function paintTabs() {
     tabsEl.innerHTML = "";
-    for (const t of tabs.values()) {
+    for (const t of visible()) {
       const b = el("span", "term-tab" + (t.id === st.active ? " on" : "") + (t.alive ? "" : " dead"));
       const name = el("button", "term-name", esc(t.title));
       name.title = t.cwd + (t.alive ? "" : "  (finished)");
@@ -86,6 +91,7 @@ const term = (() => {
     const t = tabs.get(id);
     if (!t) return;
     st.active = id;
+    st.activeBy.set(t.session ?? null, id);
     for (const o of tabs.values()) o.div.classList.toggle("hidden", o !== t);
     paintTabs();
     if (shown()) { open(t); setTimeout(() => { fitActive(); t.xt.focus(); }, 0); }
@@ -95,13 +101,32 @@ const term = (() => {
     box.classList.remove("hidden");
     setHeight(st.h);
     $("#termBtn")?.classList.add("on");
-    if (!tabs.size) return openAt(null);
-    select(st.active || [...tabs.keys()][0]);
+    st.openFor.add(curSid());
+    const vis = visible();
+    if (!vis.length) { paintTabs(); return openAt(null); }
+    select(vis.find((t) => t.id === st.activeBy.get(curSid()))?.id || vis[0].id);
   }
-  function hide() {
+  function conceal() {   // the pane goes away without it being the session's choice (another session has no terminals)
     box.classList.add("hidden");
     $("#termBtn")?.classList.remove("on");
+  }
+  function hide() {
+    st.openFor.delete(curSid());
+    conceal();
     $("#input")?.focus();
+  }
+  // another session was selected: its own terminals (and whether its pane was open) come up, the others' go out of sight
+  function sessionChanged() {
+    const vis = visible();
+    paintTabs();
+    if (st.openFor.has(curSid()) && vis.length) {
+      box.classList.remove("hidden"); setHeight(st.h); $("#termBtn")?.classList.add("on");
+      select(vis.find((t) => t.id === st.activeBy.get(curSid()))?.id || vis[0].id);
+    } else {
+      st.active = null;
+      for (const o of tabs.values()) o.div.classList.add("hidden");
+      conceal();
+    }
   }
   function toggle() { return shown() ? hide() : show(); }
 
@@ -111,8 +136,10 @@ const term = (() => {
     api().term_close(id);
     t.xt.dispose(); t.div.remove(); tabs.delete(id);
     if (st.active === id) st.active = null;
-    if (!tabs.size) return hide(), paintTabs();
-    select(st.active || [...tabs.keys()].pop());
+    if (st.activeBy.get(t.session ?? null) === id) st.activeBy.delete(t.session ?? null);
+    const vis = visible();
+    if (!vis.length) return hide(), paintTabs();
+    select(st.active || vis.at(-1).id);
   }
 
   // a new terminal in the folder (or in the folder holding the file); no path: the session's folder
@@ -121,14 +148,22 @@ const term = (() => {
     box.classList.remove("hidden");
     setHeight(st.h);
     $("#termBtn")?.classList.add("on");
-    const r = await api().term_open(path || null, cwd || null, 100, 14);
-    if (r.error) { if (!tabs.size) hide(); return err(r.error); }
+    st.openFor.add(curSid());
+    const r = await api().term_open(path || null, cwd || null, 100, 14, curSid());
+    if (r.error) { if (!visible().length) hide(); return err(r.error); }
     const t = make({ ...r, buf: "" });
     select(t.id);
     return true;
   }
+  // a session continued in Claude Code's CLI (Python started the shell and typed `claude --resume`): its own tab
+  function adopt(info, sid) {
+    const t = make({ ...info, buf: "" });
+    st.openFor.add(sid);
+    if (curSid() === sid) { box.classList.remove("hidden"); setHeight(st.h); $("#termBtn")?.classList.add("on"); select(t.id); }
+    else st.activeBy.set(sid, t.id);
+  }
   // act on the terminal that's showing, or start one there if there isn't one
-  const live = () => { const t = tabs.get(st.active); return t && t.alive ? t : null; };
+  const live = () => { const t = tabs.get(st.active); return t && t.alive && mine(t) ? t : null; };
   async function cd(path, cwd) {
     if (!live()) return openAt(path, cwd);
     show();
@@ -216,12 +251,13 @@ const term = (() => {
       const r = await api().term_list();
       st.ok = r.ok;
       for (const i of r.terms) if (!tabs.has(i.id)) make(i);
-      if (tabs.size) { st.active = [...tabs.keys()][0]; paintTabs(); }
+      for (const t of tabs.values()) st.openFor.add(t.session ?? null);   // (the window was reloaded: what was running stays up)
+      sessionChanged();
     } catch (_) { /* old backend */ }
     st.loaded = true;
   });
 
-  return { show, hide, toggle, openAt, cd, typePath, run, paste, prefill, external, out, exited, shown, hasLive: () => !!live(), canRun: (p) => /\.(py|pyw|js|mjs|ts|ps1|bat|cmd|exe|sh)$/i.test(p) };
+  return { show, hide, toggle, sessionChanged, adopt, openAt, cd, typePath, run, paste, prefill, external, out, exited, shown, hasLive: () => !!live(), canRun: (p) => /\.(py|pyw|js|mjs|ts|ps1|bat|cmd|exe|sh)$/i.test(p) };
 })();
 
 // The terminal entries for a file or folder's right-click menu. kind: "dir" or "file" (a file opens its folder).

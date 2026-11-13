@@ -1227,6 +1227,8 @@ class Session:
             opts["session_id"] = self.id
         if self.cwd:
             opts.update(setting_sources=["user", "project", "local"], enable_file_checkpointing=True)
+            if r.settings.get("chrome", True):   # Claude in Chrome (the browser extension); works alongside strict_mcp_config
+                opts["extra_args"] = {**opts["extra_args"], "chrome": None}
         else:
             # not [] - the SDK sends that as an empty --setting-sources, which loads everything. CHAT_DIR has no
             # project settings, so this leaves out your user settings (skills, plugins: ~10k tokens a question).
@@ -3822,6 +3824,17 @@ class Router:
                 self.meta.session(old).pop("successor", None)   # (restored alone, it is a session of its own again)
         if notify:
             self.sessions_changed(cwd)
+        return None
+
+    def release_for_cli(self, sid):
+        """Let go of Yo Claude's own connection to a session so Claude Code in a terminal can take it over (one Claude per
+        conversation). Returns why not, if it can't. A later message here reconnects and resumes."""
+        s = self.live.get(sid)
+        if not s:
+            return None
+        if s.busy or s.running_tasks():
+            return "It's still working (or has background tasks running). Let it finish or stop it first."
+        self.run(s.disconnect()).result(10)
         return None
 
     def delete_one(self, sid, cwd, force=False):

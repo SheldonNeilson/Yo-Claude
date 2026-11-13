@@ -74,13 +74,13 @@ RUNNERS = {".py": "python {}", ".pyw": "python {}", ".js": "node {}", ".mjs": "n
 
 
 class Term:
-    def __init__(self, tid, title, cwd, proc):
-        self.id, self.title, self.cwd, self.proc = tid, title, cwd, proc
+    def __init__(self, tid, title, cwd, proc, session=None):
+        self.id, self.title, self.cwd, self.proc, self.session = tid, title, cwd, proc, session   # (session: the Yo Claude session it belongs to)
         self.buf, self.alive, self.code = "", True, None
         self.ps = os.path.basename(str(getattr(proc, "argv", [""])[0] if hasattr(proc, "argv") else "")).lower().startswith(("pwsh", "powershell"))
 
     def info(self):
-        return {"id": self.id, "title": self.title, "cwd": self.cwd, "alive": self.alive}
+        return {"id": self.id, "title": self.title, "cwd": self.cwd, "alive": self.alive, "session": self.session}
 
 
 class Terminals:
@@ -93,7 +93,7 @@ class Terminals:
     def available(self):
         return PtyProcess is not None
 
-    def open(self, cwd, title=None, cols=100, rows=14, run=None):
+    def open(self, cwd, title=None, cols=100, rows=14, run=None, session=None):
         """A new shell in `cwd`; `run` is typed (and entered) once it's up. Returns the terminal's info or {"error"}."""
         if PtyProcess is None:
             return {"error": "The terminal needs pywinpty, which isn't installed. Run Install Yo Claude again (or pip install pywinpty)."}
@@ -109,7 +109,7 @@ class Terminals:
         except Exception as e:
             log.warning("terminal spawn failed: %s", e)
             return {"error": f"Couldn't start a shell: {e}"}
-        t = Term(tid, title or os.path.basename(cwd.rstrip("\\/")) or cwd, cwd, proc)
+        t = Term(tid, title or os.path.basename(cwd.rstrip("\\/")) or cwd, cwd, proc, session)
         self.terms[tid] = t
         threading.Thread(target=self._read, args=(t,), daemon=True).start()
         if run:
@@ -197,10 +197,12 @@ class Terminals:
             self.close(tid)
 
 
-def open_external(folder):
-    """The folder in a separate terminal window: Windows Terminal if it's installed, else a PowerShell window."""
+def open_external(folder, run=None):
+    """The folder in a separate terminal window: Windows Terminal if it's installed, else a PowerShell window.
+    `run` is a command typed in it (the window stays open after it ends)."""
     wt = shutil.which("wt")
+    ps = ["powershell", "-NoLogo", "-NoExit", "-Command", run] if run else None
     if wt:
-        subprocess.Popen([wt, "-d", folder])
+        subprocess.Popen([wt, "-d", folder] + (ps or []))
     else:
-        subprocess.Popen(shell_argv(), cwd=folder, creationflags=subprocess.CREATE_NEW_CONSOLE)
+        subprocess.Popen(ps or shell_argv(), cwd=folder, creationflags=subprocess.CREATE_NEW_CONSOLE)

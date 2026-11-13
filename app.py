@@ -1038,7 +1038,7 @@ class Api:
             m = localai.find(a.settings, key)
             if m:
                 threading.Thread(target=localai.warm, args=(m,), daemon=True).start()
-        if key == "pc_control":
+        if key in ("pc_control", "chrome"):
             a.router.reconnect_all()
         if key == "accurate_speech":
             a.commands.put(("accurate_speech", bool(value)))
@@ -1508,12 +1508,29 @@ class Api:
             return None
         return full if os.path.isdir(full) else os.path.dirname(full)
 
-    def term_open(self, path=None, cwd=None, cols=100, rows=14):
-        """A new terminal in that folder (or the folder holding that file). Returns its info or {"error"}."""
+    def term_open(self, path=None, cwd=None, cols=100, rows=14, session=None):
+        """A new terminal in that folder (or the folder holding that file). Returns its info or {"error"}.
+        `session`: the Yo Claude session it belongs to (the pane shows each session's own terminals)."""
         folder = self._term_folder(path, cwd)
         if not folder:
             return {"error": missing(path, cwd)}
-        return self._app.terms.open(folder, cols=cols, rows=rows)
+        return self._app.terms.open(folder, cols=cols, rows=rows, session=session)
+
+    def open_in_cli(self, sid, cwd, external=False, cols=100, rows=14):
+        """Continue a session in Claude Code's own CLI (`claude --resume`), in the terminal pane or a separate window.
+        Yo Claude lets go of its own connection first: one Claude per conversation."""
+        err = self._app.router.release_for_cli(sid)
+        if err:
+            return {"error": err}
+        folder = cwd if cwd and os.path.isdir(cwd) else sessions.CHAT_DIR
+        cmd = f"claude --resume {sid}"
+        if external:
+            try:
+                terminal.open_external(folder, run=cmd)
+                return {"external": True}
+            except OSError as e:
+                return {"error": f"Couldn't open a terminal window: {e}"}
+        return self._app.terms.open(folder, title="claude CLI", cols=cols, rows=rows, run=cmd, session=sid)
 
     def term_cd(self, tid, path, cwd=None):
         folder = self._term_folder(path, cwd)
