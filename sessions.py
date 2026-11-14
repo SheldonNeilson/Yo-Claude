@@ -2321,6 +2321,7 @@ class Router:
         self.agent_bg = {}                  # session id -> descriptions of subagents still writing their transcript (see watch_agents)
         threading.Thread(target=self.watch_agents, name="agent-watch", daemon=True).start()
         threading.Thread(target=self.poll_limits, name="limits-poll", daemon=True).start()
+        threading.Thread(target=self.auto_retag, name="auto-retag", daemon=True).start()
 
     def poll_limits(self):
         """Claude Code only reports the plan limits when their status changes, so the meter would sit on a stale figure.
@@ -3874,10 +3875,11 @@ class Router:
                         skipped += 1
                         continue
                     with open(path, "rb") as f:
+                        if src not in f.read(65536):   # (the tag is on the first lines; a whole file isn't read to find out)
+                            already += 1
+                            continue
+                        f.seek(0)
                         data = f.read()
-                    if src not in data:
-                        already += 1
-                        continue
                     tmp = path + ".retag"
                     with open(tmp, "wb") as f:
                         f.write(data.replace(src, dst))
@@ -3888,6 +3890,26 @@ class Router:
                     skipped += 1
         log.info("Retag (%s): %d changed, %d skipped, %d already fine", "undo" if undo else "yo-claude", changed, skipped, already)
         return {"changed": changed, "skipped": skipped, "already": already}
+
+    @staticmethod
+    def desktop_app_installed():
+        """Is the Claude desktop app on this PC? (Its data folder, or its Store package, exists.)"""
+        local = os.environ.get("LOCALAPPDATA", "")
+        return bool(local) and (os.path.isdir(os.path.join(local, "Claude-Data")) or bool(glob.glob(os.path.join(local, "Packages", "Claude_*"))))
+
+    def auto_retag(self):
+        """Once, a little after start-up: give the sessions from before the "yo-claude" tag the new one, so the Claude desktop app
+        can take them in, and tell the window (which shows where to click in the desktop app). Tried again at later starts
+        until nothing was skipped. Off with "desktop_visible": false."""
+        time.sleep(60)
+        if not self.settings.get("desktop_visible", True) or self.meta.data.get("retag_done"):
+            return
+        r = self.retag_sessions()
+        if not r["skipped"]:
+            self.meta.data["retag_done"] = True
+            self.meta.save()
+        if r["changed"] and self.desktop_app_installed():
+            self.emit("desktop_sync", changed=r["changed"])
 
     def release_for_cli(self, sid):
         """Let go of Yo Claude's own connection to a session so Claude Code in a terminal can take it over (one Claude per

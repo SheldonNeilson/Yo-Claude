@@ -45,7 +45,16 @@ function retagOld() {
   confirmBox("This changes one tag inside each of your older Yo Claude session files, so the Claude desktop app can pick them up (its “recover sessions” scan, or a restart of it). The conversations themselves aren't touched, and the change can be undone from the same place. Sessions that are open or were used in the last minute are skipped; run it again later for those. Go ahead?", async () => {
     const r = await api().retag_sessions(false);
     toast(`${r.changed} session${r.changed === 1 ? "" : "s"} updated${r.skipped ? `, ${r.skipped} skipped (open or very recent)` : ""}${r.already ? `, ${r.already} already fine` : ""}`);
+    if (r.changed) desktopSteps();
   });
+}
+// The one step Yo Claude can't do for you: the desktop app takes sessions in with its own Import button.
+function desktopSteps() {
+  const d = dialog("Last step, in the Claude desktop app");
+  d.appendChild(el("div", "", `<p>Your older Yo Claude sessions are ready. In the <b>Claude desktop app</b>, open its menu (☰, top left) and choose:</p>
+    <p><b>Help › Troubleshooting › Import Claude Code CLI Sessions…</b></p>
+    <p>then <b>Import sessions</b>. They appear in its Code session list. For sessions you start later, repeat the same Import whenever you want them listed there.</p>`));
+  addButtons(d, [["got it", closeModal, "primary"]]);
 }
 function reloadWindow() {
   if (typeof docs !== "undefined" && docs.dirty()) return alertBox("A file in the editor has unsaved changes: save or close it first, then reload.");
@@ -183,7 +192,7 @@ const MENUS = {
     ["Reload plugins", () => window.plugins.load(true)],
     ["Open plugins folder", () => api().open_plugins_folder()],
     "-",
-    ["Show my old sessions in the Claude desktop app…", () => retagOld()],
+    ["Sync old sessions to Claude desktop…", () => retagOld()],
   ],
   // the extras, each on or off (named the old way). Claude's own (tick lists, advisor notes) apply from a session's
   // next start; the rest at once.

@@ -239,6 +239,7 @@ function handle(e) {
     case "update": renderUpdate(e); break;
     case "update_countdown": updateCountdown(e); break;
     case "notice": toast(e.text); break;
+    case "desktop_sync": toast(`${e.changed} older session${e.changed === 1 ? " is" : "s are"} ready for the Claude desktop app: click for the last step`, "", () => desktopSteps()); break;
     case "compose": if (S.active && e.session === S.active.id) window.plugins.compose(e.text); break;   // a plugin's "give it something to add"
     case "session_info":
       if (S.active && e.session.id === S.active.id) { Object.assign(S.active, e.session); renderExtraDirs(); renderFolder(); renderHead(); renderTree(); }
