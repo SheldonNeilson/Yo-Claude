@@ -56,8 +56,13 @@ function desktopSteps() {
     <p>then <b>Import sessions</b>. They appear in its Code session list. For sessions you start later, repeat the same Import whenever you want them listed there.</p>`));
   addButtons(d, [["got it", closeModal, "primary"]]);
 }
-function reloadWindow() {
+async function reloadWindow() {
   if (typeof docs !== "undefined" && docs.dirty()) return alertBox("A file in the editor has unsaved changes: save or close it first, then reload.");
+  // A plain reload only revalidates the page itself: the scripts and styles come from the webview's cache for as long as it thinks they're
+  // fresh (a file untouched for days is "fresh" for most of a day), so an edited script would not load. Fetching each with cache:"reload"
+  // replaces the cached copy first.
+  const urls = [...document.querySelectorAll("script[src], link[rel=stylesheet]")].map((e) => e.src || e.href);
+  await Promise.all(urls.map((u) => fetch(u, { cache: "reload" }).catch(() => {})));
   location.reload();
 }
 document.addEventListener("keydown", (e) => { if (e.key === "F5" && !e.ctrlKey && !e.altKey) { e.preventDefault(); reloadWindow(); } });
