@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+  <title>BUG INVADERS · NEILSON.CO.ZA</title>
+  <meta name="description" content="Bug Invaders: Space Invaders with merge conflicts, failing tests and a Friday deploy. Born inside Yo Claude, a voice-first coding assistant." />
+  <meta name="theme-color" content="#111110" />
+  <link rel="icon" type="image/svg+xml" href="../favicon.svg" />
+  <link rel="canonical" href="https://neilson.co.za/bug-invaders/" />
+  <!--invaders:css-->
+  <style>
+    :root { --bg:#111110; --text:#e8e4da; --dim:#8f8a80; --faint:#5c5a56; --orange:#d97757; --orange2:#ff8c60; --amber:#e8b04b;
+      --green:#9fd17f; --blue:#5ab0ff; --red:#ff6b6b; --line2:#4a3e36; --mono:"Cascadia Mono",Consolas,"Courier New",monospace; }
+    * { box-sizing: border-box; }
+    html, body { margin:0; height:100%; background:var(--bg); color:var(--text); font:15px/1.5 var(--mono); overflow:hidden; }
+    #wrap { position:fixed; inset:0; display:flex; flex-direction:column; padding:0 8px env(safe-area-inset-bottom); }
+    #bar { flex:none; display:flex; gap:1.5ch; padding:8px 4px; color:var(--dim); font-size:13px; flex-wrap:wrap; }
+    #foot { flex:none; display:flex; gap:1.5ch; padding:6px 4px 8px; color:var(--faint); font-size:12px; flex-wrap:wrap; }
+    #foot a { color:var(--dim); text-decoration:none; } #foot a:hover { color:var(--orange); text-decoration:underline; }
+    #foot .sp { flex:1; }
+    .crt::after { content:""; position:fixed; inset:0; pointer-events:none; z-index:9;
+      background:repeating-linear-gradient(0deg, rgba(0,0,0,.14) 0 1px, transparent 1px 3px), radial-gradient(120% 100% at 50% 50%, transparent 60%, rgba(0,0,0,.45)); }
+    #bar a { color:var(--orange); text-decoration:none; } #bar a:hover { color:var(--orange2); text-decoration:underline; }
+    #bar .sp { flex:1; }
+    #chat { position:relative; flex:1; min-height:0; }
+    #transcript { position:absolute; inset:0; }
+    #pad { flex:none; display:none; flex-wrap:wrap; gap:8px; padding:8px 2px; }
+    #pad button { flex:1 1 22%; min-width:0; height:52px; font:inherit; font-size:20px; color:var(--orange); background:#1b1a18; border:1px solid var(--line2); border-radius:8px; touch-action:none; user-select:none; }
+    /* the era actions (meter, force, screen bomb, hyper, polarity, release...): invaders.js lists the ones reached through window.invaders.onActions and the
+       script below builds a button for each, in a row of their own that wraps; up to six fit one row at 360px */
+    #pad button.x { flex:1 1 14%; min-width:50px; height:42px; font-size:11px; letter-spacing:0; padding:0 2px; color:var(--amber); }
+    #pad button:active { background:#2a2118; }
+    /* up / down / bomb / roll appear only in the eras that have them (invaders.js sets data-move2d / data-bomb / data-roll on #pad) */
+    #pad button[data-k="up"], #pad button[data-k="down"], #pad button[data-k="bomb"], #pad button[data-k="roll"] { display:none; }
+    #pad[data-move2d] button[data-k="up"], #pad[data-move2d] button[data-k="down"], #pad[data-bomb] button[data-k="bomb"], #pad[data-roll] button[data-k="roll"] { display:block; }
+    @media (pointer:coarse) { #pad { display:flex; } }
+    @media (max-width:420px) { #pad { gap:6px; } #pad button { height:46px; font-size:18px; } #pad button.x { height:40px; font-size:10px; } }
+  </style>
+</head>
+<body class="crt">
+<div id="wrap">
+  <div id="bar">
+    <a href="../">~/neilson.co.za</a><span>/</span><span style="color:var(--orange)">bug-invaders</span><span class="sp"></span>
+    <a href="https://github.com/SheldonNeilson/Yo-Claude" target="_blank" rel="noopener">[ get the full Yo Claude on GitHub ]</a>
+  </div>
+  <div id="chat"><div id="transcript"></div></div>
+  <div id="foot">
+    <span>part of <a href="https://github.com/SheldonNeilson/Yo-Claude" target="_blank" rel="noopener">Yo Claude</a>, a voice-first coding assistant for Windows</span><span class="sp"></span>
+    <a href="https://github.com/SheldonNeilson/Yo-Claude" target="_blank" rel="noopener">github.com/SheldonNeilson/Yo-Claude</a>
+  </div>
+  <div id="pad">
+    <button data-k="left" aria-label="left">◀</button><button data-k="fire" aria-label="fire">FIRE</button>
+    <button data-k="right" aria-label="right">▶</button><button data-k="pause" aria-label="pause">II</button>
+    <button data-k="up" aria-label="up">▲</button><button data-k="down" aria-label="down">▼</button>
+    <button data-k="bomb" aria-label="bomb">BOMB</button><button data-k="roll" aria-label="roll">ROLL</button>
+  </div>
+</div>
+<script>window.INVADERS_STANDALONE = true;</script>
+<!--invaders:js-->
+<script>
+  window.invaders.show();
+  const pad = document.getElementById("pad");
+  if (/[?&]pad(&|=|$)/.test(location.search)) pad.style.display = "flex";   // ?pad shows the touch pad on a desktop (tests, screenshots)
+  const bind = (b) => {
+    const k = b.dataset.k, up = () => window.invaders.input(k, false);
+    b.addEventListener("pointerdown", (e) => { e.preventDefault(); b.setPointerCapture(e.pointerId); window.invaders.input(k, true); });
+    b.addEventListener("pointerup", up); b.addEventListener("pointercancel", up);
+  };
+  for (const b of pad.querySelectorAll("button")) bind(b);
+  // era actions: window.invaders tells us which exist in the eras reached so far ([{ action, label, key }]); one button each, any action name works
+  window.invaders.onActions = (list) => {
+    for (const b of pad.querySelectorAll("button.x")) b.remove();
+    for (const a of list) {
+      const b = document.createElement("button");
+      b.className = "x"; b.dataset.k = a.action; b.textContent = a.label; b.setAttribute("aria-label", a.label + (a.key ? " (key " + a.key + ")" : ""));
+      pad.appendChild(b); bind(b);
+    }
+  };
+</script>
+</body>
+</html>

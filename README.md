@@ -4,6 +4,11 @@ A "Hey Siri" for Claude on Windows. Say **"yo claude"**, ask anything out loud, 
 voice. Point it at a folder and it becomes a voice-first coding assistant: it reads and edits code, and shows its
 work, every file it changed and your git branch. With PC control on, it can also use your screen, mouse and keyboard.
 
+**Hear the result, skip the wall of text.** Claude's replies can run long. When you ask by voice, Yo Claude tells Claude
+to open its answer with one or two plain sentences (what it did, or the answer), and only that opening is read out.
+The code, lists, diffs and detail stay on screen for when you want them. So you can hand off a task, look away, and
+hear "Fixed it, three tests pass; the diff is on screen" the moment it's done.
+
 Unofficial fan project, not made or supported by Anthropic. Uses your own Claude account through Claude Code.
 
 ![Yo Claude coding: groups of sessions on the left (a group per folder, plus your own), the conversation with folded tool steps, and the files changed in the session on the right](docs/screenshots/coding.png)
@@ -23,7 +28,11 @@ each with their own voice and 60 to 100 short clips of resting, thinking, listen
 
 **Something to do while Claude thinks.** Bug Invaders comes up over the chat when a reply takes a while (or from the 👾 button
 next to the message box): shoot failing tests, TODOs and segfaults, grab coffee and `npm update` power-ups, and it steps
-aside the moment Claude needs you. Esc hides it.
+aside the moment Claude needs you. Esc hides it. It starts as 1978 Space Invaders and **grows up one wave at a time through
+arcade history**: Galaxian dive-bombs, then a plane you fly in every direction over scrolling ground (bomb the ground targets,
+shoot the air), 1942 squadrons and a barrel roll, a Gradius power-up meter, an R-Type charge beam, Raiden tanks and bombs,
+bullet hell with a visible hitbox, Ikaruga's orange and blue, and finally a neon twin-stick finale. Everything stays glowing
+text, with a bug-and-merge-conflict sense of humour. You can also [play it on the web](https://neilson.co.za/bug-invaders/).
 
 ![The chat, a Markdown file in split edit and preview, and a terminal, side by side](docs/screenshots/workspace.png)
 
@@ -83,6 +92,9 @@ The first time, a welcome tour explains everything and checks how well it hears 
   4 or 6 seconds; a request can run up to a minute). You can also say it in one breath: "yo claude, what's the weather
   tomorrow?" **Voice → More → Wake on just "Claude"** lets you leave out the "yo" (off by default: the bare name is an
   ordinary word, so it wakes more by accident).
+- **Short spoken summaries**: a spoken reply is the plain opening of Claude's answer (at most three sentences),
+  ending with "The rest is on screen" when there's more. Code blocks, lists and links are never read out, and neither
+  are emojis.
 - **Follow-ups**: after it answers it listens for about 6 seconds, so you can carry on without the wake word.
   "Never mind" ends it.
 - **Voice commands**: "new session", "new chat", "switch to *session name*".
