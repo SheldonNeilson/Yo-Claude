@@ -2,7 +2,7 @@
   --bg: #111110; --bg2: #181816; --bg3: #20201d; --line: #3a332d; --line2: #4a3e36;
   --text: #e8e4da; --dim: #8f8a80; --faint: #5c5a56;
   --orange: #d97757; --orange2: #ff8c60; --amber: #e8b04b; --green: #9fd17f; --blue: #5ab0ff; --red: #ff6b6b;
-  --mono: "Cascadia Mono", "Cascadia Code", Consolas, "Courier New", "Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji", monospace;
+  --mono: "Cascadia Mono", "Cascadia Code", Consolas, "Courier New", monospace;
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font: 13px/1.5 var(--mono); }
@@ -719,6 +719,9 @@ b.lo { color: var(--green); } b.mid { color: var(--amber); } b.hi { color: var(-
 .dialog.feedback input:not([type=checkbox]), .dialog.feedback textarea { margin: 6px 0; }
 .dialog.feedback .fbkinds { display: flex; gap: 8px; margin: 8px 0; }
 .dialog.feedback .fbk.on { border-color: var(--orange); color: var(--orange); }
+
+.earlier { color: var(--faint); text-align: center; padding: 6px; cursor: pointer; border: 1px dashed var(--line2); margin: 4px 0 10px; }
+.earlier:hover { color: var(--orange); }
 
 /* file explorer */
 .ftools { padding: 3px 10px; gap: 4px; }

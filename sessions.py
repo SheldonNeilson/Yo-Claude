@@ -9,6 +9,7 @@ items for the UI, and routes tool approvals to the UI and to voice.
 import asyncio
 import base64
 import datetime
+import glob
 import ctypes
 import hashlib
 import inspect
@@ -38,6 +39,26 @@ log = logging.getLogger("yo_claude")
 HERE = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(os.path.expanduser("~"), ".yoclaude")
 PC_CONTROL_DATA = os.path.join(DATA_DIR, "pc-control")   # its log, saved macros and kill-switch file
+HISTORY_PAGE = 250   # items sent when a session opens (and per "load earlier"): a long conversation isn't shipped and drawn whole
+
+
+def paged(items, n=HISTORY_PAGE):
+    """The newest page of a transcript for the window, and how many items there are in all (items keep their own index `i`)."""
+    return {"items": items[-n:], "total": len(items)}
+
+
+_PROJECT_KEYS = {}
+
+
+def project_key(cwd):
+    """Claude Code's folder name for a working directory. The SDK works it out with realpath (disk calls), and the task
+    list asked for it per session every few seconds: on a busy disk that piled up threads and froze the window."""
+    cwd = cwd or CHAT_DIR
+    if cwd not in _PROJECT_KEYS:
+        _PROJECT_KEYS[cwd] = sdk.project_key_for_directory(cwd)
+    return _PROJECT_KEYS[cwd]
+
+
 CHAT_DIR = os.path.join(DATA_DIR, "home")       # cwd for chats: outside any project, so nothing project-level loads
 TRASH_DIR = os.path.join(DATA_DIR, "trash")
 VOICE_NOTE_MODEL = "claude-haiku-5-5"   # writes the short spoken lines (a separate call: nothing lands in the chat)
@@ -1242,6 +1263,11 @@ class Session:
             tools = WEB_TOOLS + (FILE_TOOLS if self.extra_dirs else [])
             opts.update(setting_sources=["project", "local"], tools=tools, allowed_tools=list(WEB_TOOLS),
                         model=CHAT_MODEL)
+        if r.settings.get("desktop_visible", True):
+            # The Claude desktop app only adopts sessions that weren't started through an SDK (it skips the tags sdk-py,
+            # sdk-ts, sdk-cli), so Yo Claude's own tag lets its new sessions show up there. Set "desktop_visible": false
+            # in settings.json to go back to the SDK's.
+            opts["env"] = {**opts.get("env", {}), "CLAUDE_CODE_ENTRYPOINT": "yo-claude"}
         if self.extra_dirs:   # more folders Claude may read and write, besides the main one
             opts["add_dirs"] = list(self.extra_dirs)
         if self.model:
@@ -2958,7 +2984,7 @@ class Router:
         if group and group in self.meta.data["groups"] and group != self.default_group(cwd):
             self.meta.update(s.id, group=group, cwd=cwd)
         self.ensure_baseline(s, "start")
-        self.emit("opened", session=self.describe(s), items=[])
+        self.emit("opened", session=self.describe(s), items=[], total=0)
         self.sessions_changed(cwd)
         self.run(s.warm())
         return s
@@ -3006,7 +3032,7 @@ class Router:
         # seq: the window gets this open twice (this event and open_session's answer) and draws it once
         self.open_seq += 1
         s.open_seq = self.open_seq
-        self.emit("opened", session=self.describe(s), items=s.items, seq=s.open_seq)
+        self.emit("opened", session=self.describe(s), seq=s.open_seq, **paged(s.items))
         self.run(s.warm())
         if time.time() - t0 > 1.0:   # (which part, when it's slow: loading its history, or the bookkeeping after)
             log.info("Open of %s: history %.2f s, bookkeeping %.2f s, event %.2f s", sid[:8], t1 - t0, t2 - t1, time.time() - t2)
@@ -3306,7 +3332,7 @@ class Router:
             lines.append("Open in the user's editor: " + ", ".join(open_files))
         if learn:
             try:
-                self.writing.bootstrap(cwd or "", sdk.project_key_for_directory(cwd or CHAT_DIR))
+                self.writing.bootstrap(cwd or "", project_key(cwd))
                 ex = self.writing.examples(text, cwd, 6)
             except Exception as e:
                 log.debug("writing examples failed: %s", e)
@@ -3335,7 +3361,7 @@ class Router:
                 ex = []
                 if self.settings.get("predict_learn", True):
                     try:
-                        self.writing.bootstrap(cwd or "", sdk.project_key_for_directory(cwd or CHAT_DIR))
+                        self.writing.bootstrap(cwd or "", project_key(cwd))
                         ex = list(reversed(self.writing.examples(text, cwd, 8)))
                     except Exception as e:
                         log.debug("writing examples failed: %s", e)
@@ -3762,7 +3788,7 @@ class Router:
         self.groups_changed()
 
     def session_file(self, sid, cwd):
-        folder = os.path.join(PROJECTS_DIR, sdk.project_key_for_directory(cwd or CHAT_DIR))
+        folder = os.path.join(PROJECTS_DIR, project_key(cwd))
         return folder, os.path.join(folder, f"{sid}.jsonl")
 
     def stale(self):
@@ -3831,6 +3857,37 @@ class Router:
         if notify:
             self.sessions_changed(cwd)
         return None
+
+    OLD_TAG, NEW_TAG = b'"entrypoint":"sdk-py"', b'"entrypoint":"yo-claude"'
+
+    def retag_sessions(self, undo=False):
+        """Make the sessions Yo Claude started before the "yo-claude" tag show in the Claude desktop app, which skips the SDK's
+        sdk-py tag: swap the tag in their files (the swap is exactly reversible: undo=True puts sdk-py back). Sessions that are
+        connected or were written in the last minute are left for next time. Returns {"changed", "skipped", "already"}."""
+        src, dst = (self.NEW_TAG, self.OLD_TAG) if undo else (self.OLD_TAG, self.NEW_TAG)
+        changed = skipped = already = 0
+        connected = {sid for sid, s in self.live.items() if s.client}
+        for folder in glob.glob(os.path.join(PROJECTS_DIR, "*")):
+            for path in glob.glob(os.path.join(folder, "*.jsonl")):
+                try:
+                    if os.path.basename(path)[:-6] in connected or time.time() - os.path.getmtime(path) < 60:
+                        skipped += 1
+                        continue
+                    with open(path, "rb") as f:
+                        data = f.read()
+                    if src not in data:
+                        already += 1
+                        continue
+                    tmp = path + ".retag"
+                    with open(tmp, "wb") as f:
+                        f.write(data.replace(src, dst))
+                    os.replace(tmp, path)
+                    changed += 1
+                except OSError as e:
+                    log.warning("retag %s: %s", path, e)
+                    skipped += 1
+        log.info("Retag (%s): %d changed, %d skipped, %d already fine", "undo" if undo else "yo-claude", changed, skipped, already)
+        return {"changed": changed, "skipped": skipped, "already": already}
 
     def release_for_cli(self, sid):
         """Let go of Yo Claude's own connection to a session so Claude Code in a terminal can take it over (one Claude per

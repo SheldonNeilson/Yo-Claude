@@ -16,7 +16,8 @@ const feedback = (() => {
     const info = await api().issue_info().catch(() => ({}));
     const d = dialog("🪲 Oops! Tell us what's up");
     d.classList.add("wide", "feedback");
-    d.appendChild(el("p", "dim", "Found a bug? Want a feature? This opens a ready-filled GitHub issue. Nothing is sent until you press Submit over there. 🕵️"));
+    const heading = d.querySelector("h3"), blurb = el("p", "dim");
+    d.appendChild(blurb);
     const row = el("div", "fbkinds");
     const kinds = { bug: "🪲 Something's broken", feature: "💡 I want a thing" };
     const btns = {};
@@ -24,6 +25,9 @@ const feedback = (() => {
     body.style.width = "100%";
     const set = (k) => {
       kind = k;
+      heading.textContent = k === "bug" ? "🪲 Oops! What went wrong?" : "💡 Got an idea? Let's hear it";
+      blurb.textContent = (k === "bug" ? "Found a bug? Tell us what happened." : "Want Yo Claude to do something new? Describe it.") +
+        " This opens a ready-filled GitHub issue; nothing is sent until you press Submit over there. 🕵️";
       for (const [n, b] of Object.entries(btns)) b.classList.toggle("on", n === k);
       title.placeholder = pick(QUIPS[k]);
       if (!body.dataset.touched) body.value = TEMPLATES[k].replace(/\n/g, "\n");

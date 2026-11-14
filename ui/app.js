@@ -174,9 +174,15 @@ function handle(e) {
       // while it's replying: text streamed in between would be added twice to what the first copy already had
       if (e.seq != null && e.seq === S.openSeq && S.active?.id === e.session?.id && !e.session?.busy) break;
       S.openSeq = e.seq;
-      S.active = e.session; S.items = e.items || []; S.folder = e.session.cwd; waitLine.touch();
+      S.active = e.session; setItems(e.items || [], e.total); S.folder = e.session.cwd; waitLine.touch();
       const s = findSession(S.active.id); if (s) s.unseen = false;
+      const drawT0 = performance.now();
       renderTranscript(); renderHead(); renderTree();   // its folder opens by itself (it holds the active session)
+      const sw = S.switchT0, now = performance.now();
+      if (sw && sw.id === S.active.id) {   // log a slow switch: from the click, and how much of it was drawing
+        S.switchT0 = null;
+        if (now - sw.t > 800) api().ui_note(`Slow switch to ${sw.id.slice(0, 8)} "${sw.title}": ${((now - sw.t) / 1000).toFixed(1)} s from the click, drawing ${S.items.length} items took ${((now - drawT0) / 1000).toFixed(1)} s`).catch?.(() => {});
+      }
       gallery.session = null; gallery.entries = []; gallery.count = 0; gallery.touch();
       tasks.sessionChanged(); term.sessionChanged();
       planBox.collapsed = null; planBox.update();
@@ -506,6 +512,7 @@ function sessionRow(s, withFolder = false) {
       document.querySelectorAll("#tree .session.active").forEach((r) => r.classList.remove("active"));
       row.classList.add("active");
     }
+    S.switchT0 = { id: s.id, title: s.title, t: performance.now() };   // (timed in the "opened" event: logged when slow)
     api().open_session(s.id, s.cwd);
   };
   row.onmousedown = (e) => { if (e.button === 0) openIt(); };
@@ -1114,9 +1121,37 @@ function addCopyButtons(node, it) {
     pre.appendChild(b);
   });
 }
-function renderTranscript() {
+// The window holds the newest page of a conversation (the rest is fetched on demand): S.items is indexed by each item's own
+// number, with gaps for what isn't loaded yet.
+function setItems(items, total) {
+  S.items = new Array(Math.max(total ?? 0, items.length));
+  for (const it of items) if (it) S.items[it.i] = it;
+}
+const firstLoaded = () => { const k = S.items.findIndex(Boolean); return k < 0 ? 0 : k; };
+async function loadEarlier() {
+  const first = firstLoaded();
+  if (loadEarlier.busy || !S.active || first <= 0) return;
+  loadEarlier.busy = true;
+  const sid = S.active.id, t = $("#transcript"), h0 = t.scrollHeight, top0 = t.scrollTop;
+  try {
+    const r = await api().history_before(sid, first, 250);
+    if (S.active?.id !== sid) return;
+    for (const it of r.items) if (it && !S.items[it.i]) S.items[it.i] = it;
+    renderTranscript(true);
+    t.scrollTop = top0 + (t.scrollHeight - h0);   // (what you were reading stays where it was)
+  } finally { loadEarlier.busy = false; }
+}
+function renderTranscript(keepPlace = false) {
   const t = $("#transcript");
+  const opened = keepPlace ? new Set(transcript.foldOpen) : null;
   t.innerHTML = ""; transcript.reset();
+  if (opened) opened.forEach((k) => transcript.foldOpen.add(k));
+  const more = firstLoaded();
+  if (more > 0) {
+    const bar = el("div", "earlier", `▲ ${more} earlier item${more > 1 ? "s" : ""} · click, or scroll up, to load more`);
+    bar.onclick = () => loadEarlier();
+    t.appendChild(bar);
+  }
   if (!S.items.length) {
     const cwd = S.active ? S.active.cwd : S.folder;
     t.appendChild(el("div", "empty", esc(cwd
@@ -1129,9 +1164,11 @@ function renderTranscript() {
   transcript.refreshGroups();
   transcript.fold();
   follow.bind("chat", t);
+  if (keepPlace) return;
   follow.set("chat", true);             // a freshly opened conversation starts at the newest message
   t.scrollTop = t.scrollHeight;
 }
+$("#transcript").addEventListener("scroll", (e) => { if (e.target.scrollTop < 30 && firstLoaded() > 0) loadEarlier(); });
 let renderTimer = null;
 function scheduleRender(i) {
   if (renderTimer) return;
@@ -1789,7 +1826,7 @@ function zoomable(img, fill) {
   const label = el("span", "zlabel", "100%");
   const btn = (t, tip, fn) => { const b = el("button", "", t); b.dataset.tip = tip; b.onclick = (e) => { e.stopPropagation(); fn(); }; return b; };
   bar.append(btn("−", "Zoom out", () => zoomAt(1 / 1.5, ...mid())), label, btn("+", "Zoom in", () => zoomAt(1.5, ...mid())),
-             btn("reset", "Fit the picture again", reset));
+             btn("reset", "Fit the picture again", reset), btn("copy", "Copy the picture to the clipboard (or right-click it)", () => copyImage(img)));
   box.addEventListener("wheel", (e) => {
     e.preventDefault();
     zoomAt(e.deltaY < 0 ? 1.2 : 1 / 1.2, ...rel(e));
@@ -2369,7 +2406,8 @@ window.addEventListener("pywebviewready", async () => {
     try { s = await api().init(); } catch (e) { if (i >= 4) throw e; await new Promise((r) => setTimeout(r, 700)); }
   }
   Object.assign(S, { settings: s.settings, folder: s.folder, workspaces: s.workspaces || [], groups: s.groups,
-                     active: s.active, items: s.items || [], display: s.display });
+                     active: s.active, items: [], display: s.display });
+  setItems(s.items || [], s.total);
   S.manual = s.settings.tree_manual || {};
   $("#versionTag").textContent = "v" + s.version;
   renderUpdate(s.update);

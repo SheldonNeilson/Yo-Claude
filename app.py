@@ -600,7 +600,7 @@ class App:
                {"kind": "display", "state": self.display, "voice": self.voice_state,
                 "work": self.work_state, "text": self.voice_text, "hold": self.voice_hold}]
         if active:
-            evs.append({"kind": "opened", "session": self.router.describe(active), "items": active.items})
+            evs.append({"kind": "opened", "session": self.router.describe(active), **sessions.paged(active.items)})
         self.push(self.bar, evs)
 
     def main_on_screen(self):
@@ -864,7 +864,7 @@ class Api:
                 "updated": updated,
                 "settings": dict(a.settings), "folder": r.folder, "folders": r.meta.data["recent_folders"],
                 "workspaces": r.workspaces(), "groups": r.meta.data["groups"], "sessions": self.safe_list(r, r.folder),
-                "active": r.describe(active) if active else None, "items": active.items if active else [],
+                "active": r.describe(active) if active else None, **(sessions.paged(active.items) if active else {"items": [], "total": 0}),
                 "display": {"state": a.display, "voice": a.voice_state, "work": a.work_state, "text": a.voice_text}}
 
     def fix_text(self, text):
@@ -1243,7 +1243,15 @@ class Api:
         s = self._app.router.open(sid, cwd)
         took = time.time() - t0
         (log.warning if took > 1.0 else log.info)("Opened session %s in %.2f s (%d items)", str(sid)[:8], took, len(s.items))
-        return {"session": self._app.router.describe(s), "items": s.items, "seq": getattr(s, "open_seq", None)}
+        return {"session": self._app.router.describe(s), "seq": getattr(s, "open_seq", None), **sessions.paged(s.items)}
+
+    def history_before(self, sid, before, n=sessions.HISTORY_PAGE):
+        """The page of an open conversation's items just before index `before` (the window's "load earlier")."""
+        s = self._app.router.live.get(sid)
+        if not s:
+            return {"items": [], "total": 0}
+        before = max(0, min(int(before), len(s.items)))
+        return {"items": s.items[max(0, before - n):before], "total": len(s.items)}
 
     def list_sessions(self, cwd):
         return self._app.router.list(cwd)
@@ -1341,6 +1349,10 @@ class Api:
 
     def ui_note(self, text):   # the window's own diagnostics (e.g. the thinking animation's layout churning) go in the log
         log.info("[ui] %s", str(text)[:300])
+
+    def ui_note(self, text):
+        """A line from the window for the log (used for slow session switches)."""
+        log.info("UI: %s", str(text)[:500])
 
     def focus_lost(self, info):
         """The message box lost the keyboard while you were typing (ui/app.js): log where it went, including which window
@@ -1653,6 +1665,44 @@ class Api:
         """The countdown dialog's cancel: no automatic update now (asks again at the next check)."""
         self._app.cancel_update()
 
+    def copy_image(self, src):
+        """A picture onto the Windows clipboard (a bitmap and a PNG), so it pastes into other programs. `src`: one of
+        Yo Claude's local media URLs, a data: URL or a file path. Returns an error message, or None."""
+        import base64
+        import io
+        import urllib.parse
+        import win32clipboard
+        from PIL import Image
+        try:
+            if src.startswith("data:"):
+                im = Image.open(io.BytesIO(base64.b64decode(src.split(",", 1)[1])))
+            else:
+                path = src
+                if src.startswith("http://127.0.0.1:"):
+                    path = self._app.media.tokens.get(urllib.parse.urlparse(src).path.strip("/").split("/")[0])
+                    if not path:
+                        return "That picture isn't available any more."
+                im = Image.open(path)
+            im.load()
+            rgba = im.convert("RGBA")
+            png = io.BytesIO()
+            rgba.save(png, "PNG")
+            flat = Image.new("RGB", rgba.size, (255, 255, 255))   # (programs that only take a bitmap get it on white)
+            flat.paste(rgba, mask=rgba.split()[3])
+            bmp = io.BytesIO()
+            flat.save(bmp, "BMP")
+        except Exception as e:
+            log.warning("copy_image failed: %s", e)
+            return f"Couldn't copy that picture: {e}"
+        win32clipboard.OpenClipboard()
+        try:
+            win32clipboard.EmptyClipboard()
+            win32clipboard.SetClipboardData(win32clipboard.CF_DIB, bmp.getvalue()[14:])
+            win32clipboard.SetClipboardData(win32clipboard.RegisterClipboardFormat("PNG"), png.getvalue())
+        finally:
+            win32clipboard.CloseClipboard()
+        return None
+
     def copy_text(self, text):
         """Clipboard via Windows itself (works whatever the page is allowed to do)."""
         import win32clipboard
@@ -1685,6 +1735,9 @@ class Api:
             return ""
         finally:
             win32clipboard.CloseClipboard()
+
+    def retag_sessions(self, undo=False):
+        return self._app.router.retag_sessions(bool(undo))
 
     def issue_info(self):
         """For the bug / feature form: the repo, this version, the PC, and the latest warnings and errors from the log."""

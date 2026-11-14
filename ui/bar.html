@@ -135,7 +135,7 @@ window.app = {
         case "speech": avatar.speech(e); break;
         case "mood": avatar.react(e.clip); break;
         case "settings": S.settings = e.settings; applyMore(); break;
-        case "opened": S.active = e.session; S.items = e.items || []; renderFeed(); break;
+        case "opened": S.active = e.session; S.items = []; for (const it of e.items || []) if (it) S.items[it.i] = it; renderFeed(); break;
         case "item": if (S.active && e.session === S.active.id) { S.items[e.item.i] = e.item; renderFeed(); } break;
         case "delta": if (S.active && e.session === S.active.id && S.items[e.i]) { S.items[e.i].text += e.text; renderFeed(); } break;
       }

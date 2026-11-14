@@ -9,6 +9,16 @@ function copyText(text, what = "copied") {
   if (!text) return;
   api().copy_text(text).then(() => toast(what));
 }
+function copyImage(img) {
+  api().copy_image(img.currentSrc || img.src).then((err) => err ? toast(err, "error") : toast("picture copied: paste it anywhere"));
+}
+// right-click a picture anywhere (the file pane, the viewer, the chat, the gallery): copy it. A picture that already has its own menu keeps it.
+document.addEventListener("contextmenu", (e) => {
+  const img = e.target.closest?.("img");
+  if (e.defaultPrevented || !img || !img.src || img.classList.contains("glive") || img.closest("#avatar, #logo, #tree")) return;
+  e.preventDefault();
+  showMenu(e, [["copy image", () => copyImage(img)]]);
+});
 function toast(text, kind = "", onclick = null) {   // onclick: the toast is a button (and stays up longer)
   const t = $("#toast");
   t.textContent = text; t.className = kind;
@@ -29,6 +39,14 @@ async function resetLayoutNow() {
 }
 // Reload only the window: a change to ui/*.js, .css or .html shows up, while Python keeps running (replies, background tasks, terminals and
 // open sessions carry on). Changes to the .py files still need a restart.
+// New sessions carry Yo Claude's own tag, which the Claude desktop app accepts (it skips the SDK's). This swaps the tag in the files of
+// the sessions from before; the swap is exactly reversible.
+function retagOld() {
+  confirmBox("This changes one tag inside each of your older Yo Claude session files, so the Claude desktop app can pick them up (its “recover sessions” scan, or a restart of it). The conversations themselves aren't touched, and the change can be undone from the same place. Sessions that are open or were used in the last minute are skipped; run it again later for those. Go ahead?", async () => {
+    const r = await api().retag_sessions(false);
+    toast(`${r.changed} session${r.changed === 1 ? "" : "s"} updated${r.skipped ? `, ${r.skipped} skipped (open or very recent)` : ""}${r.already ? `, ${r.already} already fine` : ""}`);
+  });
+}
 function reloadWindow() {
   if (typeof docs !== "undefined" && docs.dirty()) return alertBox("A file in the editor has unsaved changes: save or close it first, then reload.");
   location.reload();
@@ -164,6 +182,8 @@ const MENUS = {
     ["Open Yo Claude's data folder", () => api().open_data_folder()],
     ["Reload plugins", () => window.plugins.load(true)],
     ["Open plugins folder", () => api().open_plugins_folder()],
+    "-",
+    ["Show my old sessions in the Claude desktop app…", () => retagOld()],
   ],
   // the extras, each on or off (named the old way). Claude's own (tick lists, advisor notes) apply from a session's
   // next start; the rest at once.
