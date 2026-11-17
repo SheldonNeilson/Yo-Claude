@@ -1,5 +1,5 @@
 # Yo Claude (Windows, Python 3.10-3.13). PC control has its own environment: pc_control\requirements.txt.
-claude-agent-sdk==0.2.173
+claude-agent-sdk==0.2.183
 pywebview==6.2.1
 pythonnet==3.2.1
 pystray==0.19.5
