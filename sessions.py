@@ -1000,6 +1000,16 @@ def approval_summary(tool, inp):
     return f"use {tool}"
 
 
+_chime_last = 0.0
+def _chime_tones():
+    """Two quick rising tones (real tones: the system sound can be silent when the Windows scheme is "No Sounds")."""
+    try:
+        import winsound
+        winsound.Beep(660, 110)
+        winsound.Beep(990, 170)
+    except Exception:
+        pass
+
 class Session:
     """One conversation: its transcript, live SDK connection and pending approvals."""
 
@@ -1407,6 +1417,7 @@ class Session:
         item = self.add({"kind": "approval", "id": aid, "tool": tool, "input": inp, "summary": summary,
                          "title": getattr(ctx, "title", None) or "", "status": "pending"})
         self.router.set_work(self, "awaiting_approval")
+        self.chime()
         if self.voice_turn and self.router.on_voice_approval:
             self.router.on_voice_approval(self.id, aid, summary)
         try:
@@ -1458,6 +1469,7 @@ class Session:
         self.approvals[aid] = future             # with the approvals, so stopping the turn also skips it
         item = self.add({"kind": "question", "id": aid, "questions": questions, "status": "pending"})
         self.router.set_work(self, "awaiting_approval")
+        self.chime()
         try:
             got = await future                   # dict of answers, or anything else (None, an approval tuple) = skip
         finally:
@@ -1524,6 +1536,18 @@ class Session:
             return None, "", ""
         asked = next((i for i in reversed(self.items[:reply["i"]]) if i.get("kind") == "user"), None)
         return reply["i"], reply["text"], (asked or {}).get("text", "")
+
+    def chime(self):
+        """An optional chime for when the voice is off: the session has answered and won't go on until you reply (or is asking
+        permission or a question). Setting `chime_waiting`, off by default; it stays quiet while replies are read aloud."""
+        global _chime_last
+        st = self.router.settings
+        if not st.get("chime_waiting", False) or st.get("voice_replies", True) or self.loading_history_flag():
+            return
+        if time.time() - _chime_last < 2:   # (a reply and a question back to back make one sound)
+            return
+        _chime_last = time.time()
+        threading.Thread(target=_chime_tones, daemon=True).start()
 
     async def announce(self, speak=True):
         """Claude is done and waiting for you: her reaction. Says so in one short line, shown as a voice bubble (not
@@ -1730,6 +1754,7 @@ class Session:
     def after_turn(self):
         self.stream_item = None
         if not self.loading_history_flag():
+            self.chime()
             asyncio.ensure_future(self.announce(speak=not self.voice_turn))
             asyncio.ensure_future(self.suggest(self.turn_count))   # the count now: a queued message may start next
         self.voice_turn = False   # a later reply on its own (a background task finished) gets announced

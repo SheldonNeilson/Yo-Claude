@@ -181,6 +181,7 @@ const MENUS = {
     ["More", null, { sub: [
       [`Say Hello After “Yo ${Who()}” (Else a Beep)`, () => toggleSetting("greeting", true), { checked: setting("greeting", true) }],
       ["Say when a session is done", () => toggleSetting("notify_done", true), { checked: setting("notify_done", true) }],
+      ["Chime When a Session Waits on Me (Voice Off)", () => toggleSetting("chime_waiting", false), { checked: setting("chime_waiting", false) }],
       ["Say a Quick “On It” During Long Waits", () => toggleSetting("voice_ack", true), { checked: setting("voice_ack", true) }],
       [`Wake on just “${Who()}” (no “Yo”)`, () => toggleSetting("short_wake", false), { checked: setting("short_wake", false) }],
       ["How long a pause ends what I say", null, { sub: [1.5, 2.5, 4, 6].map((v) => [`${v} seconds`, () => api().set_setting("pause_s", v), { checked: (setting("pause_s", 2.5)) === v }])}],
