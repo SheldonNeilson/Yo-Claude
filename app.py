@@ -1245,6 +1245,10 @@ class Api:
         (log.warning if took > 1.0 else log.info)("Opened session %s in %.2f s (%d items)", str(sid)[:8], took, len(s.items))
         return {"session": self._app.router.describe(s), "seq": getattr(s, "open_seq", None), **sessions.paged(s.items)}
 
+    def search_sessions(self, query, token):
+        """Search what was said in every conversation (the session list's search box); the hits arrive as "search_hits" events."""
+        self._app.router.search_text(query, token)
+
     def history_before(self, sid, before, n=sessions.HISTORY_PAGE):
         """The page of an open conversation's items just before index `before` (the window's "load earlier")."""
         s = self._app.router.live.get(sid)

@@ -82,7 +82,7 @@ window.selfctl = (() => {
         $("#app").classList.add("with-panel"); panel.q[panel.tab] = text; panel.render();
         return text ? `Searching the ${panel.tab} tab for "${text}".` : "Search cleared.";
       }
-      case "session_search": S.filter = text; $("#search").value = text; renderTree(); return text ? `Session list filtered by "${text}".` : "Session list filter cleared.";
+      case "session_search": S.filter = text; $("#search").value = text; renderTree(); startSearch(); return text ? `Session list filtered by "${text}".` : "Session list filter cleared.";
       case "open_session": {
         const s = findSession(target);
         if (!s) return `No session matches "${target}". Use ui_state to see the list.`;

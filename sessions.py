@@ -16,6 +16,7 @@ import inspect
 import io
 import json
 import logging
+import mmap
 import os
 import re
 import shutil
@@ -2315,6 +2316,79 @@ def agent_steps(path, limit=400):
                      [i["kind"]](i) for i in items)
 
 
+def _message_text(m):
+    """What was said in a transcript line: the text of a user or assistant message (tool results, thinking and the rest of Claude
+    Code's bookkeeping don't count), or ''."""
+    if m.get("type") not in ("user", "assistant"):
+        return ""
+    c = (m.get("message") or {}).get("content") if isinstance(m.get("message"), dict) else None
+    if isinstance(c, str):
+        return c
+    if isinstance(c, list):
+        return "\n".join(b.get("text", "") for b in c if isinstance(b, dict) and b.get("type") == "text")
+    return ""
+
+
+def search_needles(query):
+    """The byte strings to look for in a transcript, lower-cased: the text as typed, and as the file writes it (JSON-escaped:
+    quotes, backslashes, newlines)."""
+    raw = query.lower().encode("utf-8")
+    esc = json.dumps(query, ensure_ascii=False)[1:-1].lower().encode("utf-8")
+    return [raw] if esc == raw else [raw, esc]
+
+
+def search_transcript(path, query, needles):
+    """Does this conversation file say `query` (case-insensitive)? None, or {"id", "count", "snippet", "role"}: the match count
+    and the first match with some words around it. The file is lower-cased 8 MB at a time and searched with plain substring
+    finds (a regex with IGNORECASE was three times slower on 2 GB of transcripts); a line is parsed only where one matched."""
+    q = query.lower()
+    count, snippet, role = 0, "", ""
+    CH, keep = 8 << 20, max(len(n) for n in needles)
+    try:
+        with open(path, "rb") as f:
+            size = os.fstat(f.fileno()).st_size
+            if not size:
+                return None
+            mm = mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ)
+            try:
+                base = 0
+                while base < size:
+                    low = mm[base:base + CH + keep].lower()
+                    nxt, at = base + CH, 0
+                    while True:
+                        found = [i for i in (low.find(n, at) for n in needles) if i >= 0]
+                        if not found or min(found) >= CH:   # (a match starting past this window is the next window's)
+                            break
+                        hit = base + min(found)
+                        a = mm.rfind(b"\n", 0, hit) + 1
+                        e = mm.find(b"\n", hit)
+                        e = size if e < 0 else e
+                        nxt, at = max(nxt, e + 1), e + 1 - base
+                        try:
+                            m = json.loads(mm[a:e])
+                        except ValueError:
+                            continue
+                        text = _message_text(m)
+                        tl = text.lower()
+                        n = tl.count(q)
+                        if not n:
+                            continue
+                        count += n
+                        if not snippet:
+                            k = tl.index(q)
+                            c = max(0, k - 50)
+                            snippet = re.sub(r"\s+", " ", ("\u2026" if c else "") + text[c:k + len(query) + 90]).strip()
+                            role = m.get("type")
+                        if at >= CH:
+                            break
+                    base = nxt
+            finally:
+                mm.close()
+    except (OSError, ValueError):
+        return None
+    return {"id": os.path.basename(path)[:-6], "count": count, "snippet": snippet, "role": role} if count else None
+
+
 class Router:
     """Owns the sessions. Thread-safe entry points; everything SDK runs on its own event loop."""
 
@@ -3812,6 +3886,39 @@ class Router:
         if group and group not in self.meta.data["groups"]:
             self.meta.data["groups"].append(group)
         self.groups_changed()
+
+    def search_text(self, query, token):
+        """The session list's search box: look through what was said in every conversation (not just titles). Runs on its own
+        thread, newest conversations first, and reports as it goes ("search_hits": the token the window sent, the hits so far,
+        done). A newer search (another token) stops this one."""
+        query = (query or "").strip()
+        self.search_token = token
+        if len(query) < 2:
+            self.emit("search_hits", token=token, hits=[], done=True)
+            return
+        needles = search_needles(query)
+
+        def work():
+            files = []
+            for path in glob.glob(os.path.join(PROJECTS_DIR, "*", "*.jsonl")):
+                try:
+                    files.append((os.path.getmtime(path), path))
+                except OSError:
+                    pass
+            batch, last = [], time.time()
+            for _, path in sorted(files, reverse=True):
+                if self.search_token != token:
+                    return
+                hit = search_transcript(path, query, needles)
+                if hit:
+                    batch.append(hit)
+                if batch and time.time() - last > 0.3:
+                    self.emit("search_hits", token=token, hits=batch, done=False)
+                    batch, last = [], time.time()
+            if self.search_token == token:
+                self.emit("search_hits", token=token, hits=batch, done=True)
+
+        threading.Thread(target=work, daemon=True, name="search-sessions").start()
 
     def session_file(self, sid, cwd):
         folder = os.path.join(PROJECTS_DIR, project_key(cwd))

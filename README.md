@@ -101,6 +101,8 @@ The first time, a welcome tour explains everything and checks how well it hears 
 - **Approvals**: when Claude asks permission, say "yes, go ahead" or "no", or click.
 - **AutoCorrect**: what you say shows in the message box, Haiku fixes spelling, grammar and misheard words ("Lord"
   becomes "Claude", "young Claude" becomes "Yo Claude"), then it's sent.
+- **Your earlier messages**: in the message box, **Up** walks back through what you sent in this conversation and **Down**
+  forward again; below the newest is the box as you left it (empty, or the draft you were typing). Typing ends the walk.
 - **Stop** anything: `[■]`, Esc (when no list or menu is open), a right-click on the bar, or the tray menu.
 - **Mishearing you?** Turn on **Voice → More accurate speech recognition**. It uses a bigger speech model: slower,
   and a one-off download of about 1.5 GB.
@@ -191,6 +193,10 @@ The first time, a welcome tour explains everything and checks how well it hears 
 
 ### Folders and sessions
 
+- **Search what was said.** The box above the list filters by title straight away and, a moment after you stop typing, looks
+  through the text of every conversation (yours and Claude's, not tool output). Matching sessions appear with the line
+  that matched, your words lit up, and a count when there are several. All of it, a couple of GB of history, takes a few
+  seconds.
 - **Everything is in a group.** A folder's sessions go into a group named after the folder, made for you the first time
   (chats without a folder go into **Chats**). That is the default, nothing more: it is the same kind of group as the ones
   you make yourself. Rename it, move it up or down, remove it, or drag sessions in and out like any other.

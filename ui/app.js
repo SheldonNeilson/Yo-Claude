@@ -86,7 +86,7 @@ const api = () => new Proxy(window.pywebview.api, {
   },
 });
 const S = { settings: {}, folder: null, workspaces: [], groups: [], groupCwd: {}, groupParent: {}, groupFolders: [], lists: {}, busy: new Set(), bg: new Set(), work: {}, active: null,
-            items: [], display: { state: "starting" }, filter: "", manual: {}, more: new Set() };
+            items: [], display: { state: "starting" }, filter: "", manual: {}, more: new Set(), hits: new Map(), searching: false, searchSeq: 0 };
 
 const MODELS = [["", "model: default"], ["claude-fable-5-1", "Fable 5.1"], ["claude-opus-5-5", "Opus 5.5"],
                 ["claude-sonnet-5-5", "Sonnet 5.5"], ["claude-haiku-5-5", "Haiku 5.5"]];
@@ -248,6 +248,12 @@ function handle(e) {
       if (S.active && e.session === S.active.id) { S.active.context = e.context; renderContext(); }
       break;
     case "limits": renderLimits(e.limits); break;
+    case "search_hits":
+      if (e.token !== S.searchSeq) break;   // (an older search)
+      for (const h of e.hits) S.hits.set(h.id, h);
+      S.searching = !e.done;
+      renderTree();
+      break;
     case "ui": showForClaude(e); break;
     case "mood": avatar.react(e.clip); break;
     case "train": training.onJudgement(e); break;
@@ -423,7 +429,8 @@ function renderTree() {
     bar.querySelector("button").onclick = () => api().set_setting("group_focus", null);
     tree.appendChild(bar);
   }
-  const inGroup = (g) => allSessions().filter((s) => s.group === g && (!f || (s.title || "").toLowerCase().includes(f) || (s.first || "").toLowerCase().includes(f)))
+  if (f.trim().length >= 2 && S.searching) tree.appendChild(el("div", "smore dim", "searching what was said…"));
+  const inGroup = (g) => allSessions().filter((s) => s.group === g && (!f || (s.title || "").toLowerCase().includes(f) || (s.first || "").toLowerCase().includes(f) || S.hits.has(s.id)))
     .sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0) || (b.modified || 0) - (a.modified || 0));
   if (!f && !focus) {   // the latest sessions from every folder, so nothing recent hides in a collapsed folder
     const open = isOpen(RECENT_KEY, null, true);
@@ -494,6 +501,14 @@ const RADAR = '<span class="radar" title="Background work running"></span>';
 const BRAILLE = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏";   // (the terminal spinner every command-line user reads as "running")
 const asking = (id) => S.work[id] === "awaiting_approval";   // a session waiting on your answer or ok
 const ASK_PILL = '<span class="askpill" title="This session is waiting for your answer">? needs you</span>';
+// The line under a session in the list when you are searching: what was said, with the words you typed lit up
+function hitLine(s) {
+  const h = S.filter.trim().length >= 2 && S.hits.get(s.id);
+  if (!h || !h.snippet) return "";
+  const q = S.filter.trim(), at = h.snippet.toLowerCase().indexOf(q.toLowerCase());
+  const text = at < 0 ? esc(h.snippet) : esc(h.snippet.slice(0, at)) + "<mark>" + esc(h.snippet.slice(at, at + q.length)) + "</mark>" + esc(h.snippet.slice(at + q.length));
+  return `<div class="hit" title="${h.count} match${h.count === 1 ? "" : "es"} in this conversation">${h.role === "user" ? "you: " : ""}${text}${h.count > 1 ? ` <span class="n">×${h.count}</span>` : ""}</div>`;
+}
 function sessionRow(s, withFolder = false) {
   const row = el("div", "session" + (S.active && S.active.id === s.id ? " active" : "") + (s.unseen ? " unseen" : "") + (asking(s.id) ? " asking" : ""));
   const src = s.source && s.source !== "yoclaude" ? ` <span class="src">cli</span>` : "";
@@ -502,7 +517,7 @@ function sessionRow(s, withFolder = false) {
              : s.unseen ? '<span class="dot" title="New reply you haven\'t seen"></span>' : "";
   const where = withFolder ? ` · ${s.cwd ? "▤ " + esc(base(s.cwd)) : "◇ chat"}` : "";
   row.innerHTML = `<div class="t">${mark}${s.pinned ? "▴ " : ""}${esc(s.title)}</div>
-    <div class="m">${esc(ago(s.modified))}${where}${s.branch ? " · ⎇ " + esc(s.branch) : ""}${src}</div>`;
+    <div class="m">${esc(ago(s.modified))}${where}${s.branch ? " · ⎇ " + esc(s.branch) : ""}${src}</div>${hitLine(s)}`;
   row.title = s.first || s.title;
   // opens on mouse-down: the list is rebuilt whenever a session's state changes, and a click (down, then up on the same
   // element) is lost when that happens in between: with a few busy sessions, clicks seemed to do nothing
@@ -616,7 +631,19 @@ function sessionMenu(e, s) {
       async () => { const err = await api().delete(s.id, s.cwd); if (err) alertBox(err); })],
   ].filter(Boolean));
 }
-$("#search").oninput = (e) => { S.filter = e.target.value; renderTree(); };
+// Typing filters by title at once; what was said inside the conversations is searched on the Python side a moment after you stop
+// typing (the hits stream back as "search_hits"; a newer search replaces an older one).
+let searchTimer = 0;
+function startSearch() {
+  clearTimeout(searchTimer);
+  const q = S.filter.trim();
+  S.hits = new Map(); S.searchSeq++;
+  if (q.length < 2) { S.searching = false; renderTree(); return; }
+  S.searching = true;
+  const seq = S.searchSeq;
+  searchTimer = setTimeout(() => { api().search_sessions(q, seq); }, 300);
+}
+$("#search").oninput = (e) => { S.filter = e.target.value; renderTree(); startSearch(); };
 $("#addFolderBtn").onclick = () => addFolderFlow();
 $("#newChatBtn").onclick = () => api().new_session(null);
 $("#cleanBtn").onclick = async () => {   // suggested stale sessions, all ticked, moved to the (restorable) trash
@@ -2190,7 +2217,7 @@ async function send() {
     return;
   }
   sending = true;
-  box.value = ""; autosize();
+  box.value = ""; autosize(); msgHistory.i = -1;
   follow.set("chat", true); follow.stickAll("chat");   // you sent something: follow the reply
   composer.files = []; composer.images = []; if (comments.length) composer.comments = []; composer.renderChips();
   try {
@@ -2199,6 +2226,10 @@ async function send() {
   } finally {
     sending = false;
   }
+  msgHistory.i = -1;
+  // the message is drawn a moment after it was sent, and its layout (images, long text) can settle later still: stay at the bottom
+  const jump = () => { follow.set("chat", true); follow.stickAll("chat"); };
+  jump(); requestAnimationFrame(jump); setTimeout(jump, 150); setTimeout(jump, 600);
 }
 $("#input").addEventListener("paste", (e) => {
   for (const it of e.clipboardData?.items || []) if (it.type.startsWith("image/")) { e.preventDefault(); composer.addImage(it.getAsFile()); }
@@ -2215,8 +2246,39 @@ document.addEventListener("drop", (e) => {
   }
 });
 function autosize() { const b = $("#input"); b.style.height = "auto"; b.style.height = Math.min(200, b.scrollHeight + 2) + "px"; }
+// Up / Down in the message box walk back through what you sent in this conversation, like a shell; below the newest is the box
+// as you left it (empty, or the draft you were typing). Up only starts on the first line and Down only on the last, so moving
+// around a long message still works; typing anything ends the walk.
+const msgHistory = { i: -1, draft: "", sid: null };
+function sentMessages() {
+  const out = [];
+  for (const it of S.items) if (it && it.kind === "user" && (it.text || "").trim() && it.text !== out[out.length - 1]) out.push(it.text);
+  return out;
+}
+function historyStep(box, dir) {
+  if (msgHistory.sid !== S.active?.id) Object.assign(msgHistory, { i: -1, draft: "", sid: S.active?.id });
+  const list = sentMessages();
+  if (dir < 0) {
+    if (!list.length) return false;
+    if (msgHistory.i === -1) { msgHistory.draft = box.value; msgHistory.i = list.length; }
+    msgHistory.i = Math.max(0, msgHistory.i - 1);
+  } else {
+    if (msgHistory.i === -1) return false;
+    msgHistory.i++;
+  }
+  if (msgHistory.i >= list.length) { msgHistory.i = -1; box.value = msgHistory.draft; }
+  else box.value = list[msgHistory.i];
+  box.selectionStart = box.selectionEnd = box.value.length;
+  autosize(); ghostPaint();
+  return true;
+}
 $("#input").addEventListener("keydown", (e) => {
   if (composer.key(e)) { e.preventDefault(); e.stopPropagation(); return; }
+  if ((e.key === "ArrowUp" || e.key === "ArrowDown") && !e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey && !e.isComposing) {
+    const b = e.target, up = e.key === "ArrowUp";
+    const onEdge = up ? !b.value.slice(0, b.selectionStart).includes("\n") : !b.value.slice(b.selectionEnd).includes("\n");
+    if (onEdge && b.selectionStart === b.selectionEnd && historyStep(b, up ? -1 : 1)) { e.preventDefault(); return; }
+  }
   if (e.key === "Tab" && !e.shiftKey && !e.ctrlKey && !e.altKey && !e.target.value && $("#input").classList.contains("suggesting")) {
     e.preventDefault();   // take the suggested next message into the box, to edit or send
     const b = e.target; b.value = S.suggest; b.selectionStart = b.selectionEnd = b.value.length;
@@ -2227,7 +2289,7 @@ $("#input").addEventListener("keydown", (e) => {
   if (e.key === "ArrowRight" && e.ctrlKey && !e.shiftKey && !e.altKey && pred.shown) { e.preventDefault(); predAccept(true); return; }
   if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
 });
-$("#input").addEventListener("input", () => { autosize(); composer.autocomplete(); });
+$("#input").addEventListener("input", () => { msgHistory.i = -1; autosize(); composer.autocomplete(); });   // (typing ends a walk through your messages)
 $("#input").addEventListener("input", predictInput);
 $("#input").addEventListener("focus", () => { if (!pred.warmed) { pred.warmed = true; api().warm_predict("chat"); } });
 for (const ev of ["blur", "focus", "scroll", "click", "keyup"]) $("#input").addEventListener(ev, ghostPaint);
