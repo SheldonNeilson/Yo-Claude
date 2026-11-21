@@ -946,6 +946,10 @@ Click to open` : `What ${Who()} saw · click to enlarge`;
       const node = buildItem(it);
       const old = this.els.get(it.i);
       const after = it.kind === "spoken" && this.els.get(it.for);
+      // A voice bubble restored after a restart is stored at the end of the conversation but belongs under an old message; with
+      // the history paged, that message may not be loaded yet. Leave the bubble out until it is (loading earlier redraws it
+      // in place) instead of stacking it at the bottom.
+      if (it.kind === "spoken" && !after && !this.els.get(it.i)) return;
       const waiting = it.kind === "user" && it.queued, boxed = old?.parentElement?.classList.contains("queuebox");
       if (waiting && boxed) old.replaceWith(node);
       else if (waiting) { old?.remove(); this.queue().appendChild(node); }   // pinned at the bottom, in the order sent
