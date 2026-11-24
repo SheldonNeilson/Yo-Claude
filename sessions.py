@@ -1824,12 +1824,12 @@ class Session:
             code = earlier.get("exit_code")
         if code is not None:
             t.update(finished_card(code))
-        elif command_running(task_command(t), running_shells()) or \
-                any(d.get("task_id") == t["task_id"] for d in self.router.detached.get(self.id, [])):
+        elif any(d.get("task_id") == t["task_id"] for d in self.router.detached.get(self.id, [])):
+            # (only a task recorded as running when Yo Claude last quit counts as cut off by a restart: a command that was
+            # started in this run and is reported "stopped" just as it finishes, before its output has the exit marker, is
+            # not one, and following it made Claude get told "Yo Claude restarted" after every finished task)
             t.update(status="running", detached=True, summary=None, ended=None)
             self.router.follow(self.id, t)
-        else:
-            t["summary"] = "Stopped: its process ended without finishing (Yo Claude or Claude Code restarted)."
 
     def save_tasks(self):
         """Running tasks, with this session's Claude process id: after a restart Yo Claude can follow them."""
